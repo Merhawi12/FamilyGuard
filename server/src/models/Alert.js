@@ -6,20 +6,11 @@ const Alert = sequelize.define('Alert', {
   parentId: { type: DataTypes.UUID, allowNull: false },
   childId: { type: DataTypes.UUID },
   deviceId: { type: DataTypes.UUID },
-  type: {
-    type: DataTypes.ENUM(
-      'blocked_app_attempt',
-      'screen_time_exceeded',
-      'suspicious_activity',
-      'device_offline',
-      'bedtime_violation'
-    ),
-    allowNull: false,
-  },
+  type: { type: DataTypes.STRING, allowNull: false },
   message: { type: DataTypes.TEXT, allowNull: false },
-  severity: { type: DataTypes.ENUM('low', 'medium', 'high'), defaultValue: 'medium' },
+  severity: { type: DataTypes.STRING, defaultValue: 'medium' },
   isRead: { type: DataTypes.BOOLEAN, defaultValue: false },
-  metadata: { type: DataTypes.JSONB, defaultValue: {} },
+  metadata: { type: DataTypes.TEXT, defaultValue: '{}' },
 }, { underscored: true });
 
 module.exports = Alert;

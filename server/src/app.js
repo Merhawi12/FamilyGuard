@@ -27,6 +27,7 @@ app.use('/api/blocking', require('./routes/blocking'));
 app.use('/api/activity', require('./routes/activity'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/alerts', require('./routes/alerts'));
+app.use('/api/admin', require('./routes/admin'));
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

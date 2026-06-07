@@ -7,10 +7,7 @@ const ActivityLog = sequelize.define('ActivityLog', {
   childId: { type: DataTypes.UUID, allowNull: false },
   appName: { type: DataTypes.STRING },
   appPackage: { type: DataTypes.STRING },
-  category: {
-    type: DataTypes.ENUM('social_media', 'gaming', 'education', 'entertainment', 'browsing', 'other'),
-    defaultValue: 'other',
-  },
+  category: { type: DataTypes.STRING, defaultValue: 'other' },
   startTime: { type: DataTypes.DATE, allowNull: false },
   endTime: { type: DataTypes.DATE },
   durationMinutes: { type: DataTypes.FLOAT, defaultValue: 0 },

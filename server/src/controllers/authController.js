@@ -1,8 +1,15 @@
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
+const { sendWelcomeEmail, sendAdminRegistrationNotification } = require('../utils/email');
 
 const signToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+
+const serializeUser = (user) => {
+  const trialEndsAt = user.trialEndsAt ? new Date(user.trialEndsAt).toISOString() : null;
+  const trialExpired = trialEndsAt && new Date() > new Date(trialEndsAt);
+  return { id: user.id, name: user.name, email: user.email, role: user.role, plan: user.plan, trialEndsAt, trialExpired };
+};
 
 const register = async (req, res) => {
   try {
@@ -12,9 +19,16 @@ const register = async (req, res) => {
     const existing = await User.findOne({ where: { email } });
     if (existing) return res.status(409).json({ error: 'Email already registered' });
 
-    const user = await User.create({ name, email, passwordHash: password });
+    const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const user = await User.create({ name, email, passwordHash: password, trialEndsAt });
     const token = signToken(user.id);
-    res.status(201).json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, plan: user.plan } });
+    sendWelcomeEmail({ name, email }).catch((err) =>
+      console.error('Welcome email failed:', err.message)
+    );
+    sendAdminRegistrationNotification({ name, email }).catch((err) =>
+      console.error('Admin notification email failed:', err.message)
+    );
+    res.status(201).json({ token, user: serializeUser(user) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -31,14 +45,14 @@ const login = async (req, res) => {
     }
 
     const token = signToken(user.id);
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, plan: user.plan } });
+    res.json({ token, user: serializeUser(user) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
 const me = async (req, res) => {
-  res.json({ id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, plan: req.user.plan });
+  res.json(serializeUser(req.user));
 };
 
 module.exports = { register, login, me };

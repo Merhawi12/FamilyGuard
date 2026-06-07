@@ -5,7 +5,7 @@ const Device = sequelize.define('Device', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   childId: { type: DataTypes.UUID, allowNull: false },
   name: { type: DataTypes.STRING, allowNull: false },
-  type: { type: DataTypes.ENUM('android', 'ios', 'windows', 'mac', 'other'), defaultValue: 'android' },
+  type: { type: DataTypes.STRING, defaultValue: 'android' },
   osVersion: { type: DataTypes.STRING },
   linkingCode: { type: DataTypes.STRING, unique: true },
   linkingCodeExpiry: { type: DataTypes.DATE },

@@ -1,10 +1,18 @@
 const { Sequelize } = require('sequelize');
 require('dotenv').config();
 
-const sequelize = new Sequelize(process.env.DATABASE_URL, {
-  dialect: 'postgres',
-  logging: process.env.NODE_ENV === 'development' ? console.log : false,
-  pool: { max: 10, min: 0, acquire: 30000, idle: 10000 },
-});
+const isPostgres = process.env.DATABASE_URL?.startsWith('postgresql') || process.env.DATABASE_URL?.startsWith('postgres');
+
+const sequelize = isPostgres
+  ? new Sequelize(process.env.DATABASE_URL, {
+      dialect: 'postgres',
+      logging: false,
+      pool: { max: 10, min: 0, acquire: 30000, idle: 10000 },
+    })
+  : new Sequelize({
+      dialect: 'sqlite',
+      storage: './familyguard.sqlite',
+      logging: false,
+    });
 
 module.exports = { sequelize };

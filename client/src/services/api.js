@@ -69,4 +69,11 @@ export const alerts = {
   markAllRead: () => api.put('/alerts/read-all'),
 };
 
+export const admin = {
+  listClients: () => api.get('/admin/clients'),
+  toggleBlock: (id) => api.patch(`/admin/clients/${id}/toggle-block`),
+  updatePlan: (id, plan) => api.patch(`/admin/clients/${id}/plan`, { plan }),
+  deleteClient: (id) => api.delete(`/admin/clients/${id}`),
+};
+
 export default api;

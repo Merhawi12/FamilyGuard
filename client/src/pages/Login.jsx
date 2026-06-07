@@ -19,10 +19,11 @@ export default function Login() {
       else await register(form.name, form.email, form.password);
       navigate('/');
     } catch (err) {
-      if (!err.response) {
-        setError('Cannot connect to server. Make sure the backend is running on port 5000.');
+      const msg = err.response?.data?.error;
+      if (!err.response || (err.response.status >= 500 && !msg)) {
+        setError('Backend server is not running. Start it with: cd server && npm install && npm run dev');
       } else {
-        setError(err.response.data?.error || `Server error (${err.response.status})`);
+        setError(msg || `Server error (${err.response.status})`);
       }
     } finally {
       setLoading(false);

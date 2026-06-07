@@ -6,7 +6,7 @@ const AppRule = sequelize.define('AppRule', {
   childId: { type: DataTypes.UUID, allowNull: false },
   appName: { type: DataTypes.STRING, allowNull: false },
   appPackage: { type: DataTypes.STRING },
-  action: { type: DataTypes.ENUM('block', 'allow', 'limit'), defaultValue: 'block' },
+  action: { type: DataTypes.STRING, defaultValue: 'block' },
   dailyLimitMinutes: { type: DataTypes.INTEGER },
   category: { type: DataTypes.STRING },
   iconUrl: { type: DataTypes.STRING },

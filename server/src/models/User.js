@@ -7,8 +7,9 @@ const User = sequelize.define('User', {
   name: { type: DataTypes.STRING, allowNull: false },
   email: { type: DataTypes.STRING, allowNull: false, unique: true },
   passwordHash: { type: DataTypes.STRING, allowNull: false },
-  role: { type: DataTypes.ENUM('parent', 'admin'), defaultValue: 'parent' },
-  plan: { type: DataTypes.ENUM('free', 'premium', 'family', 'school'), defaultValue: 'free' },
+  role: { type: DataTypes.STRING, defaultValue: 'parent' },
+  plan: { type: DataTypes.STRING, defaultValue: 'free' },
+  trialEndsAt: { type: DataTypes.DATE },
   isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
 }, { underscored: true });
 

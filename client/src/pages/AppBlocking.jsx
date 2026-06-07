@@ -20,7 +20,13 @@ export default function AppBlocking() {
   const [appForm, setAppForm] = useState({ appName: '', appPackage: '', action: 'block' });
   const [webForm, setWebForm] = useState({ url: '', category: 'custom', action: 'block' });
 
-  useEffect(() => { childrenApi.list().then((r) => { setChildList(r.data); if (r.data[0]) setSelected(r.data[0]); }); }, []);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    childrenApi.list()
+      .then((r) => { setChildList(r.data); if (r.data[0]) setSelected(r.data[0]); })
+      .finally(() => setLoading(false));
+  }, []);
 
   useEffect(() => {
     if (!selected) return;
@@ -52,12 +58,33 @@ export default function AppBlocking() {
     setWebRules((prev) => prev.filter((r) => r.id !== ruleId));
   };
 
+  if (loading) return <div className="text-gray-400 text-sm">Loading...</div>;
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">App & Website Blocking</h1>
         <p className="text-gray-500 text-sm mt-1">Control which apps and sites are accessible</p>
       </div>
+
+      {childList.length === 0 ? (
+        <div className="card text-center py-12">
+          <span className="text-5xl">🚫</span>
+          <h2 className="text-lg font-semibold mt-4 mb-2">No children added yet</h2>
+          <p className="text-gray-500 text-sm mb-6">
+            You need to add a child profile first before setting up blocking rules.
+          </p>
+          <div className="bg-blue-50 rounded-xl p-4 text-left max-w-sm mx-auto text-sm space-y-2">
+            <p className="font-semibold text-blue-700">How to get started:</p>
+            <ol className="text-gray-600 space-y-1 list-decimal list-inside">
+              <li>Go to <a href="/children" className="text-blue-600 underline font-medium">Children</a> and add a child profile</li>
+              <li>Link their device using the QR code or 8-digit code</li>
+              <li>Come back here to block apps & websites</li>
+            </ol>
+          </div>
+          <a href="/children" className="btn-primary inline-block mt-6 px-6">Go to Children →</a>
+        </div>
+      ) : null}
 
       <div className="flex gap-2 flex-wrap">
         {childList.map((c) => (

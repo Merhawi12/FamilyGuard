@@ -79,16 +79,32 @@ export default function Settings() {
 
       <div className="card">
         <h2 className="font-semibold mb-2">Subscription</h2>
-        <p className="text-sm text-gray-500 mb-3">Current plan: <span className="font-semibold capitalize text-blue-600">{user?.plan}</span></p>
+        <p className="text-sm text-gray-500 mb-1">
+          Current plan: <span className="font-semibold capitalize text-blue-600">{user?.plan === 'free' ? 'Free Trial' : user?.plan}</span>
+        </p>
+        {user?.plan === 'free' && user?.trialEndsAt && (
+          <p className={`text-sm mb-3 font-medium ${user.trialExpired ? 'text-red-600' : 'text-orange-500'}`}>
+            {user.trialExpired
+              ? '⚠️ Your free trial has expired. Upgrade to continue.'
+              : `⏳ Trial ends: ${new Date(user.trialEndsAt).toLocaleDateString()} (${Math.max(0, Math.ceil((new Date(user.trialEndsAt) - Date.now()) / 86400000))} days left)`}
+          </p>
+        )}
         <div className="grid grid-cols-3 gap-3">
-          {[{ plan: 'free', label: 'Free', price: '$0', features: ['3 children', '1 device each', 'Basic monitoring'] },
+          {[{ plan: 'free', label: 'Free Trial', price: '$0', badge: '7 days only', features: ['3 children', '1 device each', 'Basic monitoring', 'Trial expires after 7 days'] },
             { plan: 'premium', label: 'Premium', price: '$9.99/mo', features: ['10 children', '5 devices each', 'Full monitoring + AI'] },
-            { plan: 'family', label: 'Family', price: '$14.99/mo', features: ['Unlimited children', 'Unlimited devices', 'AI + GPS tracking'] }].map(({ plan, label, price, features }) => (
+            { plan: 'family', label: 'Family', price: '$14.99/mo', features: ['Unlimited children', 'Unlimited devices', 'AI + GPS tracking'] }].map(({ plan, label, price, badge, features }) => (
             <div key={plan} className={`p-4 rounded-xl border-2 ${user?.plan === plan ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
-              <p className="font-semibold">{label}</p>
+              <div className="flex items-center gap-2 mb-1">
+                <p className="font-semibold">{label}</p>
+                {badge && <span className="text-xs bg-orange-100 text-orange-600 font-medium px-2 py-0.5 rounded-full">{badge}</span>}
+              </div>
               <p className="text-lg font-bold text-blue-600">{price}</p>
               <ul className="text-xs text-gray-500 mt-2 space-y-1">
-                {features.map((f) => <li key={f}>✓ {f}</li>)}
+                {features.map((f) => (
+                  <li key={f} className={f.includes('expires') ? 'text-orange-500 font-medium' : ''}>
+                    {f.includes('expires') ? '⚠️' : '✓'} {f}
+                  </li>
+                ))}
               </ul>
               {user?.plan !== plan && <button className="btn-primary w-full mt-3 text-sm py-1.5">Upgrade</button>}
             </div>
