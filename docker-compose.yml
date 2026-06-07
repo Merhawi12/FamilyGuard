@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: familyguard
+      POSTGRES_USER: familyguard
+      POSTGRES_PASSWORD: familyguard_secret
+    ports:
+      - '5432:5432'
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+
+  server:
+    build: ./server
+    ports:
+      - '5000:5000'
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://familyguard:familyguard_secret@postgres:5432/familyguard
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=change_this_in_production
+      - CLIENT_URL=http://localhost:3000
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+
+  client:
+    build: ./client
+    ports:
+      - '3000:3000'
+    environment:
+      - VITE_API_URL=http://localhost:5000
+    depends_on:
+      - server
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+
+volumes:
+  pg_data:
