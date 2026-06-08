@@ -20,6 +20,7 @@ app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:3000', creden
 app.use(express.json());
 
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/auth/mfa', require('./routes/mfa'));
 app.use('/api/children', require('./routes/children'));
 app.use('/api/devices', require('./routes/devices'));
 app.use('/api/screen-time', require('./routes/screenTime'));
@@ -28,6 +29,10 @@ app.use('/api/activity', require('./routes/activity'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/alerts', require('./routes/alerts'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/audit', require('./routes/audit'));
+app.use('/api/locations', require('./routes/locations'));
+app.use('/api/safe-zones', require('./routes/safeZones'));
+app.use('/api/chats', require('./routes/chats'));
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

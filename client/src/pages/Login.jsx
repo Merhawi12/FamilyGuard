@@ -34,9 +34,8 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="bg-white rounded-3xl shadow-xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
-          <span className="text-5xl">🛡️</span>
-          <h1 className="text-2xl font-bold text-gray-900 mt-3">FamilyGuard</h1>
-          <p className="text-gray-500 text-sm mt-1">Parental Control & Digital Safety</p>
+          <img src="/logo.png" alt="FamilyGuard" className="h-28 w-auto mx-auto" />
+          <p className="text-gray-500 text-sm mt-2">Parental Control & Digital Safety</p>
         </div>
 
         <div className="flex rounded-xl bg-gray-100 p-1 mb-6">

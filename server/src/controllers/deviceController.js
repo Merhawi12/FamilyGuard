@@ -1,6 +1,7 @@
 const QRCode = require('qrcode');
 const { Device, Child } = require('../models');
 const { generateLinkingCode } = require('../utils/crypto');
+const { auditLog } = require('../utils/auditLogger');
 
 const getDevices = async (req, res) => {
   const children = await Child.findAll({ where: { parentId: req.user.id }, attributes: ['id'] });
@@ -26,8 +27,11 @@ const generateLink = async (req, res) => {
       linkingCodeExpiry: expiry,
     });
 
+    // Include deviceId in QR so confirmLink can cross-check both values
     const qrData = JSON.stringify({ code, deviceId: device.id });
     const qrCode = await QRCode.toDataURL(qrData);
+
+    auditLog(req, { userId: req.user.id, action: 'device.link_generated', entity: 'Device', entityId: device.id, metadata: { childId, deviceName } });
 
     res.json({ device, code, qrCode });
   } catch (err) {
@@ -35,13 +39,19 @@ const generateLink = async (req, res) => {
   }
 };
 
+// Called from the child's device — unauthenticated, but requires both code AND deviceId to match.
 const confirmLink = async (req, res) => {
   try {
-    const { code, osVersion, pushToken } = req.body;
+    const { code, deviceId, osVersion, pushToken } = req.body;
+    if (!code || !deviceId) return res.status(400).json({ error: 'code and deviceId are required' });
+
     const device = await Device.findOne({ where: { linkingCode: code } });
 
     if (!device) return res.status(404).json({ error: 'Invalid linking code' });
+    // Verify the deviceId from the QR matches the device found by code
+    if (device.id !== deviceId) return res.status(400).json({ error: 'Invalid linking code' });
     if (new Date() > device.linkingCodeExpiry) return res.status(400).json({ error: 'Code expired' });
+    if (device.isLinked) return res.status(400).json({ error: 'Device already linked' });
 
     await device.update({ isLinked: true, osVersion, pushToken, lastSeen: new Date() });
     res.json({ device });
@@ -58,6 +68,7 @@ const removeDevice = async (req, res) => {
   if (!child) return res.status(403).json({ error: 'Forbidden' });
 
   await device.update({ isActive: false });
+  auditLog(req, { userId: req.user.id, action: 'device.removed', entity: 'Device', entityId: device.id });
   res.json({ message: 'Device removed' });
 };
 

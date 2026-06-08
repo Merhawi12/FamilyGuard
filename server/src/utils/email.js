@@ -49,4 +49,26 @@ const sendAdminRegistrationNotification = async ({ name, email }) => {
   });
 };
 
-module.exports = { sendWelcomeEmail, sendAdminRegistrationNotification };
+const sendVerificationEmail = async ({ name, email, code }) => {
+  if (!process.env.SMTP_HOST) {
+    console.log(`[DEV] Verification code for ${email}: ${code}`);
+    return;
+  }
+
+  await transporter.sendMail({
+    from: `"FamilyGuard" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    to: email,
+    subject: 'Verify your FamilyGuard account',
+    html: `
+      <h2>Hi ${name},</h2>
+      <p>Your verification code is:</p>
+      <h1 style="letter-spacing:8px;font-size:40px;color:#4F46E5">${code}</h1>
+      <p>This code expires in <strong>15 minutes</strong>.</p>
+      <p>If you didn't create an account, you can ignore this email.</p>
+      <br/>
+      <p>— The FamilyGuard Team</p>
+    `,
+  });
+};
+
+module.exports = { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail };

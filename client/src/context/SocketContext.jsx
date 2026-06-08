@@ -11,7 +11,7 @@ export const SocketProvider = ({ children }) => {
 
   useEffect(() => {
     if (!user) return;
-    const socket = io('/', { auth: { userId: user.id } });
+    const socket = io(import.meta.env.VITE_API_URL || '/', { auth: { userId: user.id } });
     socketRef.current = socket;
 
     socket.emit('join:parent', user.id);

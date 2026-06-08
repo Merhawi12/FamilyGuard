@@ -16,12 +16,8 @@ export default function Sidebar() {
 
   return (
     <aside className="w-64 bg-white border-r border-gray-100 flex flex-col h-screen sticky top-0">
-      <div className="p-6 border-b border-gray-100">
-        <div className="flex items-center gap-2">
-          <span className="text-2xl">🛡️</span>
-          <span className="text-xl font-bold text-blue-600">FamilyGuard</span>
-        </div>
-        <p className="text-xs text-gray-400 mt-1">Parental Control</p>
+      <div className="p-4 border-b border-gray-100">
+        <img src="/logo.png" alt="FamilyGuard" className="h-16 w-auto mx-auto" />
       </div>
 
       <nav className="flex-1 p-4 space-y-1">

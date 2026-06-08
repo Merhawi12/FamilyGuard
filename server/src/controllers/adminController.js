@@ -1,5 +1,6 @@
 const { User } = require('../models');
 const { Op } = require('sequelize');
+const { auditLog } = require('../utils/auditLogger');
 
 const listClients = async (req, res) => {
   try {
@@ -21,6 +22,14 @@ const toggleBlock = async (req, res) => {
 
     client.isActive = !client.isActive;
     await client.save();
+
+    auditLog(req, {
+      userId: req.user.id,
+      action: client.isActive ? 'admin.user_unblocked' : 'admin.user_blocked',
+      entity: 'User',
+      entityId: client.id,
+    });
+
     res.json({ id: client.id, isActive: client.isActive });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -36,11 +45,20 @@ const updatePlan = async (req, res) => {
     const client = await User.findOne({ where: { id: req.params.id, role: { [Op.ne]: 'admin' } } });
     if (!client) return res.status(404).json({ error: 'Client not found' });
 
+    const previousPlan = client.plan;
     client.plan = plan;
-    // auto-block on suspension, auto-unblock when upgrading
     if (plan === 'suspended') client.isActive = false;
     if (plan === 'premium') client.isActive = true;
     await client.save();
+
+    auditLog(req, {
+      userId: req.user.id,
+      action: 'admin.plan_changed',
+      entity: 'User',
+      entityId: client.id,
+      metadata: { previousPlan, newPlan: plan },
+    });
+
     res.json({ id: client.id, plan: client.plan, isActive: client.isActive });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -51,6 +69,14 @@ const deleteClient = async (req, res) => {
   try {
     const client = await User.findOne({ where: { id: req.params.id, role: { [Op.ne]: 'admin' } } });
     if (!client) return res.status(404).json({ error: 'Client not found' });
+
+    auditLog(req, {
+      userId: req.user.id,
+      action: 'admin.user_deleted',
+      entity: 'User',
+      entityId: client.id,
+      metadata: { email: client.email },
+    });
 
     await client.destroy();
     res.json({ message: 'Client deleted' });

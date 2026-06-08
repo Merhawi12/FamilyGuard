@@ -11,6 +11,12 @@ const User = sequelize.define('User', {
   plan: { type: DataTypes.STRING, defaultValue: 'free' },
   trialEndsAt: { type: DataTypes.DATE },
   isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
+  mfaEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+  mfaSecret: { type: DataTypes.STRING },
+  mfaBackupCodes: { type: DataTypes.TEXT },
+  emailVerified: { type: DataTypes.BOOLEAN, defaultValue: false },
+  emailVerificationCode: { type: DataTypes.STRING },
+  emailVerificationExpires: { type: DataTypes.DATE },
 }, { underscored: true });
 
 User.prototype.comparePassword = async function (plain) {
