@@ -17,7 +17,7 @@ export default function Login() {
     try {
       if (tab === 'login') await login(form.email, form.password);
       else await register(form.name, form.email, form.password);
-      navigate('/');
+      navigate('/dashboard');
     } catch (err) {
       const msg = err.response?.data?.error;
       if (!err.response || (err.response.status >= 500 && !msg)) {

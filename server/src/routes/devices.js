@@ -11,10 +11,9 @@ const confirmLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-router.use(authenticate);
-router.get('/', getDevices);
-router.post('/link', generateLink);
 router.post('/confirm', confirmLimiter, confirmLink);
-router.delete('/:id', removeDevice);
+router.get('/', authenticate, getDevices);
+router.post('/link', authenticate, generateLink);
+router.delete('/:id', authenticate, removeDevice);
 
 module.exports = router;

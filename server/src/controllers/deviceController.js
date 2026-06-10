@@ -43,13 +43,12 @@ const generateLink = async (req, res) => {
 const confirmLink = async (req, res) => {
   try {
     const { code, deviceId, osVersion, pushToken } = req.body;
-    if (!code || !deviceId) return res.status(400).json({ error: 'code and deviceId are required' });
+    if (!code) return res.status(400).json({ error: 'code is required' });
 
     const device = await Device.findOne({ where: { linkingCode: code } });
 
     if (!device) return res.status(404).json({ error: 'Invalid linking code' });
-    // Verify the deviceId from the QR matches the device found by code
-    if (device.id !== deviceId) return res.status(400).json({ error: 'Invalid linking code' });
+    if (deviceId && device.id !== deviceId) return res.status(400).json({ error: 'Invalid linking code' });
     if (new Date() > device.linkingCodeExpiry) return res.status(400).json({ error: 'Code expired' });
     if (device.isLinked) return res.status(400).json({ error: 'Device already linked' });
 

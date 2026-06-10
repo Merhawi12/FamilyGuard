@@ -2,13 +2,13 @@ import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const links = [
-  { to: '/', label: 'Dashboard', icon: '🏠' },
-  { to: '/children', label: 'Children', icon: '👨‍👩‍👧' },
-  { to: '/screen-time', label: 'Screen Time', icon: '⏱️' },
-  { to: '/blocking', label: 'App Blocking', icon: '🚫' },
-  { to: '/activity', label: 'Activity Log', icon: '📊' },
-  { to: '/reports', label: 'Reports', icon: '📈' },
-  { to: '/settings', label: 'Settings', icon: '⚙️' },
+  { to: '/dashboard', label: 'Dashboard', icon: '🏠' },
+  { to: '/dashboard/children', label: 'Children', icon: '👨‍👩‍👧' },
+  { to: '/dashboard/screen-time', label: 'Screen Time', icon: '⏱️' },
+  { to: '/dashboard/blocking', label: 'App Blocking', icon: '🚫' },
+  { to: '/dashboard/activity', label: 'Activity Log', icon: '📊' },
+  { to: '/dashboard/reports', label: 'Reports', icon: '📈' },
+  { to: '/dashboard/settings', label: 'Settings', icon: '⚙️' },
 ];
 
 export default function Sidebar() {
@@ -25,7 +25,7 @@ export default function Sidebar() {
           <NavLink
             key={to}
             to={to}
-            end={to === '/'}
+            end={to === '/dashboard'}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${
                 isActive ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'
