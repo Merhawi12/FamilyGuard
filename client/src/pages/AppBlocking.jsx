@@ -61,9 +61,9 @@ export default function AppBlocking() {
   if (loading) return <div className="text-gray-400 text-sm">Loading...</div>;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold">App & Website Blocking</h1>
+        <h1 className="text-xl md:text-2xl font-bold">App & Website Blocking</h1>
         <p className="text-gray-500 text-sm mt-1">Control which apps and sites are accessible</p>
       </div>
 

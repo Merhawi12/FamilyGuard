@@ -7,13 +7,13 @@ export default function StatsCard({ title, value, subtitle, icon, color = 'blue'
   };
 
   return (
-    <div className="card flex items-center gap-4">
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${colors[color]}`}>
+    <div className="card flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
+      <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center text-xl md:text-2xl shrink-0 ${colors[color]}`}>
         {icon}
       </div>
-      <div>
-        <p className="text-sm text-gray-500">{title}</p>
-        <p className="text-2xl font-bold">{value}</p>
+      <div className="min-w-0">
+        <p className="text-xs md:text-sm text-gray-500 leading-tight">{title}</p>
+        <p className="text-xl md:text-2xl font-bold leading-tight">{value}</p>
         {subtitle && <p className="text-xs text-gray-400">{subtitle}</p>}
       </div>
     </div>

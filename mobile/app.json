@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "FamilyGuard",
+    "slug": "familyguard-child",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "backgroundColor": "#2563eb"
+    },
+    "android": {
+      "package": "com.familyguard.child",
+      "versionCode": 1,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "RECEIVE_BOOT_COMPLETED",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "FamilyGuard needs location access to keep your child safe.",
+          "locationAlwaysPermission": "FamilyGuard needs background location to monitor your child's whereabouts.",
+          "locationWhenInUsePermission": "FamilyGuard needs location access for safety monitoring."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#2563eb"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b9ba998c-af61-4f0c-a1ce-3b13cde4311f"
+      }
+    },
+    "owner": "familyguard"
+  }
+}

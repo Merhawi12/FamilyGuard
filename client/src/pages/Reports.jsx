@@ -28,9 +28,9 @@ export default function Reports() {
     : [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold">Reports</h1>
+        <h1 className="text-xl md:text-2xl font-bold">Reports</h1>
         <p className="text-gray-500 text-sm mt-1">Usage summaries and trends</p>
       </div>
 
@@ -45,7 +45,7 @@ export default function Reports() {
 
       {selected && weekly && (
         <>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
             <div className="card text-center">
               <p className="text-3xl font-bold text-blue-600">{Math.round(weekly.totalMinutes / 60)}h</p>
               <p className="text-sm text-gray-500 mt-1">Total this week</p>
@@ -73,9 +73,9 @@ export default function Reports() {
           </div>
 
           <div className="card">
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
               <h2 className="font-semibold">Daily Breakdown</h2>
-              <input type="date" className="input max-w-[180px]" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
+              <input type="date" className="input w-full sm:w-auto sm:max-w-[180px]" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
             </div>
             {daily && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

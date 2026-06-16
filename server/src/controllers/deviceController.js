@@ -1,5 +1,6 @@
+const jwt = require('jsonwebtoken');
 const QRCode = require('qrcode');
-const { Device, Child } = require('../models');
+const { Device, Child, AppRule, WebsiteRule, ScreenTimeRule, ActivityLog } = require('../models');
 const { generateLinkingCode } = require('../utils/crypto');
 const { auditLog } = require('../utils/auditLogger');
 
@@ -53,7 +54,14 @@ const confirmLink = async (req, res) => {
     if (device.isLinked) return res.status(400).json({ error: 'Device already linked' });
 
     await device.update({ isLinked: true, osVersion, pushToken, lastSeen: new Date() });
-    res.json({ device });
+
+    const deviceToken = jwt.sign(
+      { deviceId: device.id, childId: device.childId },
+      process.env.JWT_SECRET,
+      { expiresIn: '365d' },
+    );
+
+    res.json({ device, deviceToken });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -71,4 +79,44 @@ const removeDevice = async (req, res) => {
   res.json({ message: 'Device removed' });
 };
 
-module.exports = { getDevices, generateLink, confirmLink, removeDevice };
+// GET /api/devices/me/rules — device-authenticated, returns all active rules for this device's child
+const getDeviceRules = async (req, res) => {
+  try {
+    const { childId } = req;
+    const [appRules, websiteRules, screenTimeRule] = await Promise.all([
+      AppRule.findAll({ where: { childId, isActive: true } }),
+      WebsiteRule.findAll({ where: { childId, isActive: true } }),
+      ScreenTimeRule.findOne({ where: { childId } }),
+    ]);
+    res.json({ appRules, websiteRules, screenTimeRule: screenTimeRule || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// POST /api/devices/me/heartbeat — update lastSeen timestamp
+const deviceHeartbeat = async (req, res) => {
+  try {
+    await Device.update({ lastSeen: new Date() }, { where: { id: req.deviceId } });
+    res.json({ ok: true, ts: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// POST /api/devices/me/activity — log app usage without requiring parent auth
+const deviceLogActivity = async (req, res) => {
+  try {
+    const { appName, appPackage, category, startTime, endTime, durationMinutes, url } = req.body;
+    const log = await ActivityLog.create({
+      deviceId: req.deviceId,
+      childId: req.childId,
+      appName, appPackage, category, startTime, endTime, durationMinutes, url,
+    });
+    res.status(201).json(log);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = { getDevices, generateLink, confirmLink, removeDevice, getDeviceRules, deviceHeartbeat, deviceLogActivity };

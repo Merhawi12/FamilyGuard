@@ -27,6 +27,11 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (name, email, password) => {
     const res = await authApi.register({ name, email, password });
+    return res.data; // { message, email } — no token yet, email must be verified first
+  };
+
+  const verifyEmail = async (email, code) => {
+    const res = await authApi.verifyEmail({ email, code });
     localStorage.setItem('fg_token', res.data.token);
     setUser(res.data.user);
   };
@@ -36,7 +41,7 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  return <AuthContext.Provider value={{ user, loading, login, register, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, loading, login, register, verifyEmail, logout }}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => useContext(AuthContext);

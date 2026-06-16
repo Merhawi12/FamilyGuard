@@ -8,6 +8,7 @@ export const SocketProvider = ({ children }) => {
   const { user } = useAuth();
   const socketRef = useRef(null);
   const [alerts, setAlerts] = useState([]);
+  const [messages, setMessages] = useState([]); // real-time chat messages
 
   useEffect(() => {
     if (!user) return;
@@ -20,13 +21,17 @@ export const SocketProvider = ({ children }) => {
       setAlerts((prev) => [alert, ...prev]);
     });
 
+    socket.on('chat:message', (msg) => {
+      setMessages((prev) => [...prev, msg]);
+    });
+
     return () => socket.disconnect();
   }, [user]);
 
   const emit = (event, data) => socketRef.current?.emit(event, data);
 
   return (
-    <SocketContext.Provider value={{ socket: socketRef.current, emit, alerts, setAlerts }}>
+    <SocketContext.Provider value={{ socket: socketRef.current, emit, alerts, setAlerts, messages, setMessages }}>
       {children}
     </SocketContext.Provider>
   );

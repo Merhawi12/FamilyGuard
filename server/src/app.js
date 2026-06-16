@@ -17,6 +17,10 @@ const io = new Server(httpServer, {
 
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:3000', credentials: true }));
+
+// Stripe webhook must receive raw body — register before express.json()
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
+
 app.use(express.json());
 
 app.use('/api/auth', require('./routes/auth'));
@@ -33,6 +37,7 @@ app.use('/api/audit', require('./routes/audit'));
 app.use('/api/locations', require('./routes/locations'));
 app.use('/api/safe-zones', require('./routes/safeZones'));
 app.use('/api/chats', require('./routes/chats'));
+app.use('/api/payments', require('./routes/payments'));
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -44,12 +49,14 @@ initSocketHandlers(io);
 
 const PORT = process.env.PORT || 5000;
 
-sequelize
-  .sync({ alter: process.env.NODE_ENV === 'development' })
-  .then(() => {
+const startServer = async () => {
+  try {
+    await sequelize.sync();
     httpServer.listen(PORT, () => console.log(`FamilyGuard server running on port ${PORT}`));
-  })
-  .catch((err) => {
+  } catch (err) {
     console.error('DB connection failed:', err);
     process.exit(1);
-  });
+  }
+};
+
+startServer();

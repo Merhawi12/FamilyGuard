@@ -1,9 +1,11 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 
 export default function AlertBell() {
   const { alerts, setAlerts } = useSocket();
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
   const unread = alerts.filter((a) => !a.isRead).length;
 
   const markRead = (id) => {
@@ -25,7 +27,10 @@ export default function AlertBell() {
         <div className="absolute right-0 top-12 w-80 bg-white rounded-2xl shadow-lg border border-gray-100 z-50">
           <div className="p-4 border-b border-gray-100 flex justify-between items-center">
             <span className="font-semibold">Alerts</span>
-            <button onClick={() => setAlerts([])} className="text-xs text-blue-500 hover:underline">Clear all</button>
+            <div className="flex gap-3">
+              <button onClick={() => { setOpen(false); navigate('/dashboard/alerts'); }} className="text-xs text-blue-500 hover:underline">View all</button>
+              <button onClick={() => setAlerts([])} className="text-xs text-gray-400 hover:underline">Clear</button>
+            </div>
           </div>
           <div className="max-h-80 overflow-y-auto">
             {alerts.length === 0 ? (

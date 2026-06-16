@@ -12,9 +12,13 @@ export default function LinkScreen({ navigation }) {
     setLoading(true);
     try {
       const res = await deviceApi.confirmLink(code.toUpperCase());
-      await SecureStore.setItemAsync('fg_device_id', res.data.device.id);
-      await SecureStore.setItemAsync('fg_child_id', res.data.device.childId);
-      navigation.replace('Home');
+      const { device, deviceToken } = res.data;
+
+      await SecureStore.setItemAsync('fg_device_token', deviceToken);
+      await SecureStore.setItemAsync('fg_device_id', String(device.id));
+      await SecureStore.setItemAsync('fg_child_id', String(device.childId));
+
+      navigation.replace('Permissions');
     } catch (err) {
       Alert.alert('Error', err.response?.data?.error || 'Failed to link device');
     } finally {

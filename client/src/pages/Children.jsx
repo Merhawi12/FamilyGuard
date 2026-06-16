@@ -38,42 +38,42 @@ export default function Children() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-5">
+      <div className="flex justify-between items-start gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Children</h1>
+          <h1 className="text-xl md:text-2xl font-bold">Children</h1>
           <p className="text-gray-500 text-sm mt-1">Manage child profiles and linked devices</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn-primary">+ Add Child</button>
+        <button onClick={() => setShowForm(true)} className="btn-primary shrink-0 text-sm">+ Add Child</button>
       </div>
 
       {showForm && (
         <div className="card">
           <h2 className="font-semibold mb-4">New Child Profile</h2>
-          <form onSubmit={addChild} className="flex gap-3 flex-wrap">
-            <input className="input max-w-xs" placeholder="Child's name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-            <input className="input max-w-xs" type="number" placeholder="Age (optional)" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} />
-            <button type="submit" className="btn-primary">Save</button>
-            <button type="button" onClick={() => setShowForm(false)} className="btn-ghost">Cancel</button>
+          <form onSubmit={addChild} className="space-y-3">
+            <input className="input" placeholder="Child's name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            <input className="input" type="number" placeholder="Age (optional)" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} />
+            <div className="flex gap-2">
+              <button type="submit" className="btn-primary flex-1">Save</button>
+              <button type="button" onClick={() => setShowForm(false)} className="btn-ghost flex-1">Cancel</button>
+            </div>
           </form>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         <div className="space-y-2">
+          {childList.length === 0 && <p className="text-gray-400 text-sm text-center py-6">No children added yet.</p>}
           {childList.map((c) => (
-            <div
-              key={c.id}
-              onClick={() => setSelected(c)}
-              className={`card cursor-pointer transition ${selected?.id === c.id ? 'ring-2 ring-blue-500' : ''}`}
-            >
+            <div key={c.id} onClick={() => setSelected(c)}
+              className={`card cursor-pointer transition ${selected?.id === c.id ? 'ring-2 ring-blue-500' : ''}`}>
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-xl font-bold text-blue-600">{c.name[0]}</div>
-                <div className="flex-1">
-                  <p className="font-medium">{c.name}</p>
+                <div className="w-11 h-11 bg-blue-100 rounded-full flex items-center justify-center text-lg font-bold text-blue-600 shrink-0">{c.name[0]}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{c.name}</p>
                   <p className="text-xs text-gray-400">{c.age ? `Age ${c.age}` : 'No age'} · {c.devices?.length || 0} device(s)</p>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); removeChild(c.id); }} className="text-red-400 hover:text-red-600 text-xs">Remove</button>
+                <button onClick={(e) => { e.stopPropagation(); removeChild(c.id); }} className="text-red-400 hover:text-red-600 text-xs shrink-0">Remove</button>
               </div>
             </div>
           ))}
@@ -81,9 +81,9 @@ export default function Children() {
 
         {selected && (
           <div className="lg:col-span-2 space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="font-semibold">{selected.name}'s Devices</h2>
-              <button onClick={() => setShowLink(!showLink)} className="btn-primary text-sm">Link Device</button>
+            <div className="flex justify-between items-center gap-3">
+              <h2 className="font-semibold truncate">{selected.name}'s Devices</h2>
+              <button onClick={() => setShowLink(!showLink)} className="btn-primary text-sm shrink-0">Link Device</button>
             </div>
 
             {showLink && (
@@ -97,13 +97,13 @@ export default function Children() {
                     <option value="windows">Windows</option>
                     <option value="mac">Mac</option>
                   </select>
-                  <button type="submit" className="btn-primary">Generate Code</button>
+                  <button type="submit" className="btn-primary w-full">Generate Code</button>
                 </form>
                 {linkData && (
                   <div className="mt-4 p-4 bg-blue-50 rounded-xl text-center">
                     <p className="text-sm text-gray-600 mb-2">Enter this code on the child's device:</p>
-                    <p className="text-4xl font-mono font-bold text-blue-600 tracking-widest">{linkData.code}</p>
-                    {linkData.qrCode && <img src={linkData.qrCode} alt="QR Code" className="mx-auto mt-3 w-32 h-32" />}
+                    <p className="text-3xl md:text-4xl font-mono font-bold text-blue-600 tracking-widest">{linkData.code}</p>
+                    {linkData.qrCode && <img src={linkData.qrCode} alt="QR Code" className="mx-auto mt-3 w-28 h-28 md:w-32 md:h-32" />}
                     <p className="text-xs text-gray-400 mt-2">Valid for 30 minutes</p>
                   </div>
                 )}

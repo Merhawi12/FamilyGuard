@@ -121,4 +121,65 @@ const me = async (req, res) => {
   res.json(serializeUser(req.user));
 };
 
-module.exports = { register, login, me, verifyEmail };
+const resendCode = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const user = await User.findOne({ where: { email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.emailVerified) return res.status(400).json({ error: 'Email already verified' });
+
+    const code = generateVerificationCode();
+    const emailVerificationExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await user.update({ emailVerificationCode: code, emailVerificationExpires });
+
+    sendVerificationEmail({ name: user.name, email, code }).catch((err) =>
+      console.error('Resend verification email failed:', err.message)
+    );
+
+    res.json({ message: 'Verification code resent' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+const updateProfile = async (req, res) => {
+  try {
+    const { name, email } = req.body;
+    if (!name && !email) return res.status(400).json({ error: 'Nothing to update' });
+
+    const updates = {};
+    if (name) updates.name = name.trim();
+    if (email && email !== req.user.email) {
+      const existing = await User.findOne({ where: { email } });
+      if (existing) return res.status(409).json({ error: 'Email already in use' });
+      updates.email = email.trim();
+    }
+
+    await req.user.update(updates);
+    auditLog(req, { userId: req.user.id, action: 'auth.profile_updated', entity: 'User', entityId: req.user.id });
+    res.json(serializeUser(req.user));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both passwords required' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+
+    const valid = await req.user.comparePassword(currentPassword);
+    if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    await req.user.update({ passwordHash: newPassword });
+    auditLog(req, { userId: req.user.id, action: 'auth.password_changed', entity: 'User', entityId: req.user.id });
+    res.json({ message: 'Password updated' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = { register, login, me, verifyEmail, resendCode, updateProfile, changePassword };

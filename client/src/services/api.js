@@ -3,6 +3,7 @@ import axios from 'axios';
 const api = axios.create({
   baseURL: `${import.meta.env.VITE_API_URL || ''}/api`,
   withCredentials: true,
+  timeout: 15000,
 });
 
 api.interceptors.request.use((config) => {
@@ -24,6 +25,8 @@ api.interceptors.response.use(
 
 export const auth = {
   register: (data) => api.post('/auth/register', data),
+  verifyEmail: (data) => api.post('/auth/verify-email', data),
+  resendCode: (data) => api.post('/auth/resend-code', data),
   login: (data) => api.post('/auth/login', data),
   me: () => api.get('/auth/me'),
 };
@@ -77,6 +80,29 @@ export const admin = {
   toggleBlock: (id) => api.patch(`/admin/clients/${id}/toggle-block`),
   updatePlan: (id, plan) => api.patch(`/admin/clients/${id}/plan`, { plan }),
   deleteClient: (id) => api.delete(`/admin/clients/${id}`),
+};
+
+export const chats = {
+  getMessages: (childId, params) => api.get(`/chats/${childId}/messages`, { params }),
+  sendMessage: (childId, data) => api.post(`/chats/${childId}/messages`, data),
+};
+
+export const locations = {
+  getCurrent: (childId) => api.get(`/locations/${childId}/current`),
+  getHistory: (childId, params) => api.get(`/locations/${childId}/history`, { params }),
+};
+
+export const safeZones = {
+  list: (childId) => api.get('/safe-zones', { params: childId ? { childId } : {} }),
+  create: (data) => api.post('/safe-zones', data),
+  update: (id, data) => api.put(`/safe-zones/${id}`, data),
+  remove: (id) => api.delete(`/safe-zones/${id}`),
+};
+
+export const payments = {
+  createCheckoutSession: (plan) => api.post('/payments/create-checkout-session', { plan }),
+  customerPortal: () => api.post('/payments/customer-portal'),
+  getSubscription: () => api.get('/payments/subscription'),
 };
 
 export default api;

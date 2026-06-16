@@ -11,6 +11,12 @@ import AppBlocking from './pages/AppBlocking';
 import ActivityLog from './pages/ActivityLog';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+import Alerts from './pages/Alerts';
+import Location from './pages/Location';
+import Messages from './pages/Messages';
+import AdminPanel from './pages/AdminPanel';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import Terms from './pages/Terms';
 
 const PrivateRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -41,8 +47,14 @@ export default function App() {
             <Route path="blocking" element={<AppBlocking />} />
             <Route path="activity" element={<ActivityLog />} />
             <Route path="reports" element={<Reports />} />
+            <Route path="alerts" element={<Alerts />} />
+            <Route path="location" element={<Location />} />
+            <Route path="messages" element={<Messages />} />
+            <Route path="admin" element={<AdminPanel />} />
             <Route path="settings" element={<Settings />} />
           </Route>
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<Terms />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

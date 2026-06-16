@@ -25,9 +25,9 @@ export default function ScreenTime() {
   if (!rule) return <div className="text-gray-400">Select a child to configure screen time.</div>;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold">Screen Time</h1>
+        <h1 className="text-xl md:text-2xl font-bold">Screen Time</h1>
         <p className="text-gray-500 text-sm mt-1">Set daily limits and schedules</p>
       </div>
 
@@ -86,12 +86,14 @@ export default function ScreenTime() {
             <h2 className="font-semibold mb-4">Daily Schedule</h2>
             <div className="space-y-3">
               {DAYS.map((day) => (
-                <div key={day} className="flex items-center gap-4">
-                  <input type="checkbox" checked={rule.schedule[day]?.enabled} onChange={(e) => updateScheduleDay(day, 'enabled', e.target.checked)} />
-                  <span className="w-24 capitalize text-sm font-medium">{day}</span>
-                  <input type="time" value={rule.schedule[day]?.start || '08:00'} onChange={(e) => updateScheduleDay(day, 'start', e.target.value)} className="input max-w-[130px]" disabled={!rule.schedule[day]?.enabled} />
-                  <span className="text-gray-400 text-sm">to</span>
-                  <input type="time" value={rule.schedule[day]?.end || '20:00'} onChange={(e) => updateScheduleDay(day, 'end', e.target.value)} className="input max-w-[130px]" disabled={!rule.schedule[day]?.enabled} />
+                <div key={day} className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <input type="checkbox" checked={rule.schedule[day]?.enabled} onChange={(e) => updateScheduleDay(day, 'enabled', e.target.checked)} className="shrink-0" />
+                  <span className="w-20 capitalize text-sm font-medium">{day}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input type="time" value={rule.schedule[day]?.start || '08:00'} onChange={(e) => updateScheduleDay(day, 'start', e.target.value)} className="input w-32" disabled={!rule.schedule[day]?.enabled} />
+                    <span className="text-gray-400 text-sm">to</span>
+                    <input type="time" value={rule.schedule[day]?.end || '20:00'} onChange={(e) => updateScheduleDay(day, 'end', e.target.value)} className="input w-32" disabled={!rule.schedule[day]?.enabled} />
+                  </div>
                 </div>
               ))}
             </div>

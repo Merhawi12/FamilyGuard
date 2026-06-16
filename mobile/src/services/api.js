@@ -11,13 +11,21 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// ── Device linking ────────────────────────────────────────────────────────────
 export const device = {
+  // Returns { device, deviceToken } — store deviceToken for all future calls
   confirmLink: (code) => api.post('/devices/confirm', { code }),
-  heartbeat: (deviceId) => api.post(`/devices/${deviceId}/heartbeat`, {}),
+
+  // Device-authenticated calls
+  getRules: () => api.get('/devices/me/rules'),
+  heartbeat: () => api.post('/devices/me/heartbeat'),
+  logActivity: (data) => api.post('/devices/me/activity', data),
 };
 
-export const activity = {
-  log: (data) => api.post('/activity', data),
+// ── Location ─────────────────────────────────────────────────────────────────
+export const location = {
+  // No auth required — childId + deviceId in body identify the device
+  post: (data) => api.post('/locations', data),
 };
 
 export default api;
