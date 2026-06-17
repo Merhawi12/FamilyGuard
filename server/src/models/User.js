@@ -20,6 +20,9 @@ const User = sequelize.define('User', {
   stripeCustomerId: { type: DataTypes.STRING },
   stripeSubscriptionId: { type: DataTypes.STRING },
   subscriptionStatus: { type: DataTypes.STRING, defaultValue: 'trial' },
+  notificationPrefs: { type: DataTypes.TEXT, defaultValue: '{}' },
+  permissions: { type: DataTypes.JSON, defaultValue: [] },
+  lastLoginAt: { type: DataTypes.DATE },
 }, { underscored: true });
 
 User.prototype.comparePassword = async function (plain) {

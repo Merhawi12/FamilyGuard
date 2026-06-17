@@ -1,4 +1,6 @@
 const { Message, Child } = require('../models');
+const { createAlert } = require('../utils/alertHelper');
+const { detectCyberbullying } = require('../utils/cyberbullyingDetector');
 
 // Verify the child belongs to the authenticated parent
 const resolveChild = async (childId, parentId) =>
@@ -81,18 +83,13 @@ const receiveFromChild = async (req, res) => {
 
     const io = req.app.get('io');
 
-    // If this is an emergency, also create a high-severity alert
     if (messageType === 'emergency') {
-      const { Alert } = require('../models');
-      const alert = await Alert.create({
-        parentId: child.parentId,
-        childId: child.id,
-        type: 'emergency_button',
-        message: `Emergency alert from child: ${text.trim()}`,
-        severity: 'high',
-        metadata: JSON.stringify({ messageId: message.id, deviceId }),
-      });
-      io.to(`parent:${child.parentId}`).emit('alert:new', alert);
+      await createAlert(io, { parentId: child.parentId, childId: child.id, type: 'emergency_button', message: `Emergency alert from child: ${text.trim()}`, severity: 'high', metadata: { messageId: message.id, deviceId } });
+    }
+
+    const { detected, matchedKeywords } = detectCyberbullying(text.trim());
+    if (detected) {
+      await createAlert(io, { parentId: child.parentId, childId: child.id, type: 'cyberbullying', message: `Possible cyberbullying detected in child message`, severity: 'high', metadata: { messageId: message.id, matchedKeywords } });
     }
 
     io.to(`parent:${child.parentId}`).emit('chat:message', message);

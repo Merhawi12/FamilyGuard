@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { User } = require('../models');
+const { User, Session } = require('../models');
 
 const authenticate = async (req, res, next) => {
   const header = req.headers.authorization;
@@ -8,6 +8,14 @@ const authenticate = async (req, res, next) => {
   try {
     const token = header.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    if (decoded.sid) {
+      const session = await Session.findByPk(decoded.sid);
+      if (!session || session.revoked) return res.status(401).json({ error: 'Session expired' });
+      session.update({ lastActiveAt: new Date() }).catch(() => {});
+      req.sessionId = session.id;
+    }
+
     const user = await User.findByPk(decoded.id);
     if (!user || !user.isActive) return res.status(401).json({ error: 'Unauthorized' });
     req.user = user;

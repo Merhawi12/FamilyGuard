@@ -10,6 +10,7 @@ const baseLinks = [
   { to: '/dashboard/blocking', label: 'App Blocking', icon: '🚫' },
   { to: '/dashboard/activity', label: 'Activity Log', icon: '📊' },
   { to: '/dashboard/messages', label: 'Messages', icon: '💬' },
+  { to: '/dashboard/contacts', label: 'Contacts', icon: '👥' },
   { to: '/dashboard/alerts', label: 'Alerts', icon: '🔔' },
   { to: '/dashboard/reports', label: 'Reports', icon: '📈' },
   { to: '/dashboard/settings', label: 'Settings', icon: '⚙️' },

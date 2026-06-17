@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { User } = require('../models');
 const { auditLog } = require('../utils/auditLogger');
+const { createSession } = require('../utils/session');
 
 const APP_NAME = 'FamilyGuard';
 const BACKUP_CODE_COUNT = 8;
@@ -114,9 +115,8 @@ const validate = async (req, res) => {
       auditLog(req, { userId: user.id, action: 'auth.mfa_backup_used', entity: 'User', entityId: user.id });
     }
 
-    const fullToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-    });
+    const { token: fullToken } = await createSession(req, user.id);
+    await user.update({ lastLoginAt: new Date() });
     auditLog(req, { userId: user.id, action: 'auth.login', entity: 'User', entityId: user.id });
 
     res.json({ token: fullToken });

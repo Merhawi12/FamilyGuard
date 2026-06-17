@@ -10,6 +10,11 @@ const AuditLog = require('./AuditLog');
 const Location = require('./Location');
 const SafeZone = require('./SafeZone');
 const Message = require('./Message');
+const Contact = require('./Contact');
+const Session = require('./Session');
+const Transaction = require('./Transaction');
+const Notification = require('./Notification');
+const SystemSetting = require('./SystemSetting');
 
 // Associations
 User.hasMany(Child, { foreignKey: 'parentId', as: 'children' });
@@ -50,7 +55,21 @@ Child.hasMany(Message, { foreignKey: 'childId', as: 'messages' });
 Message.belongsTo(User, { foreignKey: 'parentId', as: 'parent' });
 Message.belongsTo(Child, { foreignKey: 'childId', as: 'child' });
 
+User.hasMany(Contact, { foreignKey: 'parentId', as: 'contacts' });
+Child.hasMany(Contact, { foreignKey: 'childId', as: 'contacts' });
+Contact.belongsTo(User, { foreignKey: 'parentId', as: 'parent' });
+Contact.belongsTo(Child, { foreignKey: 'childId', as: 'child' });
+
+User.hasMany(Session, { foreignKey: 'userId', as: 'sessions' });
+Session.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+User.hasMany(Transaction, { foreignKey: 'userId', as: 'transactions' });
+Transaction.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+User.hasMany(Notification, { foreignKey: 'userId', as: 'notifications' });
+Notification.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
 module.exports = {
   User, Child, Device, ActivityLog, ScreenTimeRule, AppRule, WebsiteRule, Alert, AuditLog,
-  Location, SafeZone, Message,
+  Location, SafeZone, Message, Contact, Session, Transaction, Notification, SystemSetting,
 };

@@ -36,7 +36,8 @@ export const AuthProvider = ({ children }) => {
     setUser(res.data.user);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try { await authApi.logout(); } catch { /* best effort */ }
     localStorage.removeItem('fg_token');
     setUser(null);
   };

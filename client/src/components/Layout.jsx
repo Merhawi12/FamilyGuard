@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import AlertBell from './AlertBell';
+import NotificationBell from './NotificationBell';
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -31,7 +32,8 @@ export default function Layout() {
             <span className="block w-5 h-0.5 bg-gray-700" />
           </button>
           <span className="md:hidden text-sm font-semibold text-gray-700 flex-1">FamilyGuard</span>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-1">
+            <NotificationBell />
             <AlertBell />
           </div>
         </header>

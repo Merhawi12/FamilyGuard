@@ -7,6 +7,7 @@ const { Server } = require('socket.io');
 const { sequelize } = require('./config/db');
 const { User, Child, Device, ActivityLog, ScreenTimeRule, AppRule, WebsiteRule, Alert } = require('./models');
 const initSocketHandlers = require('./sockets/deviceEvents');
+const { analyzeParent } = require('./utils/safetyAnalyzer');
 
 const app = express();
 const httpServer = createServer(app);
@@ -38,6 +39,9 @@ app.use('/api/locations', require('./routes/locations'));
 app.use('/api/safe-zones', require('./routes/safeZones'));
 app.use('/api/chats', require('./routes/chats'));
 app.use('/api/payments', require('./routes/payments'));
+app.use('/api/safety', require('./routes/safety'));
+app.use('/api/contacts', require('./routes/contacts'));
+app.use('/api/notifications', require('./routes/notifications'));
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -52,7 +56,31 @@ const PORT = process.env.PORT || 5000;
 const startServer = async () => {
   try {
     await sequelize.sync();
+
+    // Safely add any new columns that don't yet exist in the SQLite schema
+    const qi = sequelize.getQueryInterface();
+    const addIfMissing = async (table, col, def) => {
+      try { await qi.addColumn(table, col, def); } catch { /* already exists */ }
+    };
+    await addIfMissing('users', 'notification_prefs', { type: require('sequelize').DataTypes.TEXT, defaultValue: '{}' });
+    await addIfMissing('users', 'permissions', { type: require('sequelize').DataTypes.JSON, defaultValue: [] });
+    await addIfMissing('users', 'last_login_at', { type: require('sequelize').DataTypes.DATE });
+    await addIfMissing('contacts', 'id', null).catch(() => {}); // triggers table creation via sync
     httpServer.listen(PORT, () => console.log(`FamilyGuard server running on port ${PORT}`));
+
+    // Hourly safety pattern analysis for all parents
+    setInterval(async () => {
+      try {
+        const parents = await User.findAll({ where: { role: 'parent', isActive: true }, attributes: ['id'] });
+        for (const parent of parents) {
+          await analyzeParent(io, parent.id).catch((err) =>
+            console.error(`[safety] analysis failed for ${parent.id}:`, err.message)
+          );
+        }
+      } catch (err) {
+        console.error('[safety] scheduler error:', err.message);
+      }
+    }, 60 * 60 * 1000);
   } catch (err) {
     console.error('DB connection failed:', err);
     process.exit(1);

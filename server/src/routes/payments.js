@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Stripe = require('stripe');
-const { User } = require('../models');
+const { User, Transaction } = require('../models');
 const { authenticate } = require('../middleware/auth');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -94,6 +94,14 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  const recordTransaction = async (data) => {
+    try {
+      await Transaction.create({ ...data, stripeEventId: event.id });
+    } catch (err) {
+      if (!err.message?.includes('UNIQUE')) console.error('Transaction log error:', err.message);
+    }
+  };
+
   try {
     switch (event.type) {
       case 'checkout.session.completed': {
@@ -103,6 +111,10 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
           { plan, stripeSubscriptionId: session.subscription, subscriptionStatus: 'active' },
           { where: { id: userId } }
         );
+        await recordTransaction({
+          userId, type: 'checkout_completed', plan, status: 'succeeded',
+          amount: session.amount_total, currency: session.currency,
+        });
         break;
       }
 
@@ -112,6 +124,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         if (user) {
           const plan = sub.items.data[0]?.price?.id === process.env.STRIPE_FAMILY_PRICE_ID ? 'family' : 'premium';
           await user.update({ subscriptionStatus: sub.status, plan });
+          await recordTransaction({ userId: user.id, type: 'subscription_updated', plan, status: sub.status });
         }
         break;
       }
@@ -121,6 +134,19 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         const user = await User.findOne({ where: { stripeCustomerId: sub.customer } });
         if (user) {
           await user.update({ plan: 'free', stripeSubscriptionId: null, subscriptionStatus: 'cancelled' });
+          await recordTransaction({ userId: user.id, type: 'subscription_cancelled', plan: 'free', status: 'cancelled' });
+        }
+        break;
+      }
+
+      case 'invoice.paid': {
+        const invoice = event.data.object;
+        const user = await User.findOne({ where: { stripeCustomerId: invoice.customer } });
+        if (user) {
+          await recordTransaction({
+            userId: user.id, type: 'invoice_paid', plan: user.plan, status: 'succeeded',
+            amount: invoice.amount_paid, currency: invoice.currency,
+          });
         }
         break;
       }
@@ -128,7 +154,13 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       case 'invoice.payment_failed': {
         const invoice = event.data.object;
         const user = await User.findOne({ where: { stripeCustomerId: invoice.customer } });
-        if (user) await user.update({ subscriptionStatus: 'past_due' });
+        if (user) {
+          await user.update({ subscriptionStatus: 'past_due' });
+          await recordTransaction({
+            userId: user.id, type: 'invoice_failed', plan: user.plan, status: 'failed',
+            amount: invoice.amount_due, currency: invoice.currency,
+          });
+        }
         break;
       }
     }

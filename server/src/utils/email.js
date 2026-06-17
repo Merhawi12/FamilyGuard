@@ -71,4 +71,41 @@ const sendVerificationEmail = async ({ name, email, code }) => {
   });
 };
 
-module.exports = { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail };
+const ALERT_TYPE_LABELS = {
+  left_safe_zone: 'Left Safe Zone',
+  entered_safe_zone: 'Arrived at Safe Zone',
+  dangerous_content: 'Dangerous Content Detected',
+  emergency_button: 'Emergency Alert',
+  cyberbullying: 'Cyberbullying Detected',
+  screen_time_exceeded: 'Screen Time Exceeded',
+  blocked_app_attempt: 'Blocked App Attempt',
+  app_installed: 'New App Installed',
+  unknown_contact: 'Unknown Contact',
+  safety_pattern: 'Safety Pattern Detected',
+};
+
+const sendAlertEmail = async ({ name, email, type, message, severity }) => {
+  if (!process.env.SMTP_HOST) return;
+
+  const label = ALERT_TYPE_LABELS[type] || type;
+  const color = severity === 'high' ? '#DC2626' : severity === 'medium' ? '#D97706' : '#2563EB';
+
+  await transporter.sendMail({
+    from: `"FamilyGuard" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    to: email,
+    subject: `⚠️ FamilyGuard Alert: ${label}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:auto;">
+        <h2 style="color:#1e293b;">FamilyGuard Alert</h2>
+        <div style="background:#f8fafc;border-left:4px solid ${color};padding:16px 20px;border-radius:4px;margin:16px 0;">
+          <p style="margin:0 0 6px;font-weight:700;color:${color};">${label}</p>
+          <p style="margin:0;color:#334155;">${message}</p>
+        </div>
+        <p style="color:#64748b;font-size:.9rem;">Hi ${name}, this alert was triggered on your FamilyGuard dashboard. Log in to review the details.</p>
+        <p style="margin-top:24px;color:#94a3b8;font-size:.8rem;">— The FamilyGuard Team</p>
+      </div>
+    `,
+  });
+};
+
+module.exports = { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendAlertEmail };

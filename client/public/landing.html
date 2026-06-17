@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FamilyGuard — Calm, Complete Protection for the Whole Family</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..800;1,9..144,400..600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+<!-- ICON SYMBOL LIBRARY -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<symbol id="ic-logo" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 5-3 7.5-7 9-4-1.5-7-4-7-9V6l7-3Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7.5 12.2c1-1.3 2-1.3 3 0s2 1.3 3 0 2-1.3 3 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+<symbol id="ic-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 7.6v4.6l3.2 2.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="ic-chat" viewBox="0 0 24 24"><path d="M4 5.6A1.6 1.6 0 0 1 5.6 4h12.8A1.6 1.6 0 0 1 20 5.6v9.2A1.6 1.6 0 0 1 18.4 16.4H10l-4.6 3.7v-3.7H5.6A1.6 1.6 0 0 1 4 14.8Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+<symbol id="ic-alertbubble" viewBox="0 0 24 24"><path d="M4 5.6A1.6 1.6 0 0 1 5.6 4h12.8A1.6 1.6 0 0 1 20 5.6v9.2A1.6 1.6 0 0 1 18.4 16.4H10l-4.6 3.7v-3.7H5.6A1.6 1.6 0 0 1 4 14.8Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="12" y1="7.4" x2="12" y2="11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="13.4" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-shieldwarn" viewBox="0 0 24 24"><path d="M12 3.3 19.5 6.6v5.1c0 5-3 7.7-7.5 9-4.5-1.3-7.5-4-7.5-9V6.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="12" y1="8.6" x2="12" y2="12.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="15.2" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-shieldcheck" viewBox="0 0 24 24"><path d="M12 3.3 19.5 6.6v5.1c0 5-3 7.7-7.5 9-4.5-1.3-7.5-4-7.5-9V6.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.8 12.3l2.1 2.1 4.3-4.3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="ic-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="6.3" y1="6.3" x2="17.7" y2="17.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+<symbol id="ic-pin" viewBox="0 0 24 24"><path d="M12 21s6.5-6.1 6.5-11.2A6.5 6.5 0 0 0 5.5 9.8C5.5 14.9 12 21 12 21Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="9.6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+<symbol id="ic-eyeoff" viewBox="0 0 24 24"><path d="M3.3 12s3.4-5.7 8.7-5.7 8.7 5.7 8.7 5.7-3.4 5.7-8.7 5.7S3.3 12 3.3 12Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.3" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+<symbol id="ic-lock" viewBox="0 0 24 24"><rect x="5.3" y="10.6" width="13.4" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 10.6V7.8a4 4 0 0 1 8 0v2.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+<symbol id="ic-bolt" viewBox="0 0 24 24"><path d="M13.2 2.6 4.8 14h5.6l-1 7.4 8.4-11.4h-5.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+<symbol id="ic-cpu" viewBox="0 0 24 24"><rect x="6.2" y="6.2" width="11.6" height="11.6" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="12" y1="2.2" x2="12" y2="6.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="12" y1="17.8" x2="12" y2="21.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="2.2" y1="12" x2="6.2" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="17.8" y1="12" x2="21.8" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+<symbol id="ic-grid" viewBox="0 0 24 24"><rect x="3.6" y="3.6" width="6.4" height="6.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="3.6" width="6.4" height="6.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3.6" y="14" width="6.4" height="6.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="14" width="6.4" height="6.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+<symbol id="ic-home" viewBox="0 0 24 24"><path d="M3.6 11.4 12 4.2l8.4 7.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.8 10v8.6a1 1 0 0 0 1 1h10.4a1 1 0 0 0 1-1V10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+<symbol id="ic-bell" viewBox="0 0 24 24"><path d="M6.6 9.4a5.4 5.4 0 0 1 10.8 0v4l1.6 3H5l1.6-3Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.6 19.4a2.4 2.4 0 0 0 4.8 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+<symbol id="ic-users" viewBox="0 0 24 24"><circle cx="9.2" cy="7.6" r="2.8" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.8 19v-1.1a4.4 4.4 0 0 1 4.4-4.4h2a4.4 4.4 0 0 1 4.4 4.4V19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M15.6 5.2a3 3 0 0 1 0 5.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M17 13.6a4 4 0 0 1 3.2 3.9V19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+<symbol id="ic-building" viewBox="0 0 24 24"><rect x="5.2" y="3.2" width="13.6" height="17.6" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="7.4" r="0.75" fill="currentColor" stroke="none"/><circle cx="15" cy="7.4" r="0.75" fill="currentColor" stroke="none"/><circle cx="9" cy="11.6" r="0.75" fill="currentColor" stroke="none"/><circle cx="15" cy="11.6" r="0.75" fill="currentColor" stroke="none"/><circle cx="9" cy="15.8" r="0.75" fill="currentColor" stroke="none"/><circle cx="15" cy="15.8" r="0.75" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-check" viewBox="0 0 24 24"><path d="M5 12.6l4.2 4.2L19 6.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="ic-arrow" viewBox="0 0 24 24"><line x1="4.5" y1="12" x2="18.5" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M13.4 6.4 19 12l-5.6 5.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="ic-menu" viewBox="0 0 24 24"><line x1="4" y1="7" x2="20" y2="7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="4" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="ic-close" viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+</defs>
+</svg>
+
+<style>
+/* ============ TOKENS ============ */
+:root{
+  --abyss:#0A1B2E;
+  --abyss-soft:#102536;
+  --abyss-soft-2:#142C40;
+  --current:#0C6478;
+  --tide:#15B8C9;
+  --tide-light:#8FE9EF;
+  --foam:#F2F9FA;
+  --sand:#FFF6F1;
+  --coral:#FF6F59;
+  --coral-deep:#E85541;
+  --ink:#0F2233;
+  --slate:#5C7080;
+  --slate-soft:#7C8E9B;
+  --line:#E2EDEE;
+  --line-soft:#EDF4F4;
+  --white:#FFFFFF;
+  --grad-tide:linear-gradient(135deg,var(--current),var(--tide));
+  --shadow-sm:0 1px 2px rgba(15,34,51,.06), 0 1px 1px rgba(15,34,51,.04);
+  --shadow-md:0 8px 24px -8px rgba(15,34,51,.14), 0 2px 8px rgba(15,34,51,.06);
+  --shadow-lg:0 24px 48px -16px rgba(15,34,51,.22), 0 6px 16px rgba(15,34,51,.08);
+  --radius-card:22px;
+  --radius-pill:999px;
+  --container:1180px;
+  --ease-flow:cubic-bezier(.16,.84,.44,1);
+}
+
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  font-family:'Plus Jakarta Sans',system-ui,sans-serif;
+  color:var(--ink);
+  background:var(--white);
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+img,svg{display:block;}
+a{color:inherit;text-decoration:none;}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+.use-icon{width:1em;height:1em;display:inline-block;vertical-align:middle;}
+:focus-visible{outline:2px solid var(--tide);outline-offset:3px;border-radius:4px;}
+
+.wrap{max-width:var(--container);margin:0 auto;padding-inline:clamp(1.25rem,5vw,2rem);}
+.section{position:relative;padding-block:clamp(4.2rem,9vw,7.2rem);}
+.section--tight{padding-block:clamp(2.6rem,5vw,3.6rem);}
+
+.eyebrow{
+  display:inline-flex;align-items:center;gap:.5rem;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:.72rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--current);
+  background:rgba(12,100,120,.08);
+  border:1px solid rgba(12,100,120,.16);
+  padding:.45rem .9rem;border-radius:var(--radius-pill);
+  margin-bottom:1.4rem;
+}
+.eyebrow--coral{color:var(--coral-deep);background:rgba(255,111,89,.1);border-color:rgba(255,111,89,.22);}
+.eyebrow--light{color:var(--tide-light);background:rgba(143,233,239,.1);border-color:rgba(143,233,239,.26);}
+
+.head-row{max-width:680px;}
+.head-row.center{margin-inline:auto;text-align:center;}
+h1,h2,h3{
+  font-family:'Fraunces',serif;
+  font-weight:600;
+  letter-spacing:-.01em;
+  color:var(--ink);
+  line-height:1.08;
+}
+h1{font-size:clamp(2.4rem,5vw,3.8rem);}
+h2{font-size:clamp(1.9rem,3.6vw,2.7rem);}
+h3{font-size:1.15rem;font-weight:600;}
+em{font-style:italic;color:var(--current);}
+.section-sub{color:var(--slate);font-size:1.06rem;margin-top:1.1rem;max-width:620px;}
+.head-row.center .section-sub{margin-inline:auto;}
+
+/* ============ BUTTONS ============ */
+.btn{
+  position:relative;overflow:hidden;
+  display:inline-flex;align-items:center;justify-content:center;gap:.55rem;
+  font-weight:700;font-size:.96rem;
+  padding:.85rem 1.7rem;border-radius:var(--radius-pill);
+  transition:transform .35s var(--ease-flow),box-shadow .35s var(--ease-flow),background .35s;
+  white-space:nowrap;
+}
+.btn .use-icon{width:1.05em;height:1.05em;}
+.btn-primary{
+  background:var(--grad-tide);color:#fff;
+  box-shadow:0 10px 28px -10px rgba(12,100,120,.55);
+  --ripple-color:rgba(255,255,255,.55);
+}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 16px 34px -10px rgba(12,100,120,.65);}
+.btn-secondary{
+  background:transparent;color:var(--ink);
+  border:1.5px solid var(--line);
+  --ripple-color:rgba(12,100,120,.16);
+}
+.btn-secondary:hover{border-color:var(--current);transform:translateY(-2px);}
+.btn-on-dark{color:#fff;border-color:rgba(255,255,255,.28);--ripple-color:rgba(255,255,255,.25);}
+.btn-on-dark:hover{border-color:rgba(255,255,255,.6);}
+.btn-light{background:#fff;color:var(--abyss);box-shadow:0 10px 28px -10px rgba(0,0,0,.35);--ripple-color:rgba(12,100,120,.2);}
+.btn-light:hover{transform:translateY(-2px);}
+.btn-sm{padding:.6rem 1.25rem;font-size:.86rem;}
+.btn-ripple{position:absolute;border-radius:50%;background:var(--ripple-color,rgba(255,255,255,.5));transform:scale(0);animation:rippleAnim .65s ease-out forwards;pointer-events:none;}
+@keyframes rippleAnim{to{transform:scale(1);opacity:0;}}
+
+/* ============ NAV ============ */
+.nav{
+  position:fixed;top:0;left:0;right:0;z-index:80;
+  padding-block:.3rem;
+  transition:padding .3s,background .3s,box-shadow .3s,backdrop-filter .3s;
+}
+.nav::before{
+  content:"";position:absolute;inset:0;
+  background:rgba(255,255,255,0);
+  backdrop-filter:blur(0px);
+  transition:background .35s,backdrop-filter .35s,box-shadow .35s;
+  z-index:-1;
+}
+.nav.is-scrolled{padding-block:.7rem;}
+.nav.is-scrolled::before{background:rgba(255,255,255,.82);backdrop-filter:blur(14px);box-shadow:0 1px 0 var(--line),0 12px 24px -16px rgba(15,34,51,.18);}
+.nav-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;}
+.logo{display:flex;align-items:center;gap:.55rem;font-family:'Fraunces',serif;font-weight:600;font-size:1.18rem;color:var(--ink);}
+.logo .use-icon{width:1.85rem;height:1.85rem;color:var(--current);}
+.logo-img{height:100px;width:auto;display:block;}
+.logo-img--footer{height:56px;filter:brightness(0) invert(1);}
+.nav-links{display:flex;align-items:center;gap:2rem;}
+.nav-links a{font-size:.94rem;font-weight:500;color:var(--ink);position:relative;padding-bottom:4px;}
+.nav-links a::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:0;background:var(--tide);transition:width .3s var(--ease-flow);}
+.nav-links a:hover::after{width:100%;}
+.nav-right{display:flex;align-items:center;gap:1.2rem;}
+.nav-signin{font-size:.92rem;font-weight:600;color:var(--ink);}
+.nav-toggle{display:none;width:2.2rem;height:2.2rem;align-items:center;justify-content:center;}
+.nav-toggle .use-icon{width:1.5rem;height:1.5rem;}
+.nav-toggle .ic-close{display:none;}
+body.nav-open .nav-toggle .ic-menu{display:none;}
+body.nav-open .nav-toggle .ic-close{display:block;}
+
+@media (max-width:840px){
+  .nav-links{
+    position:fixed;inset:64px 0 0 0;background:#fff;
+    flex-direction:column;align-items:flex-start;gap:0;
+    padding:1.4rem clamp(1.25rem,5vw,2rem) 2rem;
+    transform:translateY(-12px);opacity:0;visibility:hidden;
+    transition:opacity .25s,transform .25s,visibility .25s;
+    border-top:1px solid var(--line);
+  }
+  .nav-links a{width:100%;padding:.85rem 0;border-bottom:1px solid var(--line-soft);}
+  body.nav-open .nav-links{transform:translateY(0);opacity:1;visibility:visible;}
+  .nav-right .nav-signin{display:none;}
+  .nav-toggle{display:flex;}
+}
+
+/* ============ AMBIENT CURRENT BLOBS ============ */
+.current-field{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0;}
+.blob{position:absolute;border-radius:48% 52% 58% 42%/52% 46% 54% 48%;filter:blur(70px);will-change:transform;}
+@media (prefers-reduced-motion: no-preference){
+  .blob{animation:blobDrift1 24s ease-in-out infinite;}
+  .blob.b2{animation:blobDrift2 31s ease-in-out infinite;}
+  .blob.b3{animation:blobDrift3 27s ease-in-out infinite;}
+}
+@keyframes blobDrift1{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(40px,-26px) scale(1.08);}}
+@keyframes blobDrift2{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(-46px,30px) scale(.94);}}
+@keyframes blobDrift3{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(28px,34px) scale(1.05);}}
+
+/* ============ WAVE DIVIDER ============ */
+.wave{position:relative;width:100%;overflow:hidden;line-height:0;}
+.wave-track{display:flex;width:200%;}
+.wave-track svg{flex:0 0 50%;width:50%;height:auto;display:block;}
+@media (prefers-reduced-motion: no-preference){
+  .wave-track{animation:waveScroll 22s linear infinite;}
+}
+@keyframes waveScroll{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+
+/* ============ HERO ============ */
+.hero{position:relative;padding-top:clamp(8.5rem,14vw,11rem);padding-bottom:0;background:var(--foam);overflow:hidden;}
+.hero .current-field .blob{opacity:.5;}
+.hero .b1{width:420px;height:420px;left:-120px;top:60px;background:radial-gradient(circle at 35% 35%,var(--tide-light),var(--tide) 60%,transparent 100%);}
+.hero .b2{width:380px;height:380px;right:-100px;top:-60px;background:radial-gradient(circle at 60% 40%,var(--current),var(--abyss-soft) 70%,transparent 100%);opacity:.28;}
+.hero .b3{width:300px;height:300px;right:10%;bottom:-120px;background:radial-gradient(circle at 50% 50%,var(--coral),transparent 75%);opacity:.18;}
+
+.hero-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:clamp(2.5rem,5vw,4rem);align-items:center;position:relative;z-index:1;}
+.hero-copy h1{margin-bottom:1.3rem;}
+.hero-copy p{color:var(--slate);font-size:1.08rem;max-width:540px;margin-bottom:.95rem;}
+.hero-ctas{display:flex;flex-wrap:wrap;gap:1rem;margin-top:1.8rem;}
+.hero-trust{margin-top:1.3rem;font-size:.85rem;color:var(--slate-soft);display:flex;align-items:center;gap:.5rem;}
+.hero-trust .dot{width:5px;height:5px;border-radius:50%;background:var(--slate-soft);}
+
+/* floating dashboard card */
+.hero-visual{position:relative;height:clamp(320px,38vw,440px);}
+.float-card{
+  position:absolute;background:rgba(255,255,255,.78);
+  border:1px solid rgba(255,255,255,.9);
+  border-radius:20px;box-shadow:var(--shadow-lg);
+  backdrop-filter:blur(18px);
+  padding:1.3rem;
+}
+.float-card--main{width:min(330px,86%);left:50%;top:8%;transform:translateX(-50%);z-index:2;}
+.float-card--accent{width:200px;right:0;bottom:2%;z-index:1;padding:1rem;}
+@media (prefers-reduced-motion: no-preference){
+  .float-card--main{animation:bob 7s ease-in-out infinite;}
+  .float-card--accent{animation:bobSmall 6s ease-in-out infinite;}
+}
+@keyframes bob{0%,100%{transform:translateX(-50%) translateY(0) rotate(-.6deg);}50%{transform:translateX(-50%) translateY(-14px) rotate(.6deg);}}
+@keyframes bobSmall{0%,100%{transform:translateY(0) rotate(2.2deg);}50%{transform:translateY(-9px) rotate(-1.4deg);}}
+.fc-head{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem;}
+.fc-avatar{width:34px;height:34px;border-radius:50%;background:var(--grad-tide);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;font-family:'Fraunces',serif;}
+.fc-name{font-weight:700;font-size:.92rem;}
+.fc-live{display:flex;align-items:center;gap:.4rem;font-size:.74rem;color:var(--current);margin-left:auto;font-family:'IBM Plex Mono',monospace;}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--tide);}
+@media (prefers-reduced-motion: no-preference){.live-dot{animation:pulseDot 2.2s infinite;}}
+@keyframes pulseDot{0%{box-shadow:0 0 0 0 rgba(21,184,201,.55);}70%{box-shadow:0 0 0 7px rgba(21,184,201,0);}100%{box-shadow:0 0 0 0 rgba(21,184,201,0);}}
+.fc-row{display:flex;align-items:center;justify-content:space-between;padding:.55rem 0;border-top:1px solid var(--line-soft);font-size:.86rem;}
+.fc-row:first-of-type{border-top:none;}
+.fc-row .label{display:flex;align-items:center;gap:.5rem;color:var(--slate);}
+.fc-row .label .use-icon{width:1rem;height:1rem;color:var(--current);}
+.fc-row .val{font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:.82rem;}
+.fc-bar{height:5px;border-radius:3px;background:var(--line-soft);margin-top:.3rem;overflow:hidden;}
+.fc-bar i{display:block;height:100%;width:46%;background:var(--grad-tide);border-radius:3px;}
+.fc-accent-title{font-size:.72rem;color:var(--slate);font-family:'IBM Plex Mono',monospace;letter-spacing:.04em;margin-bottom:.5rem;}
+.fc-accent-num{font-family:'Fraunces',serif;font-weight:600;font-size:1.25rem;color:var(--current);margin-bottom:.5rem;}
+.mini-bars{display:flex;align-items:flex-end;gap:5px;height:34px;}
+.mini-bars i{flex:1;background:var(--tide);border-radius:2px;opacity:.85;}
+
+/* ============ HERO RESPONSIVE ============ */
+@media (max-width:840px){
+  .hero{padding-bottom:3rem;}
+  .hero-grid{grid-template-columns:1fr;}
+  .hero-visual{height:clamp(220px,55vw,300px);margin-top:2.5rem;}
+  .hero-copy p{max-width:100%;}
+}
+@media (max-width:480px){
+  .float-card--accent{display:none;}
+  .hero-visual{height:240px;}
+  .hero-ctas{flex-direction:column;align-items:flex-start;}
+  .hero-ctas .btn{width:100%;justify-content:center;}
+}
+
+/* ============ STATS STRIP ============ */
+.stats{background:var(--foam);border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1.5rem;}
+.stat{text-align:center;position:relative;padding:1.6rem 1rem;}
+.stat:not(:last-child)::after{content:"";position:absolute;right:0;top:20%;bottom:20%;width:1px;background:var(--line);}
+.stat .num{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:clamp(1.5rem,2.6vw,2rem);color:var(--current);}
+.stat .lbl{font-size:.85rem;color:var(--slate);margin-top:.3rem;}
+@media (max-width:760px){.stats-row{grid-template-columns:repeat(2,1fr);}.stat:nth-child(2)::after{display:none;}}
+
+/* ============ REVEAL ============ */
+[data-reveal]{opacity:0;transform:translateY(26px);transition:opacity .8s var(--ease-flow),transform .8s var(--ease-flow);}
+[data-reveal].is-visible{opacity:1;transform:translateY(0);}
+@media (prefers-reduced-motion: reduce){[data-reveal]{opacity:1;transform:none;transition:none;}}
+
+/* ============ PHOTO FRAMES ============ */
+.photo-frame{position:relative;overflow:hidden;background:var(--line-soft);}
+.photo-frame img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(.9) contrast(1.04);transition:transform .7s var(--ease-flow);}
+.photo-frame::after{content:"";position:absolute;inset:0;background:linear-gradient(165deg,rgba(12,100,120,.22),rgba(21,184,201,.05) 55%,rgba(255,255,255,0) 85%);mix-blend-mode:soft-light;pointer-events:none;}
+.photo-frame--dark::after{background:linear-gradient(165deg,rgba(7,18,30,.55),rgba(21,184,201,.08) 60%,rgba(7,18,30,.12));mix-blend-mode:multiply;}
+.problem-card:hover .photo-frame img,
+.feature-card:hover .photo-frame img,
+.glass-card:hover .photo-frame img,
+.market-card:hover .photo-frame img,
+.how-photo:hover img{transform:scale(1.06);}
+
+/* ============ PROBLEM ============ */
+.problem{background:var(--sand);}
+.problem-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.1rem;margin-top:2.8rem;}
+.problem-card{
+  background:#fff;border:1px solid #F2E3DC;border-radius:18px;overflow:hidden;
+  box-shadow:var(--shadow-sm);
+  transition:transform .35s var(--ease-flow),box-shadow .35s var(--ease-flow),border-color .35s;
+}
+.problem-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-md);border-color:rgba(255,111,89,.4);}
+.problem-card .photo-frame{aspect-ratio:4/3;}
+.problem-card p{font-weight:600;font-size:.95rem;color:var(--ink);padding:1.1rem 1.3rem 1.35rem;}
+@media (max-width:900px){.problem-grid{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:600px){.problem-grid{grid-template-columns:1fr;}}
+
+/* ============ SOLUTION (dark) ============ */
+.solution{background:var(--abyss);color:#fff;overflow:hidden;}
+.solution .current-field .blob{filter:blur(90px);}
+.solution .b1{width:480px;height:480px;left:-140px;top:-80px;background:radial-gradient(circle,var(--tide),transparent 70%);opacity:.32;mix-blend-mode:screen;}
+.solution .b2{width:420px;height:420px;right:-120px;bottom:-140px;background:radial-gradient(circle,var(--current),transparent 70%);opacity:.4;mix-blend-mode:screen;}
+.solution .b3{width:300px;height:300px;left:40%;top:30%;background:radial-gradient(circle,var(--coral),transparent 75%);opacity:.12;mix-blend-mode:screen;}
+.solution-head{max-width:640px;margin-inline:auto;text-align:center;position:relative;z-index:1;}
+.solution-head h2{color:#fff;}
+.solution-head .section-sub{color:rgba(255,255,255,.62);}
+.solution-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.4rem;margin-top:3rem;position:relative;z-index:1;}
+.glass-card{
+  background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:var(--radius-card);
+  overflow:hidden;
+  backdrop-filter:blur(6px);
+  transition:transform .35s var(--ease-flow),background .35s,border-color .35s;
+}
+.glass-card:hover{transform:translateY(-6px);background:rgba(255,255,255,.08);border-color:rgba(143,233,239,.4);}
+.glass-card .photo-frame{aspect-ratio:16/10;}
+.glass-card-body{padding:1.6rem 1.7rem 1.9rem;}
+.glass-card h3{color:#fff;margin-bottom:.5rem;}
+.glass-card p{color:rgba(255,255,255,.6);font-size:.93rem;}
+@media (max-width:900px){.solution-grid{grid-template-columns:1fr;max-width:520px;margin-inline:auto;}}
+@media (max-width:600px){.solution-grid{max-width:100%;}}
+
+/* bubbles (water signature) */
+.bubble-field{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0;}
+.bubble{position:absolute;bottom:-30px;border-radius:50%;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.9),rgba(255,255,255,.04) 70%);}
+@media (prefers-reduced-motion: no-preference){.bubble{animation-name:rise;animation-timing-function:ease-in;animation-iteration-count:infinite;}}
+@keyframes rise{0%{transform:translateY(0) scale(.5);opacity:0;}8%{opacity:.65;}88%{opacity:.35;}100%{transform:translateY(-560px) scale(1);opacity:0;}}
+
+/* ============ FEATURES ============ */
+.features{background:#fff;}
+.features-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1.2rem;margin-top:2.8rem;}
+.feature-card{
+  border:1px solid var(--line);border-radius:var(--radius-card);
+  background:#fff;overflow:hidden;
+  transition:transform .35s var(--ease-flow),box-shadow .35s var(--ease-flow),border-color .35s;
+}
+.feature-card:hover{transform:translateY(-5px);box-shadow:var(--shadow-md);border-color:rgba(21,184,201,.35);}
+.feature-card .photo-frame{aspect-ratio:4/3;}
+.feature-card-body{padding:1.4rem 1.5rem 1.6rem;}
+.feature-card h3{margin-bottom:.45rem;font-size:1.05rem;}
+.feature-card p{color:var(--slate);font-size:.9rem;}
+@media (max-width:980px){.features-grid{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:560px){.features-grid{grid-template-columns:1fr;}}
+
+/* ============ TARGET MARKET ============ */
+.market{background:#EEF5F6;}
+.market-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.4rem;margin-top:2.8rem;}
+.market-card{background:#fff;border-radius:var(--radius-card);overflow:hidden;border:1px solid var(--line);box-shadow:var(--shadow-sm);transition:transform .35s var(--ease-flow),box-shadow .35s var(--ease-flow);}
+.market-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-md);}
+.market-card .photo-frame{aspect-ratio:16/9;}
+.market-card-body{padding:1.7rem 2rem 2rem;}
+.market-head{margin-bottom:1.4rem;}
+.market-card h3{font-size:1.1rem;}
+.market-list{display:flex;flex-direction:column;gap:.85rem;}
+.market-list li{display:flex;align-items:center;gap:.75rem;font-size:.95rem;color:var(--ink);list-style:none;}
+.market-list .dot-mark{width:6px;height:6px;border-radius:50%;background:var(--tide);flex:none;}
+@media (max-width:760px){.market-grid{grid-template-columns:1fr;}}
+
+/* ============ PRICING ============ */
+.pricing{background:#fff;}
+.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.3rem;margin-top:3rem;align-items:stretch;}
+.price-card{
+  border:1px solid var(--line);border-radius:var(--radius-card);
+  padding:2.1rem 1.8rem;display:flex;flex-direction:column;
+  background:#fff;position:relative;
+  transition:transform .35s var(--ease-flow),box-shadow .35s var(--ease-flow);
+}
+.price-card.popular{
+  border-color:var(--tide);box-shadow:0 0 0 1px var(--tide),0 24px 50px -22px rgba(21,184,201,.45);
+}
+.price-card:hover{transform:translateY(-5px);}
+.popular-tag{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--grad-tide);color:#fff;font-size:.72rem;font-weight:700;padding:.35rem .9rem;border-radius:var(--radius-pill);box-shadow:var(--shadow-sm);}
+.price-name{font-weight:700;font-size:1.05rem;margin-bottom:.4rem;}
+.price-desc{color:var(--slate);font-size:.88rem;min-height:2.6rem;}
+.price-tag{display:flex;align-items:baseline;gap:.3rem;margin:1.3rem 0 1.5rem;}
+.price-tag .amt{font-family:'Fraunces',serif;font-weight:600;font-size:2.6rem;color:var(--ink);}
+.price-tag .per{color:var(--slate);font-size:.92rem;}
+.price-list{display:flex;flex-direction:column;gap:.75rem;margin-bottom:1.8rem;flex:1;}
+.price-list li{display:flex;align-items:flex-start;gap:.6rem;font-size:.9rem;color:var(--ink);list-style:none;}
+.price-list .use-icon{width:1.05rem;height:1.05rem;color:var(--tide);flex:none;margin-top:.15rem;}
+.price-list li.warn{color:#B9682E;}
+.price-list li.warn .use-icon{color:#E08A2B;}
+.price-card .btn{width:100%;}
+@media (max-width:980px){.pricing-grid{grid-template-columns:1fr;max-width:420px;margin-inline:auto;}}
+
+/* ============ HOW IT WORKS ============ */
+.how{background:var(--foam);position:relative;}
+.how-steps{display:grid;grid-template-columns:repeat(4,1fr);gap:1.6rem;margin-top:3.2rem;position:relative;}
+.how-step{position:relative;z-index:1;text-align:center;display:flex;flex-direction:column;align-items:center;}
+.how-photo{position:relative;width:100%;aspect-ratio:4/3;border-radius:16px;overflow:hidden;box-shadow:var(--shadow-sm);margin-bottom:1.5rem;}
+.how-num{
+  position:absolute;right:10px;bottom:-16px;
+  width:38px;height:38px;border-radius:50%;background:var(--grad-tide);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-family:'Fraunces',serif;font-weight:600;font-size:1rem;
+  box-shadow:0 10px 24px -8px rgba(12,100,120,.5);border:3px solid var(--foam);
+}
+.how-num-solo{
+  width:56px;height:56px;border-radius:50%;
+  background:var(--grad-tide);color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Fraunces',serif;font-weight:600;font-size:1.4rem;
+  box-shadow:0 10px 24px -8px rgba(12,100,120,.45);
+  margin-bottom:1.4rem;
+}
+.how-step h3{font-size:1rem;margin-bottom:.4rem;}
+.how-step p{font-size:.88rem;color:var(--slate);max-width:220px;}
+@media (max-width:900px){.how-steps{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:560px){.how-steps{grid-template-columns:1fr;}.how-step p{max-width:100%;}}
+@media (max-width:760px){.market-card-body{padding:1.2rem 1.4rem 1.5rem;}}
+
+/* ============ FINAL CTA ============ */
+.cta{background:var(--abyss);color:#fff;text-align:center;overflow:hidden;position:relative;}
+.cta .current-field .blob{filter:blur(100px);}
+.cta .b1{width:520px;height:520px;left:-160px;top:-160px;background:radial-gradient(circle,var(--tide),transparent 70%);opacity:.3;mix-blend-mode:screen;}
+.cta .b2{width:460px;height:460px;right:-160px;bottom:-160px;background:radial-gradient(circle,var(--current),transparent 70%);opacity:.4;mix-blend-mode:screen;}
+.cta-inner{position:relative;z-index:1;max-width:620px;margin-inline:auto;}
+.cta h2{color:#fff;margin-bottom:.9rem;}
+.cta p{color:rgba(255,255,255,.65);margin-bottom:2rem;}
+.cta-trust{margin-top:1.1rem;font-size:.84rem;color:rgba(255,255,255,.45);}
+
+/* ============ FOOTER ============ */
+footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
+.footer-row{display:flex;flex-direction:column;align-items:center;gap:1.1rem;text-align:center;}
+.footer-logo{display:flex;align-items:center;gap:.5rem;color:#fff;font-family:'Fraunces',serif;font-weight:600;font-size:1.05rem;}
+.footer-logo .use-icon{width:1.5rem;height:1.5rem;color:var(--tide-light);}
+.footer-links{display:flex;gap:1.6rem;font-size:.88rem;}
+.footer-links a:hover{color:#fff;}
+.footer-copy{font-size:.8rem;color:rgba(255,255,255,.35);margin-top:.4rem;}
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<header class="nav" id="siteNav">
+  <div class="wrap nav-row">
+    <a href="#top" class="logo"><img src="/logo.png" alt="FamilyGuard" class="logo-img"></a>
+    <nav class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#how-it-works">How it works</a>
+    </nav>
+    <div class="nav-right">
+      <a href="/login" class="nav-signin">Sign in</a>
+      <a href="/login" class="btn btn-primary btn-sm">Get Started Free</a>
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false">
+        <svg class="use-icon ic-menu"><use href="#ic-menu"/></svg>
+        <svg class="use-icon ic-close"><use href="#ic-close"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="current-field" aria-hidden="true">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+    <div class="blob b3"></div>
+  </div>
+  <div class="wrap">
+    <div class="hero-grid">
+      <div class="hero-copy" data-reveal>
+        <span class="eyebrow">About FamilyGuard</span>
+        <h1>One platform.<br>Complete <em>family protection.</em></h1>
+        <p>FamilyGuard gives parents complete visibility and calm control over their children's digital lives — from a single, easy-to-use dashboard.</p>
+        <p>As kids spend more of childhood online, the old patchwork of separate apps can't keep up. FamilyGuard replaces it with one steady current of real-time monitoring, intelligent alerts, and parental controls across every phone, tablet, and computer in the house.</p>
+        <div class="hero-ctas">
+          <a href="#pricing" class="btn btn-primary">Get Started Free <svg class="use-icon"><use href="#ic-arrow"/></svg></a>
+          <a href="#how-it-works" class="btn btn-secondary">See how it works</a>
+        </div>
+        <div class="hero-trust">No credit card required <span class="dot"></span> Free for 7 days <span class="dot"></span> Cancel anytime</div>
+      </div>
+      <div class="hero-visual" data-reveal>
+        <div class="float-card float-card--main">
+          <div class="fc-head">
+            <div class="fc-avatar">E</div>
+            <div class="fc-name">Emma's iPhone</div>
+            <div class="fc-live"><span class="live-dot"></span>Active now</div>
+          </div>
+          <div class="fc-row">
+            <span class="label"><svg class="use-icon"><use href="#ic-clock"/></svg>Screen time today</span>
+            <span class="val">2h 14m</span>
+          </div>
+          <div class="fc-bar"><i></i></div>
+          <div class="fc-row">
+            <span class="label"><svg class="use-icon"><use href="#ic-pin"/></svg>Location</span>
+            <span class="val">Home ✓</span>
+          </div>
+          <div class="fc-row">
+            <span class="label"><svg class="use-icon"><use href="#ic-shieldcheck"/></svg>Alerts today</span>
+            <span class="val">None</span>
+          </div>
+        </div>
+        <div class="float-card float-card--accent">
+          <div class="fc-accent-title">WEEKLY REPORT</div>
+          <div class="fc-accent-num">↓ 12% safer</div>
+          <div class="mini-bars">
+            <i style="height:40%"></i><i style="height:65%"></i><i style="height:50%"></i><i style="height:85%"></i><i style="height:70%"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ STATS ============ -->
+<section class="stats section--tight">
+  <div class="wrap stats-row">
+    <div class="stat" data-reveal>
+      <div class="num"><span data-target="50" data-suffix="K+">0</span></div>
+      <div class="lbl">Families protected</div>
+    </div>
+    <div class="stat" data-reveal>
+      <div class="num"><span data-target="120" data-suffix="+">0</span></div>
+      <div class="lbl">Countries</div>
+    </div>
+    <div class="stat" data-reveal>
+      <div class="num"><span data-target="4.8" data-suffix="/5">0</span></div>
+      <div class="lbl">Average rating</div>
+    </div>
+    <div class="stat" data-reveal>
+      <div class="num">24/7</div>
+      <div class="lbl">Real-time monitoring</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PROBLEM ============ -->
+<section class="problem section">
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow eyebrow--coral">The Problem</span>
+      <h2>Modern parents are navigating turbulent waters</h2>
+      <p class="section-sub">Most families cobble together multiple apps to manage these risks — creating blind spots exactly where protection matters most.</p>
+    </div>
+    <div class="problem-grid">
+      <div class="problem-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/27177568/pexels-photo-27177568.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Three children engrossed in their phones and tablets on the sofa" loading="lazy"></div><p>Excessive screen time</p></div>
+      <div class="problem-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/6255934/pexels-photo-6255934.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Teen lounging on the sofa, absorbed in her phone" loading="lazy"></div><p>Social media addiction</p></div>
+      <div class="problem-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/6958624/pexels-photo-6958624.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Teen in a hoodie quietly reading something on his phone" loading="lazy"></div><p>Cyberbullying</p></div>
+      <div class="problem-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/8841353/pexels-photo-8841353.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Father and son having a heartfelt conversation at home" loading="lazy"></div><p>Online predators</p></div>
+      <div class="problem-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/6594306/pexels-photo-6594306.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Teen wearing earphones, absorbed in her phone" loading="lazy"></div><p>Inappropriate content exposure</p></div>
+      <div class="problem-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/9795002/pexels-photo-9795002.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Close-up of a phone displaying a location-tracking app" loading="lazy"></div><p>Location and safety concerns</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- wave: sand -> abyss -->
+<div class="wave" style="color:var(--abyss);background:var(--sand);">
+  <div class="wave-track">
+    <svg viewBox="0 0 1200 120" preserveAspectRatio="none" width="100%" height="70"><path fill="currentColor" d="M0,70 Q100,30 200,70 T400,70 T600,70 T800,70 T1000,70 T1200,70 L1200,120 L0,120 Z"/></svg>
+    <svg viewBox="0 0 1200 120" preserveAspectRatio="none" width="100%" height="70"><path fill="currentColor" d="M0,70 Q100,30 200,70 T400,70 T600,70 T800,70 T1000,70 T1200,70 L1200,120 L0,120 Z"/></svg>
+  </div>
+</div>
+
+<!-- ============ SOLUTION (dark) ============ -->
+<section class="solution section">
+  <div class="current-field" aria-hidden="true">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+    <div class="blob b3"></div>
+  </div>
+  <div class="bubble-field" data-bubbles="16" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="solution-head" data-reveal>
+      <span class="eyebrow eyebrow--light">The Solution</span>
+      <h2>One calm current. Total protection.</h2>
+      <p class="section-sub">FamilyGuard merges every parental control and safety tool into a single platform — replacing the scattered patchwork with one unified current that leaves no gaps in protection.</p>
+    </div>
+    <div class="solution-grid">
+      <div class="glass-card" data-reveal>
+        <div class="photo-frame photo-frame--dark"><img src="https://images.pexels.com/photos/36740854/pexels-photo-36740854.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Hand holding a padlock, symbolizing digital protection" loading="lazy"></div>
+        <div class="glass-card-body">
+          <h3>Complete Protection</h3>
+          <p>Every device, every app, every platform — monitored from one dashboard.</p>
+        </div>
+      </div>
+      <div class="glass-card" data-reveal>
+        <div class="photo-frame photo-frame--dark"><img src="https://images.pexels.com/photos/4979123/pexels-photo-4979123.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Person instantly checking a notification on their phone" loading="lazy"></div>
+        <div class="glass-card-body">
+          <h3>Real-Time Response</h3>
+          <p>Instant alerts and controls so you can act the moment something needs attention.</p>
+        </div>
+      </div>
+      <div class="glass-card" data-reveal>
+        <div class="photo-frame photo-frame--dark"><img src="https://images.pexels.com/photos/17483874/pexels-photo-17483874.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Abstract visualization of a neural network representing intelligent detection" loading="lazy"></div>
+        <div class="glass-card-body">
+          <h3>Intelligent Detection</h3>
+          <p>AI-powered analysis identifies risks before they become serious threats.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+<section class="features section" id="features">
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow">Core Features</span>
+      <h2>Everything you need to protect your family</h2>
+      <p class="section-sub">Powerful tools designed for modern parents managing their children's digital wellbeing.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/7943950/pexels-photo-7943950.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Mother and daughter looking at a tablet together on the couch" loading="lazy"></div><div class="feature-card-body"><h3>Screen Time Management</h3><p>Set daily limits, schedules, and device usage rules.</p></div></div>
+      <div class="feature-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/8296107/pexels-photo-8296107.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Close-up of a smartphone screen showing app icons" loading="lazy"></div><div class="feature-card-body"><h3>App Monitoring &amp; Control</h3><p>View app usage, block apps, and receive activity reports.</p></div></div>
+      <div class="feature-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/6169859/pexels-photo-6169859.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Person holding a phone displaying GPS navigation" loading="lazy"></div><div class="feature-card-body"><h3>Real-Time Location Tracking</h3><p>Track children's locations with GPS and geofencing alerts.</p></div></div>
+      <div class="feature-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/6611936/pexels-photo-6611936.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Hands typing on a laptop, representing safe browsing" loading="lazy"></div><div class="feature-card-body"><h3>Safe Browsing Protection</h3><p>Block harmful websites and inappropriate content automatically.</p></div></div>
+      <div class="feature-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/6256009/pexels-photo-6256009.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Teen on the sofa with headphones, using her phone" loading="lazy"></div><div class="feature-card-body"><h3>Social Media Monitoring</h3><p>Monitor activity across major platforms and identify potential risks.</p></div></div>
+      <div class="feature-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/17485706/pexels-photo-17485706.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Abstract AI visualization representing risk detection" loading="lazy"></div><div class="feature-card-body"><h3>AI-Powered Risk Detection</h3><p>Detect cyberbullying, predators, harmful content, and suspicious behavior.</p></div></div>
+      <div class="feature-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/7204110/pexels-photo-7204110.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Mother and daughter smiling together on the couch" loading="lazy"></div><div class="feature-card-body"><h3>Family Dashboard</h3><p>Manage all family devices from a single unified control center.</p></div></div>
+      <div class="feature-card" data-reveal><div class="photo-frame"><img src="https://images.pexels.com/photos/7821762/pexels-photo-7821762.jpeg?auto=compress&cs=tinysrgb&w=700" alt="Close-up of a phone displaying an alert notification" loading="lazy"></div><div class="feature-card-body"><h3>Instant Alerts</h3><p>Get notified for dangerous content, location changes, and suspicious behavior.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TARGET MARKET ============ -->
+<section class="market section">
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow">Target Market</span>
+      <h2>Built for families and institutions</h2>
+      <p class="section-sub">FamilyGuard serves anyone responsible for the digital safety of children.</p>
+    </div>
+    <div class="market-grid">
+      <div class="market-card" data-reveal>
+        <div class="photo-frame"><img src="https://images.pexels.com/photos/6297607/pexels-photo-6297607.jpeg?auto=compress&cs=tinysrgb&w=900" alt="Mother and daughter bonding together on the couch at home" loading="lazy"></div>
+        <div class="market-card-body">
+          <div class="market-head"><h3>Primary Customers</h3></div>
+          <ul class="market-list">
+            <li><span class="dot-mark"></span>Parents with children aged 5–18</li>
+            <li><span class="dot-mark"></span>Working families</li>
+            <li><span class="dot-mark"></span>Schools and educational institutions</li>
+          </ul>
+        </div>
+      </div>
+      <div class="market-card" data-reveal>
+        <div class="photo-frame"><img src="https://images.pexels.com/photos/8926900/pexels-photo-8926900.jpeg?auto=compress&cs=tinysrgb&w=900" alt="Teacher helping a student on a computer in the classroom" loading="lazy"></div>
+        <div class="market-card-body">
+          <div class="market-head"><h3>Secondary Customers</h3></div>
+          <ul class="market-list">
+            <li><span class="dot-mark"></span>Childcare organizations</li>
+            <li><span class="dot-mark"></span>Family counselors</li>
+            <li><span class="dot-mark"></span>Government child protection programs</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PRICING ============ -->
+<section class="pricing section" id="pricing">
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow">Pricing</span>
+      <h2>Simple, transparent pricing</h2>
+      <p class="section-sub">Start free and upgrade when you're ready. No hidden fees. No contracts. No surprises.</p>
+    </div>
+    <div class="pricing-grid">
+      <div class="price-card" data-reveal>
+        <div class="price-name">Free Plan</div>
+        <p class="price-desc">Perfect for parents who want to get started.</p>
+        <div class="price-tag"><span class="amt">$0</span><span class="per">/7 days</span></div>
+        <ul class="price-list">
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Basic screen time monitoring</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Daily activity reports</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>1 child device</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Basic parental controls</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Email support</li>
+          <li class="warn"><svg class="use-icon"><use href="#ic-shieldwarn"/></svg>Trial expires after 7 days</li>
+        </ul>
+        <a href="/login" class="btn btn-secondary">Start Free</a>
+      </div>
+      <div class="price-card popular" data-reveal>
+        <span class="popular-tag">Most Popular</span>
+        <div class="price-name">Premium Plan</div>
+        <p class="price-desc">Everything parents need for complete digital protection.</p>
+        <div class="price-tag"><span class="amt">$9.99</span><span class="per">/mo</span></div>
+        <ul class="price-list">
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Everything in Free</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Real-time GPS tracking</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Geofencing alerts</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>App usage monitoring</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Website filtering &amp; blocking</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Screen time scheduling</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Up to 5 child devices</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Priority support</li>
+        </ul>
+        <a href="/login" class="btn btn-primary">Get Premium</a>
+      </div>
+      <div class="price-card" data-reveal>
+        <div class="price-name">Family Plus</div>
+        <p class="price-desc">Advanced protection for larger families.</p>
+        <div class="price-tag"><span class="amt">$14.99</span><span class="per">/mo</span></div>
+        <ul class="price-list">
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Everything in Premium</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Unlimited child devices</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>AI-powered safety alerts</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Social media monitoring</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Cyberbullying detection</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Advanced family reports</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Instant emergency notifications</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Premium support</li>
+        </ul>
+        <a href="/login" class="btn btn-secondary">Get Family Plus</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section class="how section" id="how-it-works">
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow">How It Works</span>
+      <h2>Up and running in minutes</h2>
+      <p class="section-sub">No technical knowledge required.</p>
+    </div>
+    <div class="how-steps">
+      <div class="how-step" data-reveal><div class="how-num-solo">1</div><h3>Create your account</h3><p>Sign up as a parent in under a minute.</p></div>
+      <div class="how-step" data-reveal><div class="how-num-solo">2</div><h3>Add your child</h3><p>Create a child profile with their name and age.</p></div>
+      <div class="how-step" data-reveal><div class="how-num-solo">3</div><h3>Link their device</h3><p>Enter the 8-character code on the child's phone.</p></div>
+      <div class="how-step" data-reveal><div class="how-num-solo">4</div><h3>Stay in control</h3><p>Monitor, block, and protect from your dashboard.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- wave: foam -> abyss -->
+<div class="wave" style="color:var(--abyss);background:var(--foam);">
+  <div class="wave-track">
+    <svg viewBox="0 0 1200 120" preserveAspectRatio="none" width="100%" height="70"><path fill="currentColor" d="M0,70 Q100,110 200,70 T400,70 T600,70 T800,70 T1000,70 T1200,70 L1200,120 L0,120 Z"/></svg>
+    <svg viewBox="0 0 1200 120" preserveAspectRatio="none" width="100%" height="70"><path fill="currentColor" d="M0,70 Q100,110 200,70 T400,70 T600,70 T800,70 T1000,70 T1200,70 L1200,120 L0,120 Z"/></svg>
+  </div>
+</div>
+
+<!-- ============ FINAL CTA ============ -->
+<section class="cta section">
+  <div class="current-field" aria-hidden="true">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+  </div>
+  <div class="bubble-field" data-bubbles="12" aria-hidden="true"></div>
+  <div class="wrap cta-inner" data-reveal>
+    <h2>Start protecting your family today</h2>
+    <p>Join thousands of parents using FamilyGuard to keep their children safe online.</p>
+    <a href="/login" class="btn btn-light">Create Free Account</a>
+    <div class="cta-trust">Free 7-day trial · No credit card required</div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="wrap footer-row">
+    <div class="footer-logo"><img src="/logo.png" alt="FamilyGuard" class="logo-img logo-img--footer"></div>
+    <div class="footer-links">
+      <a href="/privacy-policy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+    </div>
+    <div class="footer-copy">&copy; 2026 FamilyGuard. Parental Control &amp; Digital Safety.</div>
+  </div>
+</footer>
+
+<script>
+// ---- Sticky nav ----
+const nav = document.getElementById('siteNav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('is-scrolled', window.scrollY > 24);
+}, { passive: true });
+
+// ---- Mobile nav toggle ----
+const navToggle = document.getElementById('navToggle');
+navToggle.addEventListener('click', () => {
+  const open = document.body.classList.toggle('nav-open');
+  navToggle.setAttribute('aria-expanded', open);
+});
+document.querySelectorAll('.nav-links a').forEach(a => {
+  a.addEventListener('click', () => document.body.classList.remove('nav-open'));
+});
+
+// ---- Button ripple (water-drop click effect) ----
+document.querySelectorAll('.btn').forEach(btn => {
+  btn.addEventListener('click', function (e) {
+    const rect = this.getBoundingClientRect();
+    const ripple = document.createElement('span');
+    ripple.className = 'btn-ripple';
+    const size = Math.max(rect.width, rect.height) * 1.8;
+    ripple.style.width = ripple.style.height = size + 'px';
+    ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+    ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+    this.appendChild(ripple);
+    ripple.addEventListener('animationend', () => ripple.remove());
+  });
+});
+
+// ---- Scroll reveal ----
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!reduceMotion && 'IntersectionObserver' in window) {
+  const revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('is-visible');
+        revealObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('[data-reveal]').forEach(el => revealObserver.observe(el));
+} else {
+  document.querySelectorAll('[data-reveal]').forEach(el => el.classList.add('is-visible'));
+}
+
+// ---- Animated counters ----
+function animateCount(el) {
+  const raw = el.dataset.target;
+  const target = parseFloat(raw);
+  const decimals = raw.includes('.') ? 1 : 0;
+  const suffix = el.dataset.suffix || '';
+  const dur = 1300;
+  const start = performance.now();
+  function step(now) {
+    const p = Math.min((now - start) / dur, 1);
+    const eased = 1 - Math.pow(1 - p, 3);
+    const val = target * eased;
+    el.textContent = (decimals ? val.toFixed(decimals) : Math.round(val)) + suffix;
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+if ('IntersectionObserver' in window) {
+  const counterObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        animateCount(entry.target);
+        counterObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.4 });
+  document.querySelectorAll('[data-target]').forEach(el => counterObserver.observe(el));
+}
+
+// ---- Rising bubbles (water signature, dark sections) ----
+if (!reduceMotion) {
+  document.querySelectorAll('[data-bubbles]').forEach(container => {
+    const count = parseInt(container.dataset.bubbles, 10) || 12;
+    for (let i = 0; i < count; i++) {
+      const b = document.createElement('span');
+      b.className = 'bubble';
+      const size = 4 + Math.random() * 10;
+      b.style.width = b.style.height = size + 'px';
+      b.style.left = Math.random() * 100 + '%';
+      b.style.animationDuration = (8 + Math.random() * 10) + 's';
+      b.style.animationDelay = (Math.random() * 10) + 's';
+      container.appendChild(b);
+    }
+  });
+}
+</script>
+</body>
+</html>

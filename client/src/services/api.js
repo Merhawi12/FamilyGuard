@@ -28,7 +28,10 @@ export const auth = {
   verifyEmail: (data) => api.post('/auth/verify-email', data),
   resendCode: (data) => api.post('/auth/resend-code', data),
   login: (data) => api.post('/auth/login', data),
+  logout: () => api.post('/auth/logout'),
   me: () => api.get('/auth/me'),
+  getNotificationPrefs: () => api.get('/auth/notification-prefs'),
+  updateNotificationPrefs: (data) => api.put('/auth/notification-prefs', data),
 };
 
 export const children = {
@@ -80,6 +83,36 @@ export const admin = {
   toggleBlock: (id) => api.patch(`/admin/clients/${id}/toggle-block`),
   updatePlan: (id, plan) => api.patch(`/admin/clients/${id}/plan`, { plan }),
   deleteClient: (id) => api.delete(`/admin/clients/${id}`),
+
+  listUsers: (params) => api.get('/admin/users', { params }),
+  createUser: (data) => api.post('/admin/users', data),
+  updateUser: (id, data) => api.put(`/admin/users/${id}`, data),
+  updateRole: (id, data) => api.patch(`/admin/users/${id}/role`, data),
+  approveUser: (id) => api.patch(`/admin/users/${id}/approve`),
+
+  listActiveSessions: () => api.get('/admin/sessions/active'),
+  listUserSessions: (id) => api.get(`/admin/users/${id}/sessions`),
+  forceLogoutSession: (sessionId) => api.delete(`/admin/sessions/${sessionId}`),
+  forceLogoutUser: (id) => api.delete(`/admin/users/${id}/sessions`),
+
+  listTransactions: (params) => api.get('/admin/transactions', { params }),
+  listUserTransactions: (id) => api.get(`/admin/users/${id}/transactions`),
+
+  getSettings: () => api.get('/admin/settings'),
+  updateSettings: (data) => api.put('/admin/settings', data),
+
+  getAnalytics: () => api.get('/admin/analytics'),
+
+  sendNotification: (data) => api.post('/notifications', data),
+  listSentNotifications: () => api.get('/notifications/sent'),
+
+  getAuditLogs: (params) => api.get('/audit', { params }),
+};
+
+export const notifications = {
+  list: () => api.get('/notifications'),
+  markRead: (id) => api.patch(`/notifications/${id}/read`),
+  markAllRead: () => api.patch('/notifications/read-all'),
 };
 
 export const chats = {
@@ -103,6 +136,13 @@ export const payments = {
   createCheckoutSession: (plan) => api.post('/payments/create-checkout-session', { plan }),
   customerPortal: () => api.post('/payments/customer-portal'),
   getSubscription: () => api.get('/payments/subscription'),
+};
+
+export const contacts = {
+  list: (childId) => api.get('/contacts', { params: childId ? { childId } : {} }),
+  create: (data) => api.post('/contacts', data),
+  update: (id, data) => api.put(`/contacts/${id}`, data),
+  remove: (id) => api.delete(`/contacts/${id}`),
 };
 
 export default api;

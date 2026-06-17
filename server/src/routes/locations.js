@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const { authenticate } = require('../middleware/auth');
+const { requireFeature } = require('../middleware/featureGate');
 const { postLocation, getCurrentLocation, getHistory } = require('../controllers/locationController');
 
 // Mobile app posts location — rate-limited, no auth (identified by childId+deviceId)
@@ -14,7 +15,7 @@ const locationPostLimiter = rateLimit({
 router.post('/', locationPostLimiter, postLocation);
 
 // Parent dashboard reads location — requires auth
-router.get('/:childId/current', authenticate, getCurrentLocation);
-router.get('/:childId/history', authenticate, getHistory);
+router.get('/:childId/current', authenticate, requireFeature('gps_tracking'), getCurrentLocation);
+router.get('/:childId/history', authenticate, requireFeature('gps_tracking'), getHistory);
 
 module.exports = router;

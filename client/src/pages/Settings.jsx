@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import api, { payments } from '../services/api';
+import api, { payments, auth as authApi } from '../services/api';
 
 const PLANS = [
   {
@@ -40,9 +40,12 @@ export default function Settings() {
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [subscription, setSubscription] = useState(null);
+  const [notifPrefs, setNotifPrefs] = useState(null);
+  const [notifSaved, setNotifSaved] = useState(false);
 
   useEffect(() => {
     payments.getSubscription().then(r => setSubscription(r.data)).catch(() => {});
+    authApi.getNotificationPrefs().then(r => setNotifPrefs(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -238,6 +241,90 @@ export default function Settings() {
           })}
         </div>
       </div>
+
+      {/* Notification Preferences */}
+      {notifPrefs && (
+        <div className="card">
+          <h2 className="font-semibold mb-1">Notification Preferences</h2>
+          <p className="text-sm text-gray-500 mb-4">Choose how and when you want to be notified about alerts.</p>
+
+          <div className="space-y-4">
+            {/* Email toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Email Alerts</p>
+                <p className="text-xs text-gray-400">Receive alert emails to {user?.email}</p>
+              </div>
+              <button
+                onClick={() => setNotifPrefs(p => ({ ...p, emailAlerts: !p.emailAlerts }))}
+                className={`w-11 h-6 rounded-full transition-colors ${notifPrefs.emailAlerts ? 'bg-blue-600' : 'bg-gray-200'}`}
+              >
+                <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-1 ${notifPrefs.emailAlerts ? 'translate-x-5' : 'translate-x-0'}`} />
+              </button>
+            </div>
+
+            {notifPrefs.emailAlerts && (
+              <div className="flex items-center justify-between pl-4 border-l-2 border-blue-100">
+                <div>
+                  <p className="text-sm font-medium">High severity only</p>
+                  <p className="text-xs text-gray-400">Only email for critical alerts</p>
+                </div>
+                <button
+                  onClick={() => setNotifPrefs(p => ({ ...p, emailHighOnly: !p.emailHighOnly }))}
+                  className={`w-11 h-6 rounded-full transition-colors ${notifPrefs.emailHighOnly ? 'bg-blue-600' : 'bg-gray-200'}`}
+                >
+                  <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-1 ${notifPrefs.emailHighOnly ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+            )}
+
+            {/* Per-alert-type toggles */}
+            <div>
+              <p className="text-sm font-medium mb-2">Alert Types</p>
+              <div className="space-y-2">
+                {[
+                  { key: 'left_safe_zone', label: 'Left safe zone' },
+                  { key: 'dangerous_content', label: 'Dangerous content' },
+                  { key: 'emergency_button', label: 'Emergency button' },
+                  { key: 'cyberbullying', label: 'Cyberbullying detected' },
+                  { key: 'safety_pattern', label: 'AI safety patterns' },
+                  { key: 'screen_time_exceeded', label: 'Screen time exceeded' },
+                  { key: 'blocked_app_attempt', label: 'Blocked app attempt' },
+                  { key: 'app_installed', label: 'New app installed' },
+                  { key: 'unknown_contact', label: 'Unknown contact' },
+                ].map(({ key, label }) => (
+                  <div key={key} className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">{label}</span>
+                    <button
+                      onClick={() => setNotifPrefs(p => ({ ...p, alertTypes: { ...p.alertTypes, [key]: !p.alertTypes?.[key] } }))}
+                      className={`w-9 h-5 rounded-full transition-colors ${notifPrefs.alertTypes?.[key] ? 'bg-blue-600' : 'bg-gray-200'}`}
+                    >
+                      <span className={`block w-3 h-3 bg-white rounded-full shadow transition-transform mx-1 ${notifPrefs.alertTypes?.[key] ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {notifSaved && <p className="text-sm text-green-600">Preferences saved!</p>}
+
+            <button
+              className="btn-primary"
+              onClick={async () => {
+                try {
+                  await authApi.updateNotificationPrefs(notifPrefs);
+                  setNotifSaved(true);
+                  setTimeout(() => setNotifSaved(false), 2500);
+                } catch {
+                  setError('Failed to save notification preferences');
+                }
+              }}
+            >
+              Save Preferences
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

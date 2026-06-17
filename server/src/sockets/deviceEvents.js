@@ -1,4 +1,6 @@
 const { Device, Alert, Message, Child } = require('../models');
+const { createAlert } = require('../utils/alertHelper');
+const { detectCyberbullying } = require('../utils/cyberbullyingDetector');
 
 const initSocketHandlers = (io) => {
   io.on('connection', (socket) => {
@@ -14,61 +16,25 @@ const initSocketHandlers = (io) => {
 
     // ── Existing alert types ───────────────────────────────────────────────────
     socket.on('alert:blocked_app', async ({ parentId, childId, deviceId, appName }) => {
-      const alert = await Alert.create({
-        parentId, childId, deviceId,
-        type: 'blocked_app_attempt',
-        message: `${appName} was blocked on a child device`,
-        severity: 'medium',
-      });
-      io.to(`parent:${parentId}`).emit('alert:new', alert);
+      await createAlert(io, { parentId, childId, deviceId, type: 'blocked_app_attempt', message: `${appName} was blocked on a child device`, severity: 'medium' });
     });
 
     socket.on('alert:screen_time_exceeded', async ({ parentId, childId, deviceId }) => {
-      const alert = await Alert.create({
-        parentId, childId, deviceId,
-        type: 'screen_time_exceeded',
-        message: 'Daily screen time limit has been reached',
-        severity: 'high',
-      });
-      io.to(`parent:${parentId}`).emit('alert:new', alert);
+      await createAlert(io, { parentId, childId, deviceId, type: 'screen_time_exceeded', message: 'Daily screen time limit has been reached', severity: 'high' });
     });
 
     // ── New alert types ────────────────────────────────────────────────────────
 
-    // Child installed a new app
     socket.on('alert:app_installed', async ({ parentId, childId, deviceId, appName, appPackage }) => {
-      const alert = await Alert.create({
-        parentId, childId, deviceId,
-        type: 'app_installed',
-        message: `New app installed: ${appName}`,
-        severity: 'medium',
-        metadata: JSON.stringify({ appName, appPackage }),
-      });
-      io.to(`parent:${parentId}`).emit('alert:new', alert);
+      await createAlert(io, { parentId, childId, deviceId, type: 'app_installed', message: `New app installed: ${appName}`, severity: 'medium', metadata: { appName, appPackage } });
     });
 
-    // Dangerous content detected (e.g., category flagged on device)
     socket.on('alert:dangerous_content', async ({ parentId, childId, deviceId, url, category }) => {
-      const alert = await Alert.create({
-        parentId, childId, deviceId,
-        type: 'dangerous_content',
-        message: `Dangerous content detected (${category})`,
-        severity: 'high',
-        metadata: JSON.stringify({ url, category }),
-      });
-      io.to(`parent:${parentId}`).emit('alert:new', alert);
+      await createAlert(io, { parentId, childId, deviceId, type: 'dangerous_content', message: `Dangerous content detected (${category})`, severity: 'high', metadata: { url, category } });
     });
 
-    // Unknown contact appeared (SMS/call from number not in contacts)
     socket.on('alert:unknown_contact', async ({ parentId, childId, deviceId, phoneNumber }) => {
-      const alert = await Alert.create({
-        parentId, childId, deviceId,
-        type: 'unknown_contact',
-        message: `Unknown contact attempted to reach child`,
-        severity: 'high',
-        metadata: JSON.stringify({ phoneNumber }),
-      });
-      io.to(`parent:${parentId}`).emit('alert:new', alert);
+      await createAlert(io, { parentId, childId, deviceId, type: 'unknown_contact', message: `Unknown contact attempted to reach child`, severity: 'high', metadata: { phoneNumber } });
     });
 
     // ── Activity stream ────────────────────────────────────────────────────────
@@ -109,15 +75,12 @@ const initSocketHandlers = (io) => {
         socket.emit('chat:delivered', { messageId: message.id });
 
         if (messageType === 'emergency') {
-          const alert = await Alert.create({
-            parentId: child.parentId,
-            childId: child.id,
-            type: 'emergency_button',
-            message: `Emergency alert from child: ${text?.trim()}`,
-            severity: 'high',
-            metadata: JSON.stringify({ messageId: message.id, deviceId }),
-          });
-          io.to(`parent:${child.parentId}`).emit('alert:new', alert);
+          await createAlert(io, { parentId: child.parentId, childId: child.id, type: 'emergency_button', message: `Emergency alert from child: ${text?.trim()}`, severity: 'high', metadata: { messageId: message.id, deviceId } });
+        }
+
+        const { detected, matchedKeywords } = detectCyberbullying(text?.trim());
+        if (detected) {
+          await createAlert(io, { parentId: child.parentId, childId: child.id, type: 'cyberbullying', message: 'Possible cyberbullying detected in child message', severity: 'high', metadata: { messageId: message.id, matchedKeywords } });
         }
       } catch (err) {
         console.error('[socket] chat:send error:', err.message);

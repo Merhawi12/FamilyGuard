@@ -1,8 +1,18 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const landingAtRoot = {
+  name: 'landing-at-root',
+  configureServer(server) {
+    server.middlewares.use((req, _res, next) => {
+      if (req.url === '/' || req.url === '/?') req.url = '/landing.html';
+      next();
+    });
+  },
+};
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), landingAtRoot],
   optimizeDeps: {
     include: ['leaflet'],
   },

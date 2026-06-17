@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
-const { Location, Child, Device, SafeZone, Alert } = require('../models');
+const { Location, Child, Device, SafeZone } = require('../models');
+const { createAlert } = require('../utils/alertHelper');
 
 // Haversine distance in metres between two lat/lng points
 const haversineMeters = (lat1, lng1, lat2, lng2) => {
@@ -83,27 +84,11 @@ const checkGeofences = async (req, parentId, childId, lat, lng, io) => {
     const justLeft = !insideNow && insidePrev === true;
 
     if (justEntered && zone.notifyOnEnter) {
-      const alert = await Alert.create({
-        parentId,
-        childId,
-        type: 'entered_safe_zone',
-        message: `Child arrived at ${zone.name}`,
-        severity: 'medium',
-        metadata: JSON.stringify({ zoneId: zone.id, zoneName: zone.name, lat, lng }),
-      });
-      io.to(`parent:${parentId}`).emit('alert:new', alert);
+      await createAlert(io, { parentId, childId, type: 'entered_safe_zone', message: `Child arrived at ${zone.name}`, severity: 'medium', metadata: { zoneId: zone.id, zoneName: zone.name, lat, lng } });
     }
 
     if (justLeft && zone.notifyOnLeave) {
-      const alert = await Alert.create({
-        parentId,
-        childId,
-        type: 'left_safe_zone',
-        message: `Child left ${zone.name}`,
-        severity: 'high',
-        metadata: JSON.stringify({ zoneId: zone.id, zoneName: zone.name, lat, lng }),
-      });
-      io.to(`parent:${parentId}`).emit('alert:new', alert);
+      await createAlert(io, { parentId, childId, type: 'left_safe_zone', message: `Child left ${zone.name}`, severity: 'high', metadata: { zoneId: zone.id, zoneName: zone.name, lat, lng } });
     }
   }
 };

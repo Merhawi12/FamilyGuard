@@ -1,8 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
 import Layout from './components/Layout';
-import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Children from './pages/Children';
@@ -14,9 +14,22 @@ import Settings from './pages/Settings';
 import Alerts from './pages/Alerts';
 import Location from './pages/Location';
 import Messages from './pages/Messages';
-import AdminPanel from './pages/AdminPanel';
+import AdminLayout from './pages/admin/AdminLayout';
+import AdminOverview from './pages/admin/AdminOverview';
+import AdminUsers from './pages/admin/AdminUsers';
+import AdminSessions from './pages/admin/AdminSessions';
+import AdminBilling from './pages/admin/AdminBilling';
+import AdminNotifications from './pages/admin/AdminNotifications';
+import AdminSettings from './pages/admin/AdminSettings';
+import AdminAuditLogs from './pages/admin/AdminAuditLogs';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Terms from './pages/Terms';
+import Contacts from './pages/Contacts';
+
+function GoToLanding() {
+  useEffect(() => { window.location.replace('/landing.html'); }, []);
+  return null;
+}
 
 const PrivateRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -29,7 +42,7 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<GoToLanding />} />
           <Route path="/login" element={<Login />} />
           <Route
             path="/dashboard"
@@ -50,7 +63,16 @@ export default function App() {
             <Route path="alerts" element={<Alerts />} />
             <Route path="location" element={<Location />} />
             <Route path="messages" element={<Messages />} />
-            <Route path="admin" element={<AdminPanel />} />
+            <Route path="contacts" element={<Contacts />} />
+            <Route path="admin" element={<AdminLayout />}>
+              <Route index element={<AdminOverview />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="sessions" element={<AdminSessions />} />
+              <Route path="billing" element={<AdminBilling />} />
+              <Route path="notifications" element={<AdminNotifications />} />
+              <Route path="settings" element={<AdminSettings />} />
+              <Route path="audit-logs" element={<AdminAuditLogs />} />
+            </Route>
             <Route path="settings" element={<Settings />} />
           </Route>
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />

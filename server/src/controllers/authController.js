@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 const { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail } = require('../utils/email');
 const { auditLog } = require('../utils/auditLogger');
+const { createSession, revokeSession } = require('../utils/session');
 
 const generateVerificationCode = () =>
   String(Math.floor(100000 + Math.random() * 900000));
@@ -109,7 +110,8 @@ const login = async (req, res) => {
       return res.json({ mfaRequired: true, preAuthToken });
     }
 
-    const token = signToken(user.id);
+    const { token } = await createSession(req, user.id);
+    await user.update({ lastLoginAt: new Date() });
     auditLog(req, { userId: user.id, action: 'auth.login', entity: 'User', entityId: user.id });
     res.json({ token, user: serializeUser(user) });
   } catch (err) {
@@ -119,6 +121,16 @@ const login = async (req, res) => {
 
 const me = async (req, res) => {
   res.json(serializeUser(req.user));
+};
+
+const logout = async (req, res) => {
+  try {
+    if (req.sessionId) await revokeSession(req.sessionId);
+    auditLog(req, { userId: req.user.id, action: 'auth.logout', entity: 'User', entityId: req.user.id });
+    res.json({ message: 'Logged out' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
 const resendCode = async (req, res) => {
@@ -182,4 +194,40 @@ const changePassword = async (req, res) => {
   }
 };
 
-module.exports = { register, login, me, verifyEmail, resendCode, updateProfile, changePassword };
+const getNotificationPrefs = async (req, res) => {
+  try {
+    const prefs = req.user.notificationPrefs ? JSON.parse(req.user.notificationPrefs) : {};
+    const defaults = {
+      emailAlerts: true,
+      emailHighOnly: true,
+      alertTypes: {
+        left_safe_zone: true,
+        dangerous_content: true,
+        emergency_button: true,
+        cyberbullying: true,
+        safety_pattern: true,
+        screen_time_exceeded: true,
+        blocked_app_attempt: false,
+        app_installed: false,
+        unknown_contact: true,
+      },
+    };
+    res.json({ ...defaults, ...prefs, alertTypes: { ...defaults.alertTypes, ...(prefs.alertTypes || {}) } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+const updateNotificationPrefs = async (req, res) => {
+  try {
+    const current = req.user.notificationPrefs ? JSON.parse(req.user.notificationPrefs) : {};
+    const updated = { ...current, ...req.body };
+    if (req.body.alertTypes) updated.alertTypes = { ...(current.alertTypes || {}), ...req.body.alertTypes };
+    await req.user.update({ notificationPrefs: JSON.stringify(updated) });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = { register, login, me, logout, verifyEmail, resendCode, updateProfile, changePassword, getNotificationPrefs, updateNotificationPrefs };
