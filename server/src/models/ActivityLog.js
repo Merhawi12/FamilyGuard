@@ -13,7 +13,13 @@ const ActivityLog = sequelize.define('ActivityLog', {
   endTime: { type: DataTypes.DATE },
   durationMinutes: { type: DataTypes.FLOAT, defaultValue: 0 },
   url: { type: DataTypes.STRING },
-}, { underscored: true });
+}, {
+  underscored: true,
+  indexes: [
+    { fields: ['device_id'] },
+    { fields: ['child_id', 'start_time'] },
+  ],
+});
 
 // Encrypt url before writing
 const encryptUrl = (log) => {

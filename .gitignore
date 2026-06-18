@@ -7,3 +7,5 @@ build/
 *.log
 coverage/
 .cache/
+*.sqlite
+*.sqlite3

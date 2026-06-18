@@ -5,10 +5,12 @@ const { auditLog } = require('../utils/auditLogger');
 // GET /api/notifications — the current user's own notifications
 const listMine = async (req, res) => {
   try {
+    const { limit = 100, offset = 0 } = req.query;
     const notifications = await Notification.findAll({
       where: { userId: req.user.id },
       order: [['createdAt', 'DESC']],
-      limit: 100,
+      limit: Math.min(parseInt(limit), 100),
+      offset: parseInt(offset),
     });
     res.json(notifications);
   } catch (err) {
@@ -75,11 +77,13 @@ const send = async (req, res) => {
 // GET /api/notifications/sent — admin's view of what's been sent
 const listSent = async (req, res) => {
   try {
+    const { limit = 200, offset = 0 } = req.query;
     const notifications = await Notification.findAll({
       where: { createdBy: { [Op.ne]: null } },
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email'] }],
       order: [['createdAt', 'DESC']],
-      limit: 200,
+      limit: Math.min(parseInt(limit), 200),
+      offset: parseInt(offset),
     });
     res.json(notifications);
   } catch (err) {

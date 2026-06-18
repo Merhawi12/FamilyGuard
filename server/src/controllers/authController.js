@@ -89,19 +89,41 @@ const verifyEmail = async (req, res) => {
   }
 };
 
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
     const user = await User.findOne({ where: { email } });
+
+    if (user?.lockedUntil && new Date() < new Date(user.lockedUntil)) {
+      auditLog(req, { userId: user.id, action: 'auth.login_blocked_locked', metadata: { email } });
+      return res.status(423).json({ error: 'Account temporarily locked due to repeated failed logins. Try again later.' });
+    }
+
     if (!user || !(await user.comparePassword(password))) {
+      if (user) {
+        const attempts = user.failedLoginAttempts + 1;
+        const updates = { failedLoginAttempts: attempts };
+        if (attempts >= MAX_LOGIN_ATTEMPTS) {
+          updates.lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MS);
+          updates.failedLoginAttempts = 0;
+        }
+        await user.update(updates);
+      }
       auditLog(req, { userId: user?.id, action: 'auth.login_failed', metadata: { email } });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     if (!user.emailVerified) {
       return res.status(403).json({ error: 'Please verify your email before logging in', emailVerificationRequired: true });
+    }
+
+    if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+      await user.update({ failedLoginAttempts: 0, lockedUntil: null });
     }
 
     if (user.mfaEnabled) {

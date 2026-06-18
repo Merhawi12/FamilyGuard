@@ -23,6 +23,8 @@ const User = sequelize.define('User', {
   notificationPrefs: { type: DataTypes.TEXT, defaultValue: '{}' },
   permissions: { type: DataTypes.JSON, defaultValue: [] },
   lastLoginAt: { type: DataTypes.DATE },
+  failedLoginAttempts: { type: DataTypes.INTEGER, defaultValue: 0 },
+  lockedUntil: { type: DataTypes.DATE },
 }, { underscored: true });
 
 User.prototype.comparePassword = async function (plain) {

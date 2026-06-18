@@ -11,6 +11,12 @@ const Alert = sequelize.define('Alert', {
   severity: { type: DataTypes.STRING, defaultValue: 'medium' },
   isRead: { type: DataTypes.BOOLEAN, defaultValue: false },
   metadata: { type: DataTypes.TEXT, defaultValue: '{}' },
-}, { underscored: true });
+}, {
+  underscored: true,
+  indexes: [
+    { fields: ['parent_id'] },
+    { fields: ['child_id'] },
+  ],
+});
 
 module.exports = Alert;

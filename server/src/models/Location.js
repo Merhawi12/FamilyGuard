@@ -12,6 +12,13 @@ const Location = sequelize.define('Location', {
   heading: { type: DataTypes.FLOAT },
   address: { type: DataTypes.STRING },
   recordedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
-}, { underscored: true, updatedAt: false });
+}, {
+  underscored: true,
+  updatedAt: false,
+  indexes: [
+    { fields: ['device_id'] },
+    { fields: ['child_id', 'recorded_at'] },
+  ],
+});
 
 module.exports = Location;

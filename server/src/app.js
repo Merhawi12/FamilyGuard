@@ -65,7 +65,20 @@ const startServer = async () => {
     await addIfMissing('users', 'notification_prefs', { type: require('sequelize').DataTypes.TEXT, defaultValue: '{}' });
     await addIfMissing('users', 'permissions', { type: require('sequelize').DataTypes.JSON, defaultValue: [] });
     await addIfMissing('users', 'last_login_at', { type: require('sequelize').DataTypes.DATE });
+    await addIfMissing('users', 'failed_login_attempts', { type: require('sequelize').DataTypes.INTEGER, defaultValue: 0 });
+    await addIfMissing('users', 'locked_until', { type: require('sequelize').DataTypes.DATE });
     await addIfMissing('contacts', 'id', null).catch(() => {}); // triggers table creation via sync
+
+    const addIndexIfMissing = async (table, fields) => {
+      try { await qi.addIndex(table, fields); } catch { /* already exists */ }
+    };
+    await addIndexIfMissing('activity_logs', ['device_id']);
+    await addIndexIfMissing('activity_logs', ['child_id', 'start_time']);
+    await addIndexIfMissing('locations', ['device_id']);
+    await addIndexIfMissing('locations', ['child_id', 'recorded_at']);
+    await addIndexIfMissing('alerts', ['parent_id']);
+    await addIndexIfMissing('alerts', ['child_id']);
+
     httpServer.listen(PORT, () => console.log(`FamilyGuard server running on port ${PORT}`));
 
     // Hourly safety pattern analysis for all parents
