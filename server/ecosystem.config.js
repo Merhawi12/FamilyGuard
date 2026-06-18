@@ -3,6 +3,7 @@ module.exports = {
     {
       name: 'familyguard-api',
       script: 'src/app.js',
+      cwd: __dirname,
       instances: 1,
       autorestart: true,
       watch: false,

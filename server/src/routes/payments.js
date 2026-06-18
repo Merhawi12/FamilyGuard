@@ -4,7 +4,10 @@ const Stripe = require('stripe');
 const { User, Transaction } = require('../models');
 const { authenticate } = require('../middleware/auth');
 
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+// A misconfigured/missing Stripe key must not crash the whole API — payments
+// degrade to 503 while every other route (alerts, location, monitoring) stays up.
+const stripe = process.env.STRIPE_SECRET_KEY ? Stripe(process.env.STRIPE_SECRET_KEY) : null;
+if (!stripe) console.error('[payments] STRIPE_SECRET_KEY not set — payment routes disabled');
 
 const PLANS = {
   premium: { priceId: process.env.STRIPE_PREMIUM_PRICE_ID, name: 'Premium', amount: 999 },
@@ -13,6 +16,8 @@ const PLANS = {
 
 // POST /api/payments/create-checkout-session
 router.post('/create-checkout-session', authenticate, async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Payments are not configured' });
+
   const { plan } = req.body;
   if (!PLANS[plan]) return res.status(400).json({ error: 'Invalid plan' });
 
@@ -46,6 +51,8 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
 
 // POST /api/payments/customer-portal
 router.post('/customer-portal', authenticate, async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Payments are not configured' });
+
   try {
     const user = await User.findByPk(req.user.id);
     if (!user.stripeCustomerId) return res.status(400).json({ error: 'No active subscription' });
@@ -84,6 +91,8 @@ router.get('/subscription', authenticate, async (req, res) => {
 
 // POST /api/payments/webhook  (raw body — registered before JSON middleware)
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!stripe) return res.status(503).send('Payments are not configured');
+
   const sig = req.headers['stripe-signature'];
   let event;
 
