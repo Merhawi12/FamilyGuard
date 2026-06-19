@@ -11,6 +11,8 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSent, setForgotSent] = useState(false);
 
   const { login, register, verifyEmail } = useAuth();
   const navigate = useNavigate();
@@ -89,6 +91,20 @@ export default function Login() {
       navigate('/dashboard');
     } catch (err) {
       setError(err.response?.data?.error || 'Invalid or expired code');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      await authApi.forgotPassword({ email: forgotEmail });
+      setForgotSent(true);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to send reset link');
     } finally {
       setLoading(false);
     }
@@ -177,6 +193,43 @@ export default function Login() {
               </button>
             </div>
           </div>
+        ) : tab === 'forgot' ? (
+          <div>
+            <div className="text-center mb-6">
+              <h2 className="text-xl font-bold text-gray-900">Reset your password</h2>
+              <p className="text-sm text-gray-500 mt-1">Enter your account email and we'll send you a reset link.</p>
+            </div>
+
+            {forgotSent ? (
+              <p className="text-sm text-green-600 text-center">
+                If an account exists for that email, a reset link has been sent. Check your inbox.
+              </p>
+            ) : (
+              <form onSubmit={handleForgotPassword} className="space-y-4">
+                <input
+                  className="input"
+                  type="email"
+                  placeholder="Email address"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  required
+                />
+                {error && <p className="text-sm text-red-500">{error}</p>}
+                <button type="submit" disabled={loading} className="btn-primary w-full py-3">
+                  {loading ? 'Sending...' : 'Send Reset Link'}
+                </button>
+              </form>
+            )}
+
+            <div className="text-center mt-4">
+              <button
+                onClick={() => { setTab('login'); setError(''); setForgotSent(false); }}
+                className="text-sm text-gray-400 hover:text-gray-600"
+              >
+                ← Back to sign in
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             <div className="flex rounded-xl bg-gray-100 p-1 mb-6">
@@ -217,6 +270,18 @@ export default function Login() {
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 required
               />
+
+              {tab === 'login' && (
+                <div className="text-right -mt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setTab('forgot'); setError(''); }}
+                    className="text-sm text-blue-600 hover:underline"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
 
               {error && <p className="text-sm text-red-500">{error}</p>}
 

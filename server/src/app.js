@@ -68,6 +68,8 @@ const startServer = async () => {
     await addIfMissing('users', 'last_login_at', { type: require('sequelize').DataTypes.DATE });
     await addIfMissing('users', 'failed_login_attempts', { type: require('sequelize').DataTypes.INTEGER, defaultValue: 0 });
     await addIfMissing('users', 'locked_until', { type: require('sequelize').DataTypes.DATE });
+    await addIfMissing('users', 'password_reset_token', { type: require('sequelize').DataTypes.STRING });
+    await addIfMissing('users', 'password_reset_expires', { type: require('sequelize').DataTypes.DATE });
     await addIfMissing('contacts', 'id', null).catch(() => {}); // triggers table creation via sync
 
     const addIndexIfMissing = async (table, fields) => {

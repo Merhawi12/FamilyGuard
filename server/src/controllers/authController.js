@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { User } = require('../models');
-const { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail } = require('../utils/email');
+const { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendPasswordResetEmail } = require('../utils/email');
 const { auditLog } = require('../utils/auditLogger');
 const { createSession, revokeSession } = require('../utils/session');
 
@@ -216,6 +217,58 @@ const changePassword = async (req, res) => {
   }
 };
 
+const RESET_TOKEN_EXPIRES_MS = 30 * 60 * 1000;
+
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const user = await User.findOne({ where: { email } });
+    // Always return the same response so this endpoint can't be used to enumerate accounts
+    if (user) {
+      const token = crypto.randomBytes(32).toString('hex');
+      const passwordResetExpires = new Date(Date.now() + RESET_TOKEN_EXPIRES_MS);
+      await user.update({ passwordResetToken: token, passwordResetExpires });
+
+      sendPasswordResetEmail({ name: user.name, email, token }).catch((err) =>
+        console.error('Password reset email failed:', err.message)
+      );
+      auditLog(req, { userId: user.id, action: 'auth.password_reset_requested', entity: 'User', entityId: user.id });
+    }
+
+    res.json({ message: 'If an account exists for that email, a reset link has been sent' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) return res.status(400).json({ error: 'Token and new password required' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+
+    const user = await User.findOne({ where: { passwordResetToken: token } });
+    if (!user || !user.passwordResetExpires || new Date() > new Date(user.passwordResetExpires)) {
+      return res.status(400).json({ error: 'Invalid or expired reset link' });
+    }
+
+    await user.update({
+      passwordHash: newPassword,
+      passwordResetToken: null,
+      passwordResetExpires: null,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+    });
+
+    auditLog(req, { userId: user.id, action: 'auth.password_reset', entity: 'User', entityId: user.id });
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 const getNotificationPrefs = async (req, res) => {
   try {
     const prefs = req.user.notificationPrefs ? JSON.parse(req.user.notificationPrefs) : {};
@@ -252,4 +305,4 @@ const updateNotificationPrefs = async (req, res) => {
   }
 };
 
-module.exports = { register, login, me, logout, verifyEmail, resendCode, updateProfile, changePassword, getNotificationPrefs, updateNotificationPrefs };
+module.exports = { register, login, me, logout, verifyEmail, resendCode, updateProfile, changePassword, forgotPassword, resetPassword, getNotificationPrefs, updateNotificationPrefs };

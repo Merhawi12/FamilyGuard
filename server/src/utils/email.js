@@ -10,7 +10,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const ADMIN_EMAIL = 'samera3031@gmail.com';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'samera3031@gmail.com';
 
 const sendWelcomeEmail = async ({ name, email }) => {
   if (!process.env.SMTP_HOST) return;
@@ -65,6 +65,30 @@ const sendVerificationEmail = async ({ name, email, code }) => {
       <h1 style="letter-spacing:8px;font-size:40px;color:#4F46E5">${code}</h1>
       <p>This code expires in <strong>15 minutes</strong>.</p>
       <p>If you didn't create an account, you can ignore this email.</p>
+      <br/>
+      <p>— The FamilyGuard Team</p>
+    `,
+  });
+};
+
+const sendPasswordResetEmail = async ({ name, email, token }) => {
+  const resetUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
+
+  if (!process.env.SMTP_HOST) {
+    console.log(`[DEV] Password reset link for ${email}: ${resetUrl}`);
+    return;
+  }
+
+  await transporter.sendMail({
+    from: `"FamilyGuard" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    to: email,
+    subject: 'Reset your FamilyGuard password',
+    html: `
+      <h2>Hi ${name},</h2>
+      <p>We received a request to reset your FamilyGuard password. Click below to choose a new one:</p>
+      <p><a href="${resetUrl}" style="display:inline-block;background:#4F46E5;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">Reset Password</a></p>
+      <p>This link expires in <strong>30 minutes</strong>.</p>
+      <p>If you didn't request this, you can safely ignore this email — your password won't change.</p>
       <br/>
       <p>— The FamilyGuard Team</p>
     `,
@@ -132,4 +156,4 @@ const sendContactFormEmail = async ({ name, email, message }) => {
   });
 };
 
-module.exports = { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendAlertEmail, sendContactFormEmail };
+module.exports = { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendAlertEmail, sendContactFormEmail, sendPasswordResetEmail };

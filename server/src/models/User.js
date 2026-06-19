@@ -17,6 +17,8 @@ const User = sequelize.define('User', {
   emailVerified: { type: DataTypes.BOOLEAN, defaultValue: false },
   emailVerificationCode: { type: DataTypes.STRING },
   emailVerificationExpires: { type: DataTypes.DATE },
+  passwordResetToken: { type: DataTypes.STRING },
+  passwordResetExpires: { type: DataTypes.DATE },
   stripeCustomerId: { type: DataTypes.STRING },
   stripeSubscriptionId: { type: DataTypes.STRING },
   subscriptionStatus: { type: DataTypes.STRING, defaultValue: 'trial' },
@@ -31,8 +33,10 @@ User.prototype.comparePassword = async function (plain) {
   return bcrypt.compare(plain, this.passwordHash);
 };
 
-User.beforeCreate(async (user) => {
-  user.passwordHash = await bcrypt.hash(user.passwordHash, 12);
+User.beforeSave(async (user) => {
+  if (user.changed('passwordHash')) {
+    user.passwordHash = await bcrypt.hash(user.passwordHash, 12);
+  }
 });
 
 module.exports = User;

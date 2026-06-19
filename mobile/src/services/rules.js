@@ -2,7 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { io } from 'socket.io-client';
 import { device as deviceApi } from './api';
 
-const SOCKET_URL = 'http://18.226.58.189';
+const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'http://18.226.58.189';
 const POLL_INTERVAL = 5 * 60 * 1000; // 5 min
 
 let _rules = { appRules: [], websiteRules: [], screenTimeRule: null };
