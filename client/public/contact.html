@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Contact Us — FamilyGuard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..800;1,9..144,400..600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<symbol id="ic-menu" viewBox="0 0 24 24"><line x1="4" y1="7" x2="20" y2="7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="4" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="ic-close" viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+</defs>
+</svg>
+
+<style>
+/* ============ TOKENS ============ */
+:root{
+  --abyss:#0A1B2E;
+  --abyss-soft:#102536;
+  --abyss-soft-2:#142C40;
+  --current:#0C6478;
+  --tide:#15B8C9;
+  --tide-light:#8FE9EF;
+  --foam:#F2F9FA;
+  --sand:#FFF6F1;
+  --coral:#FF6F59;
+  --coral-deep:#E85541;
+  --ink:#0F2233;
+  --slate:#5C7080;
+  --slate-soft:#7C8E9B;
+  --line:#E2EDEE;
+  --line-soft:#EDF4F4;
+  --white:#FFFFFF;
+  --grad-tide:linear-gradient(135deg,var(--current),var(--tide));
+  --shadow-sm:0 1px 2px rgba(15,34,51,.06), 0 1px 1px rgba(15,34,51,.04);
+  --shadow-md:0 8px 24px -8px rgba(15,34,51,.14), 0 2px 8px rgba(15,34,51,.06);
+  --shadow-lg:0 24px 48px -16px rgba(15,34,51,.22), 0 6px 16px rgba(15,34,51,.08);
+  --radius-card:22px;
+  --radius-pill:999px;
+  --container:1180px;
+  --ease-flow:cubic-bezier(.16,.84,.44,1);
+}
+
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  font-family:'Plus Jakarta Sans',system-ui,sans-serif;
+  color:var(--ink);
+  background:var(--white);
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+img,svg{display:block;}
+a{color:inherit;text-decoration:none;}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+.use-icon{width:1em;height:1em;display:inline-block;vertical-align:middle;}
+:focus-visible{outline:2px solid var(--tide);outline-offset:3px;border-radius:4px;}
+
+.wrap{max-width:var(--container);margin:0 auto;padding-inline:clamp(1.25rem,5vw,2rem);}
+.section{position:relative;padding-block:clamp(4.2rem,9vw,7.2rem);}
+
+.eyebrow{
+  display:inline-flex;align-items:center;gap:.5rem;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:.72rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--current);
+  background:rgba(12,100,120,.08);
+  border:1px solid rgba(12,100,120,.16);
+  padding:.45rem .9rem;border-radius:var(--radius-pill);
+  margin-bottom:1.4rem;
+}
+
+.head-row{max-width:680px;}
+.head-row.center{margin-inline:auto;text-align:center;}
+h1,h2,h3{
+  font-family:'Fraunces',serif;
+  font-weight:600;
+  letter-spacing:-.01em;
+  color:var(--ink);
+  line-height:1.08;
+}
+h1{font-size:clamp(2.2rem,4.4vw,3.2rem);}
+h2{font-size:clamp(1.9rem,3.6vw,2.7rem);}
+.section-sub{color:var(--slate);font-size:1.06rem;margin-top:1.1rem;max-width:560px;}
+.head-row.center .section-sub{margin-inline:auto;}
+
+/* ============ BUTTONS ============ */
+.btn{
+  position:relative;overflow:hidden;
+  display:inline-flex;align-items:center;justify-content:center;gap:.55rem;
+  font-weight:700;font-size:.96rem;
+  padding:.85rem 1.7rem;border-radius:var(--radius-pill);
+  transition:transform .35s var(--ease-flow),box-shadow .35s var(--ease-flow),background .35s;
+  white-space:nowrap;
+}
+.btn-primary{
+  background:var(--grad-tide);color:#fff;
+  box-shadow:0 10px 28px -10px rgba(12,100,120,.55);
+  --ripple-color:rgba(255,255,255,.55);
+}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 16px 34px -10px rgba(12,100,120,.65);}
+.btn-sm{padding:.6rem 1.25rem;font-size:.86rem;}
+.btn-ripple{position:absolute;border-radius:50%;background:var(--ripple-color,rgba(255,255,255,.5));transform:scale(0);animation:rippleAnim .65s ease-out forwards;pointer-events:none;}
+@keyframes rippleAnim{to{transform:scale(1);opacity:0;}}
+
+/* ============ NAV ============ */
+.nav{
+  position:fixed;top:0;left:0;right:0;z-index:80;
+  padding-block:.3rem;
+  transition:padding .3s,background .3s,box-shadow .3s,backdrop-filter .3s;
+}
+.nav::before{
+  content:"";position:absolute;inset:0;
+  background:rgba(255,255,255,0);
+  backdrop-filter:blur(0px);
+  transition:background .35s,backdrop-filter .35s,box-shadow .35s;
+  z-index:-1;
+}
+.nav.is-scrolled{padding-block:.7rem;}
+.nav.is-scrolled::before{background:rgba(255,255,255,.82);backdrop-filter:blur(14px);box-shadow:0 1px 0 var(--line),0 12px 24px -16px rgba(15,34,51,.18);}
+.nav-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;}
+.logo{display:flex;align-items:center;gap:.55rem;font-family:'Fraunces',serif;font-weight:600;font-size:1.18rem;color:var(--ink);}
+.logo-img{height:100px;width:auto;display:block;}
+.logo-img--footer{height:56px;filter:brightness(0) invert(1);}
+.nav-links{display:flex;align-items:center;gap:2rem;}
+.nav-links a{font-size:.94rem;font-weight:500;color:var(--ink);position:relative;padding-bottom:4px;}
+.nav-links a::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:0;background:var(--tide);transition:width .3s var(--ease-flow);}
+.nav-links a:hover::after{width:100%;}
+.nav-right{display:flex;align-items:center;gap:1.2rem;}
+.nav-signin{font-size:.92rem;font-weight:600;color:var(--ink);}
+.nav-toggle{display:none;width:2.2rem;height:2.2rem;align-items:center;justify-content:center;}
+.nav-toggle .use-icon{width:1.5rem;height:1.5rem;}
+.nav-toggle .ic-close{display:none;}
+body.nav-open .nav-toggle .ic-menu{display:none;}
+body.nav-open .nav-toggle .ic-close{display:block;}
+
+@media (max-width:840px){
+  .nav-links{
+    position:fixed;inset:64px 0 0 0;background:#fff;
+    flex-direction:column;align-items:flex-start;gap:0;
+    padding:1.4rem clamp(1.25rem,5vw,2rem) 2rem;
+    transform:translateY(-12px);opacity:0;visibility:hidden;
+    transition:opacity .25s,transform .25s,visibility .25s;
+    border-top:1px solid var(--line);
+  }
+  .nav-links a{width:100%;padding:.85rem 0;border-bottom:1px solid var(--line-soft);}
+  body.nav-open .nav-links{transform:translateY(0);opacity:1;visibility:visible;}
+  .nav-right .nav-signin{display:none;}
+  .nav-toggle{display:flex;}
+}
+
+/* ============ AMBIENT CURRENT BLOBS ============ */
+.current-field{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0;}
+.blob{position:absolute;border-radius:48% 52% 58% 42%/52% 46% 54% 48%;filter:blur(70px);will-change:transform;}
+@media (prefers-reduced-motion: no-preference){
+  .blob{animation:blobDrift1 24s ease-in-out infinite;}
+  .blob.b2{animation:blobDrift2 31s ease-in-out infinite;}
+  .blob.b3{animation:blobDrift3 27s ease-in-out infinite;}
+}
+@keyframes blobDrift1{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(40px,-26px) scale(1.08);}}
+@keyframes blobDrift2{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(-46px,30px) scale(.94);}}
+@keyframes blobDrift3{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(28px,34px) scale(1.05);}}
+
+/* ============ PAGE HERO ============ */
+.page-hero{position:relative;padding-top:clamp(8.5rem,14vw,11rem);padding-bottom:clamp(3rem,7vw,5rem);background:var(--foam);overflow:hidden;}
+.page-hero .current-field .blob{opacity:.5;}
+.page-hero .b1{width:420px;height:420px;left:-120px;top:60px;background:radial-gradient(circle at 35% 35%,var(--tide-light),var(--tide) 60%,transparent 100%);}
+.page-hero .b2{width:380px;height:380px;right:-100px;top:-60px;background:radial-gradient(circle at 60% 40%,var(--current),var(--abyss-soft) 70%,transparent 100%);opacity:.28;}
+.page-hero .head-row{position:relative;z-index:1;}
+
+/* ============ REVEAL ============ */
+[data-reveal]{opacity:0;transform:translateY(26px);transition:opacity .8s var(--ease-flow),transform .8s var(--ease-flow);}
+[data-reveal].is-visible{opacity:1;transform:translateY(0);}
+@media (prefers-reduced-motion: reduce){[data-reveal]{opacity:1;transform:none;transition:none;}}
+
+/* ============ CONTACT ============ */
+.contact{background:#fff;}
+.contact-wrap{max-width:600px;margin-inline:auto;}
+.form-field{margin-bottom:1.1rem;}
+.form-field label{display:block;font-size:.85rem;font-weight:600;color:var(--ink);margin-bottom:.4rem;}
+.form-field input,.form-field textarea{
+  width:100%;padding:.85rem 1rem;border:1.5px solid var(--line);border-radius:12px;
+  font-family:inherit;font-size:.95rem;color:var(--ink);background:#fff;
+  transition:border-color .25s,box-shadow .25s;
+}
+.form-field input:focus,.form-field textarea:focus{
+  outline:none;border-color:var(--tide);box-shadow:0 0 0 3px rgba(21,184,201,.15);
+}
+.form-field textarea{resize:vertical;min-height:140px;}
+.contact-submit{width:100%;}
+.contact-submit:disabled{opacity:.6;cursor:not-allowed;}
+.contact-status{font-size:.9rem;margin-top:.9rem;text-align:center;}
+.contact-status.success{color:#1FAE74;}
+.contact-status.error{color:var(--coral-deep);}
+
+/* ============ FOOTER ============ */
+footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
+.footer-row{display:flex;flex-direction:column;align-items:center;gap:1.1rem;text-align:center;}
+.footer-logo{display:flex;align-items:center;gap:.5rem;color:#fff;font-family:'Fraunces',serif;font-weight:600;font-size:1.05rem;}
+.footer-links{display:flex;gap:1.6rem;font-size:.88rem;}
+.footer-links a:hover{color:#fff;}
+.footer-copy{font-size:.8rem;color:rgba(255,255,255,.35);margin-top:.4rem;}
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<header class="nav" id="siteNav">
+  <div class="wrap nav-row">
+    <a href="/landing.html" class="logo"><img src="/logo.png" alt="FamilyGuard" class="logo-img"></a>
+    <nav class="nav-links">
+      <a href="/landing.html#features">Features</a>
+      <a href="/landing.html#ai-features">AI Coach</a>
+      <a href="/landing.html#pricing">Pricing</a>
+      <a href="/landing.html#how-it-works">How it works</a>
+      <a href="/contact.html">Contact</a>
+    </nav>
+    <div class="nav-right">
+      <a href="/login" class="nav-signin">Sign in</a>
+      <a href="/login" class="btn btn-primary btn-sm">Get Started Free</a>
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false">
+        <svg class="use-icon ic-menu"><use href="#ic-menu"/></svg>
+        <svg class="use-icon ic-close"><use href="#ic-close"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- ============ PAGE HERO ============ -->
+<section class="page-hero">
+  <div class="current-field" aria-hidden="true">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+  </div>
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow">Contact Us</span>
+      <h1>We're here to help</h1>
+      <p class="section-sub">Have a question about FamilyGuard, need support, or want to share feedback? Send us a message and our team will get back to you soon.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CONTACT FORM ============ -->
+<section class="contact section">
+  <div class="wrap">
+    <div class="contact-wrap" data-reveal>
+      <form id="contactForm" novalidate>
+        <div class="form-field">
+          <label for="cf-name">Your name</label>
+          <input id="cf-name" name="name" type="text" required>
+        </div>
+        <div class="form-field">
+          <label for="cf-email">Your email</label>
+          <input id="cf-email" name="email" type="email" required>
+        </div>
+        <div class="form-field">
+          <label for="cf-message">Your message</label>
+          <textarea id="cf-message" name="message" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary contact-submit">Send Message</button>
+        <p class="contact-status" id="cfStatus"></p>
+      </form>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="wrap footer-row">
+    <div class="footer-logo"><img src="/logo.png" alt="FamilyGuard" class="logo-img logo-img--footer"></div>
+    <div class="footer-links">
+      <a href="/privacy-policy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+      <a href="/contact.html">Contact</a>
+    </div>
+    <div class="footer-copy">&copy; 2026 FamilyGuard. Parental Control &amp; Digital Safety.</div>
+  </div>
+</footer>
+
+<script>
+// ---- Sticky nav ----
+const nav = document.getElementById('siteNav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('is-scrolled', window.scrollY > 24);
+}, { passive: true });
+
+// ---- Mobile nav toggle ----
+const navToggle = document.getElementById('navToggle');
+navToggle.addEventListener('click', () => {
+  const open = document.body.classList.toggle('nav-open');
+  navToggle.setAttribute('aria-expanded', open);
+});
+document.querySelectorAll('.nav-links a').forEach(a => {
+  a.addEventListener('click', () => document.body.classList.remove('nav-open'));
+});
+
+// ---- Button ripple ----
+document.querySelectorAll('.btn').forEach(btn => {
+  btn.addEventListener('click', function (e) {
+    const rect = this.getBoundingClientRect();
+    const ripple = document.createElement('span');
+    ripple.className = 'btn-ripple';
+    const size = Math.max(rect.width, rect.height) * 1.8;
+    ripple.style.width = ripple.style.height = size + 'px';
+    ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+    ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+    this.appendChild(ripple);
+    ripple.addEventListener('animationend', () => ripple.remove());
+  });
+});
+
+// ---- Scroll reveal ----
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!reduceMotion && 'IntersectionObserver' in window) {
+  const revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('is-visible');
+        revealObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('[data-reveal]').forEach(el => revealObserver.observe(el));
+} else {
+  document.querySelectorAll('[data-reveal]').forEach(el => el.classList.add('is-visible'));
+}
+
+// ---- Contact form ----
+const contactForm = document.getElementById('contactForm');
+if (contactForm) {
+  const cfStatus = document.getElementById('cfStatus');
+  const submitBtn = contactForm.querySelector('.contact-submit');
+  contactForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending...';
+    cfStatus.textContent = '';
+    cfStatus.className = 'contact-status';
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: contactForm.name.value,
+          email: contactForm.email.value,
+          message: contactForm.message.value,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Failed to send message');
+      cfStatus.textContent = "Thanks! Your message has been sent — we'll get back to you soon.";
+      cfStatus.classList.add('success');
+      contactForm.reset();
+    } catch (err) {
+      cfStatus.textContent = err.message || 'Something went wrong — please try again.';
+      cfStatus.classList.add('error');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Send Message';
+    }
+  });
+}
+</script>
+</body>
+</html>

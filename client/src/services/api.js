@@ -145,4 +145,8 @@ export const contacts = {
   remove: (id) => api.delete(`/contacts/${id}`),
 };
 
+export const contactForm = {
+  send: (data) => api.post('/contact', data),
+};
+
 export default api;

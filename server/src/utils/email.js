@@ -108,4 +108,28 @@ const sendAlertEmail = async ({ name, email, type, message, severity }) => {
   });
 };
 
-module.exports = { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendAlertEmail };
+const escapeHtml = (str) =>
+  String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const sendContactFormEmail = async ({ name, email, message }) => {
+  if (!process.env.SMTP_HOST) {
+    console.log(`[DEV] Contact form from ${name} <${email}>: ${message}`);
+    return;
+  }
+
+  await transporter.sendMail({
+    from: `"FamilyGuard" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    to: ADMIN_EMAIL,
+    replyTo: email,
+    subject: `New Contact Form Message from ${name}`,
+    html: `
+      <h2>New Contact Form Submission</h2>
+      <p><strong>Name:</strong> ${escapeHtml(name)}</p>
+      <p><strong>Email:</strong> ${escapeHtml(email)}</p>
+      <p><strong>Message:</strong></p>
+      <p style="white-space:pre-wrap;">${escapeHtml(message)}</p>
+    `,
+  });
+};
+
+module.exports = { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendAlertEmail, sendContactFormEmail };

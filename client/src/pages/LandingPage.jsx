@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { contactForm } from '../services/api';
 
 const problems = [
   { icon: '📱', text: 'Excessive screen time' },
@@ -78,6 +79,20 @@ export default function LandingPage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [contactValues, setContactValues] = useState({ name: '', email: '', message: '' });
+  const [contactStatus, setContactStatus] = useState('idle'); // idle | sending | sent | error
+
+  const handleContactSubmit = async (e) => {
+    e.preventDefault();
+    setContactStatus('sending');
+    try {
+      await contactForm.send(contactValues);
+      setContactStatus('sent');
+      setContactValues({ name: '', email: '', message: '' });
+    } catch {
+      setContactStatus('error');
+    }
+  };
 
   useEffect(() => {
     if (!loading && user) navigate('/dashboard', { replace: true });
@@ -96,6 +111,7 @@ export default function LandingPage() {
           <div className="hidden md:flex items-center gap-4">
             <a href="#features" className="text-sm font-medium text-gray-600 hover:text-blue-600 transition">Features</a>
             <a href="#pricing" className="text-sm font-medium text-gray-600 hover:text-blue-600 transition">Pricing</a>
+            <a href="#contact" className="text-sm font-medium text-gray-600 hover:text-blue-600 transition">Contact</a>
             <Link to="/login" className="text-sm font-medium text-gray-600 hover:text-blue-600 transition">Sign In</Link>
             <Link to="/login" className="text-sm font-medium bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
               Get Started Free
@@ -119,6 +135,7 @@ export default function LandingPage() {
           <div className="md:hidden bg-white border-t border-gray-100 px-6 py-4 flex flex-col gap-4">
             <a href="#features" onClick={() => setMenuOpen(false)} className="text-sm font-medium text-gray-700 hover:text-blue-600 transition">Features</a>
             <a href="#pricing" onClick={() => setMenuOpen(false)} className="text-sm font-medium text-gray-700 hover:text-blue-600 transition">Pricing</a>
+            <a href="#contact" onClick={() => setMenuOpen(false)} className="text-sm font-medium text-gray-700 hover:text-blue-600 transition">Contact</a>
             <Link to="/login" onClick={() => setMenuOpen(false)} className="text-sm font-medium text-gray-700 hover:text-blue-600 transition">Sign In</Link>
             <Link to="/login" onClick={() => setMenuOpen(false)} className="text-sm font-medium bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition text-center">
               Get Started Free
@@ -510,6 +527,60 @@ export default function LandingPage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Contact */}
+      <section id="contact" className="py-14 md:py-24 px-4 md:px-6 bg-gray-50">
+        <div className="max-w-xl mx-auto">
+          <div className="text-center mb-10">
+            <span className="inline-block bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full mb-4 uppercase tracking-wide">
+              Contact Us
+            </span>
+            <h2 className="text-4xl font-bold text-gray-900 mb-4">Get in touch</h2>
+            <p className="text-lg text-gray-500">Questions or feedback? We'd love to hear from you.</p>
+          </div>
+
+          {contactStatus === 'sent' ? (
+            <p className="text-center text-green-600 font-medium">Thanks! Your message has been sent — we'll get back to you soon.</p>
+          ) : (
+            <form onSubmit={handleContactSubmit} className="space-y-4">
+              <input
+                type="text"
+                required
+                placeholder="Your name"
+                value={contactValues.name}
+                onChange={(e) => setContactValues((v) => ({ ...v, name: e.target.value }))}
+                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="email"
+                required
+                placeholder="Your email"
+                value={contactValues.email}
+                onChange={(e) => setContactValues((v) => ({ ...v, email: e.target.value }))}
+                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <textarea
+                required
+                rows={5}
+                placeholder="Your message"
+                value={contactValues.message}
+                onChange={(e) => setContactValues((v) => ({ ...v, message: e.target.value }))}
+                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {contactStatus === 'error' && (
+                <p className="text-red-600 text-sm">Something went wrong — please try again.</p>
+              )}
+              <button
+                type="submit"
+                disabled={contactStatus === 'sending'}
+                className="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition disabled:opacity-50"
+              >
+                {contactStatus === 'sending' ? 'Sending...' : 'Send Message'}
+              </button>
+            </form>
+          )}
         </div>
       </section>
 

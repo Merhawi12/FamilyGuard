@@ -84,8 +84,8 @@ const getDeviceRules = async (req, res) => {
   try {
     const { childId } = req;
     const [appRules, websiteRules, screenTimeRule] = await Promise.all([
-      AppRule.findAll({ where: { childId, isActive: true } }),
-      WebsiteRule.findAll({ where: { childId, isActive: true } }),
+      AppRule.findAll({ where: { childId } }),
+      WebsiteRule.findAll({ where: { childId } }),
       ScreenTimeRule.findOne({ where: { childId } }),
     ]);
     res.json({ appRules, websiteRules, screenTimeRule: screenTimeRule || null });

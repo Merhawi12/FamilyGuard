@@ -41,6 +41,7 @@ app.use('/api/chats', require('./routes/chats'));
 app.use('/api/payments', require('./routes/payments'));
 app.use('/api/safety', require('./routes/safety'));
 app.use('/api/contacts', require('./routes/contacts'));
+app.use('/api/contact', require('./routes/contactForm'));
 app.use('/api/notifications', require('./routes/notifications'));
 
 app.use((err, req, res, next) => {

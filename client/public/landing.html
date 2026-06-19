@@ -483,6 +483,28 @@ body.nav-open .nav-toggle .ic-close{display:block;}
 @media (max-width:560px){.how-steps{grid-template-columns:1fr;}.how-step p{max-width:100%;}}
 @media (max-width:760px){.market-card-body{padding:1.2rem 1.4rem 1.5rem;}}
 
+/* ============ CONTACT ============ */
+.contact{background:var(--foam);}
+.contact-wrap{max-width:600px;margin-inline:auto;}
+.form-field{margin-bottom:1.1rem;}
+.form-field label{display:block;font-size:.85rem;font-weight:600;color:var(--ink);margin-bottom:.4rem;}
+.form-field input,.form-field textarea{
+  width:100%;padding:.85rem 1rem;border:1.5px solid var(--line);border-radius:12px;
+  font-family:inherit;font-size:.95rem;color:var(--ink);background:#fff;
+  transition:border-color .25s,box-shadow .25s;
+}
+.form-field input:focus,.form-field textarea:focus{
+  outline:none;border-color:var(--tide);box-shadow:0 0 0 3px rgba(21,184,201,.15);
+}
+.form-field textarea{resize:vertical;min-height:140px;}
+.contact-submit{width:100%;}
+.contact-submit:disabled{opacity:.6;cursor:not-allowed;}
+.contact-status{font-size:.9rem;margin-top:.9rem;text-align:center;}
+.contact-status.success{color:#1FAE74;}
+.contact-status.error{color:var(--coral-deep);}
+.contact-more{text-align:center;margin-top:1.6rem;font-size:.9rem;color:var(--slate);}
+.contact-more a{color:var(--current);font-weight:600;}
+
 /* ============ FINAL CTA ============ */
 .cta{background:var(--abyss);color:#fff;text-align:center;overflow:hidden;position:relative;}
 .cta .current-field .blob{filter:blur(100px);}
@@ -514,6 +536,7 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
       <a href="#ai-features">AI Coach</a>
       <a href="#pricing">Pricing</a>
       <a href="#how-it-works">How it works</a>
+      <a href="#contact">Contact</a>
     </nav>
     <div class="nav-right">
       <a href="/login" class="nav-signin">Sign in</a>
@@ -867,6 +890,36 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
   </div>
 </section>
 
+<!-- ============ CONTACT ============ -->
+<section class="contact section" id="contact">
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow">Contact Us</span>
+      <h2>Get in touch</h2>
+      <p class="section-sub">Questions or feedback? We'd love to hear from you.</p>
+    </div>
+    <div class="contact-wrap" data-reveal>
+      <form id="contactForm" novalidate>
+        <div class="form-field">
+          <label for="cf-name">Your name</label>
+          <input id="cf-name" name="name" type="text" required>
+        </div>
+        <div class="form-field">
+          <label for="cf-email">Your email</label>
+          <input id="cf-email" name="email" type="email" required>
+        </div>
+        <div class="form-field">
+          <label for="cf-message">Your message</label>
+          <textarea id="cf-message" name="message" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary contact-submit">Send Message</button>
+        <p class="contact-status" id="cfStatus"></p>
+      </form>
+      <p class="contact-more">Prefer a dedicated page? <a href="/contact.html">Visit our Contact page →</a></p>
+    </div>
+  </div>
+</section>
+
 <!-- wave: foam -> abyss -->
 <div class="wave" style="color:var(--abyss);background:var(--foam);">
   <div class="wave-track">
@@ -899,6 +952,7 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
     <div class="footer-links">
       <a href="/privacy-policy">Privacy Policy</a>
       <a href="/terms">Terms of Service</a>
+      <a href="/contact.html">Contact</a>
     </div>
     <div class="footer-copy">&copy; 2026 FamilyGuard. Parental Control &amp; Digital Safety.</div>
   </div>
@@ -979,6 +1033,42 @@ if ('IntersectionObserver' in window) {
     });
   }, { threshold: 0.4 });
   document.querySelectorAll('[data-target]').forEach(el => counterObserver.observe(el));
+}
+
+// ---- Contact form ----
+const contactForm = document.getElementById('contactForm');
+if (contactForm) {
+  const cfStatus = document.getElementById('cfStatus');
+  const submitBtn = contactForm.querySelector('.contact-submit');
+  contactForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending...';
+    cfStatus.textContent = '';
+    cfStatus.className = 'contact-status';
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: contactForm.name.value,
+          email: contactForm.email.value,
+          message: contactForm.message.value,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Failed to send message');
+      cfStatus.textContent = "Thanks! Your message has been sent — we'll get back to you soon.";
+      cfStatus.classList.add('success');
+      contactForm.reset();
+    } catch (err) {
+      cfStatus.textContent = err.message || 'Something went wrong — please try again.';
+      cfStatus.classList.add('error');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Send Message';
+    }
+  });
 }
 
 // ---- Rising bubbles (water signature, dark sections) ----
