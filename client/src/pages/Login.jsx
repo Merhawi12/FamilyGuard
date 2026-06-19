@@ -116,7 +116,7 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4 py-8">
       <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 w-full max-w-md">
         <div className="text-center mb-8">
-          <a href="http://localhost:3000/"><img src="/logo.png" alt="FamilyGuard" className="h-28 w-auto mx-auto cursor-pointer" /></a>
+          <a href="/"><img src="/logo.png" alt="FamilyGuard" className="h-28 w-auto mx-auto cursor-pointer" /></a>
           <p className="text-gray-500 text-sm mt-2">Parental Control & Digital Safety</p>
         </div>
 
