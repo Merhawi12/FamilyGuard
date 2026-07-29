@@ -2,7 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { io } from 'socket.io-client';
 import { device as deviceApi } from './api';
 
-const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://parentix.ca';
+const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.parentix.ca';
 const POLL_INTERVAL = 5 * 60 * 1000; // 5 min
 
 let _rules = { appRules: [], websiteRules: [], screenTimeRule: null };

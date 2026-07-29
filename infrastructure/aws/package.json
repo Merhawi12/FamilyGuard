@@ -1,0 +1,28 @@
+{
+  "name": "@parentix/infrastructure",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AWS CDK definition of the Parentix platform (VPC, RDS, ElastiCache, ECS Fargate, ALB, S3, CloudFront, SES).",
+  "bin": {
+    "parentix": "bin/parentix.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy --all",
+    "destroy": "cdk destroy --all",
+    "bootstrap": "cdk bootstrap"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "aws-cdk": "^2.147.0",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.4.5"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.147.0",
+    "constructs": "^10.3.0"
+  }
+}

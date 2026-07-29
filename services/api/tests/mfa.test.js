@@ -51,6 +51,12 @@ describe('MFA login (two-step)', () => {
     expect(validated.status).toBe(200);
     expect(typeof validated.body.token).toBe('string');
 
+    // Same response shape as a non-MFA login, so the client can finish signing
+    // in without a second round trip for the user record.
+    expect(validated.body.user).toMatchObject({ id: user.id, email: user.email, role: user.role });
+    expect(validated.body.user.passwordHash).toBeUndefined();
+    expect(validated.body.user.mfaSecret).toBeUndefined();
+
     // The issued token works on an authenticated route.
     const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${validated.body.token}`);
     expect(me.status).toBe(200);

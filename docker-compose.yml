@@ -1,8 +1,15 @@
-version: '3.8'
+# Local backing services only — Postgres and Redis, matching what the API gets
+# from RDS and ElastiCache in AWS.
+#
+#   docker compose up -d
+#   cp services/api/.env.example services/api/.env   # then fill in the secrets
+#   npm run dev:api / npm run dev:family / npm run dev:admin
+#
+# The apps themselves run on the host so hot reload works normally.
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: parentix
       POSTGRES_USER: parentix
@@ -11,40 +18,21 @@ services:
       - '5432:5432'
     volumes:
       - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U parentix']
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     ports:
       - '6379:6379'
-
-  server:
-    build: ./server
-    ports:
-      - '5000:5000'
-    environment:
-      - NODE_ENV=development
-      - DATABASE_URL=postgresql://parentix:parentix_secret@postgres:5432/parentix
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=change_this_in_production
-      - CLIENT_URL=http://localhost:3000
-    depends_on:
-      - postgres
-      - redis
-    volumes:
-      - ./server:/app
-      - /app/node_modules
-
-  client:
-    build: ./client
-    ports:
-      - '3000:3000'
-    environment:
-      - VITE_API_URL=http://localhost:5000
-    depends_on:
-      - server
-    volumes:
-      - ./client:/app
-      - /app/node_modules
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pg_data:

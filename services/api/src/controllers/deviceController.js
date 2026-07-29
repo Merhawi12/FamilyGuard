@@ -7,10 +7,14 @@ const { auditLog } = require('../utils/auditLogger');
 const { env } = require('../config/env');
 
 const getDevices = async (req, res, next) => {
-  const children = await Child.findAll({ where: { parentId: req.user.id }, attributes: ['id'] });
-  const childIds = children.map((c) => c.id);
-  const devices = await Device.findAll({ where: { childId: childIds, isActive: true }, include: ['child'] });
-  res.json(devices);
+  try {
+    const children = await Child.findAll({ where: { parentId: req.user.id }, attributes: ['id'] });
+    const childIds = children.map((c) => c.id);
+    const devices = await Device.findAll({ where: { childId: childIds, isActive: true }, include: ['child'] });
+    res.json(devices);
+  } catch (err) {
+    next(err);
+  }
 };
 
 const generateLink = async (req, res, next) => {
@@ -70,15 +74,19 @@ const confirmLink = async (req, res, next) => {
 };
 
 const removeDevice = async (req, res, next) => {
-  const device = await Device.findByPk(req.params.id);
-  if (!device) return res.status(404).json({ error: 'Device not found' });
+  try {
+    const device = await Device.findByPk(req.params.id);
+    if (!device) return res.status(404).json({ error: 'Device not found' });
 
-  const child = await Child.findOne({ where: { id: device.childId, parentId: req.user.id } });
-  if (!child) return res.status(403).json({ error: 'Forbidden' });
+    const child = await Child.findOne({ where: { id: device.childId, parentId: req.user.id } });
+    if (!child) return res.status(403).json({ error: 'Forbidden' });
 
-  await device.update({ isActive: false });
-  auditLog(req, { userId: req.user.id, action: 'device.removed', entity: 'Device', entityId: device.id });
-  res.json({ message: 'Device removed' });
+    await device.update({ isActive: false });
+    auditLog(req, { userId: req.user.id, action: 'device.removed', entity: 'Device', entityId: device.id });
+    res.json({ message: 'Device removed' });
+  } catch (err) {
+    next(err);
+  }
 };
 
 // GET /api/devices/me/rules — device-authenticated, returns all active rules for this device's child

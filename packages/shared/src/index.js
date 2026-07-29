@@ -1,5 +1,7 @@
 export { default as api, setTokenKey, setLoginPath, getToken, setToken, clearToken, errorMessage } from './api/client.js';
 export * from './api/endpoints.js';
+export { uploadChildAvatar } from './api/upload.js';
+export { default as Avatar } from './components/Avatar.jsx';
 export { AuthProvider, useAuth } from './auth/AuthContext.jsx';
 export { SocketProvider, useSocket } from './realtime/SocketContext.jsx';
 export { default as ErrorBoundary } from './components/ErrorBoundary.jsx';

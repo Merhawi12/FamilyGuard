@@ -30,13 +30,6 @@
           "locationAlwaysPermission": "Parentix needs background location to monitor your child's whereabouts.",
           "locationWhenInUsePermission": "Parentix needs location access for safety monitoring."
         }
-      ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/icon.png",
-          "color": "#2563eb"
-        }
       ]
     ],
     "extra": {

@@ -10,3 +10,11 @@ process.env.DATABASE_URL = '';        // force the SQLite branch in config/db
 process.env.SMTP_HOST = '';           // email utils no-op without a host
 process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'; // makes the (mocked) Stripe client non-null
 process.env.CLIENT_URL = 'http://localhost:3000';
+process.env.ADMIN_URL = 'http://localhost:3001';
+
+// Object storage is exercised against the manual AWS SDK mocks in __mocks__/,
+// so nothing here reaches the network.
+process.env.STORAGE_PROVIDER = 's3';
+process.env.S3_BUCKET = 'parentix-uploads-test';
+process.env.S3_PUBLIC_BASE_URL = 'https://app.parentix.test/media';
+process.env.AWS_REGION = 'us-east-2';

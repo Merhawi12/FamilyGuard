@@ -17,7 +17,6 @@ const migrator = new Umzug({
   migrations: {
     glob: ['migrations/*.js', { cwd: __dirname }],
     resolve: ({ name, path: filepath, context }) => {
-      // eslint-disable-next-line global-require, import/no-dynamic-require
       const migration = require(filepath);
       return {
         name,

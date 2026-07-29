@@ -1,0 +1,46 @@
+{
+  "root": true,
+  "env": { "es2022": true },
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module",
+    "ecmaFeatures": { "jsx": true }
+  },
+  "settings": { "react": { "version": "18.2" } },
+  "rules": {
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "no-undef": "error",
+    "no-console": "off",
+    "eqeqeq": ["warn", "smart"],
+    "prefer-const": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["apps/admin-dashboard/src/**/*.{js,jsx}", "apps/family-app/src/**/*.{js,jsx}", "packages/shared/src/**/*.{js,jsx}"],
+      "extends": ["eslint:recommended", "plugin:react/recommended", "plugin:react-hooks/recommended"],
+      "env": { "browser": true },
+      "rules": {
+        "react/prop-types": "off",
+        "react/react-in-jsx-scope": "off",
+        // Apostrophes and quotes read fine in JSX text and are all over the
+        // policy pages; escaping them would only hurt readability.
+        "react/no-unescaped-entities": "off"
+      }
+    },
+    {
+      "files": ["services/api/**/*.js"],
+      "extends": ["eslint:recommended"],
+      "env": { "node": true, "es2022": true },
+      "parserOptions": { "sourceType": "script" }
+    },
+    {
+      "files": ["services/api/tests/**/*.js", "services/api/__mocks__/**/*.js"],
+      "env": { "node": true, "jest": true }
+    },
+    {
+      "files": ["*.config.js", "apps/*/vite.config.js", "apps/*/tailwind.config.js", "apps/*/postcss.config.js"],
+      "env": { "node": true }
+    }
+  ],
+  "ignorePatterns": ["node_modules/", "dist/", "build/", "cdk.out/", "apps/child-app/android/"]
+}

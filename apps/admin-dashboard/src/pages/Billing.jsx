@@ -24,6 +24,8 @@ export default function AdminBilling() {
       .finally(() => setLoading(false));
   };
 
+  // Re-runs when a filter changes; 'load' is recreated each render by design.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [filters.status, filters.plan]);
 
   return (

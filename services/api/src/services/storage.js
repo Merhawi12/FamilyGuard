@@ -102,4 +102,34 @@ const keyFromUrl = (url) => {
   return url.startsWith(`${base}/`) ? url.slice(base.length + 1) : null;
 };
 
-module.exports = { isEnabled, createImageUploadUrl, deleteObject, publicUrl, keyFromUrl, ALLOWED_IMAGE_TYPES };
+/**
+ * Confirms a URL points at an object this service issued to *this* owner.
+ *
+ * Callers persist URLs that arrive in a request body, and later delete the URL
+ * they replaced. Without this check a caller could store a URL naming someone
+ * else's object and have the service delete it on the next update, so an
+ * unverified URL must never reach the database.
+ *
+ * @returns {string|null} the object key, or null if the URL is not the owner's.
+ */
+const ownedKeyFromUrl = (url, { prefix, ownerId }) => {
+  const key = keyFromUrl(url);
+  if (!key) return null;
+
+  const expected = `${prefix}/${ownerId}/`;
+  if (!key.startsWith(expected)) return null;
+
+  // Nothing may climb out of the owner's prefix.
+  const remainder = key.slice(expected.length);
+  return remainder && !remainder.includes('/') && !remainder.includes('..') ? key : null;
+};
+
+module.exports = {
+  isEnabled,
+  createImageUploadUrl,
+  deleteObject,
+  publicUrl,
+  keyFromUrl,
+  ownedKeyFromUrl,
+  ALLOWED_IMAGE_TYPES,
+};

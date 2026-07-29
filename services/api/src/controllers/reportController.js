@@ -1,4 +1,4 @@
-const { Op, fn, col, literal } = require('sequelize');
+const { Op } = require('sequelize');
 const { ActivityLog, Child } = require('../models');
 
 const getDailySummary = async (req, res) => {

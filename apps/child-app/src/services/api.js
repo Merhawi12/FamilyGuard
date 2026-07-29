@@ -1,7 +1,9 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://parentix.ca/api';
+// The child device talks to the API directly rather than through the CloudFront
+// distribution that fronts the web apps.
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.parentix.ca/api';
 
 const api = axios.create({ baseURL: API_URL });
 
@@ -24,7 +26,8 @@ export const device = {
 
 // ── Location ─────────────────────────────────────────────────────────────────
 export const location = {
-  // No auth required — childId + deviceId in body identify the device
+  // Device-authenticated: the server derives childId and deviceId from the
+  // device token, so neither may be supplied in the body.
   post: (data) => api.post('/locations', data),
 };
 

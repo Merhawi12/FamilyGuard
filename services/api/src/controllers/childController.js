@@ -37,13 +37,28 @@ const updateChild = async (req, res, next) => {
     if (name !== undefined) updates.name = name;
     if (age !== undefined) updates.age = age;
     if (avatar !== undefined) updates.avatar = avatar;
-    if (avatarUrl !== undefined) updates.avatarUrl = avatarUrl || null;
 
-    // Replacing or clearing a photo orphans the old object — clean it up.
+    if (avatarUrl !== undefined) {
+      if (!avatarUrl) {
+        updates.avatarUrl = null;
+      } else {
+        // Only a URL this service issued to this parent may be stored. An
+        // unchecked value would let a caller name someone else's object and
+        // have the cleanup below delete it on the next update.
+        const key = storage.ownedKeyFromUrl(avatarUrl, { prefix: 'child-avatars', ownerId: req.user.id });
+        if (!key) return res.status(400).json({ error: 'avatarUrl must be an uploaded Parentix image' });
+        updates.avatarUrl = avatarUrl;
+      }
+    }
+
+    // Replacing or clearing a photo orphans the old object — clean it up. The
+    // previous value came from this same validated path, so the key is ours.
     const previousUrl = child.avatarUrl;
     await child.update(updates);
+
     if (previousUrl && previousUrl !== child.avatarUrl) {
-      storage.deleteObject(storage.keyFromUrl(previousUrl));
+      const staleKey = storage.ownedKeyFromUrl(previousUrl, { prefix: 'child-avatars', ownerId: req.user.id });
+      if (staleKey) storage.deleteObject(staleKey);
     }
 
     res.json(child);

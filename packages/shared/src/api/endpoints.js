@@ -105,6 +105,11 @@ export const contactForm = {
   send: (data) => api.post('/contact', data),
 };
 
+export const uploads = {
+  /** Mints a short-lived pre-signed S3 PUT URL for a child profile photo. */
+  childAvatar: (data) => api.post('/uploads/child-avatar', data),
+};
+
 /** Staff-only surface — every call is additionally gated server-side by role. */
 export const admin = {
   listClients: () => api.get('/admin/clients'),

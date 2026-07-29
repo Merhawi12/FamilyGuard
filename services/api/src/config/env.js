@@ -31,7 +31,25 @@ const corsOrigins = [
   ...list(process.env.CORS_ORIGINS),
 ];
 
-const databaseUrl = process.env.DATABASE_URL || '';
+/**
+ * Postgres can be configured two ways:
+ *
+ *   DATABASE_URL          a single connection string (local, Docker Compose)
+ *   DB_HOST/DB_USER/…     discrete fields, which is all an AWS Secrets Manager
+ *                         RDS secret can inject into an ECS task
+ *
+ * Discrete fields win when present so a task definition never has to compose
+ * the URL itself.
+ */
+const buildDatabaseUrl = () => {
+  const { DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD } = process.env;
+  if (!DB_HOST || !DB_USER) return process.env.DATABASE_URL || '';
+
+  const credentials = `${encodeURIComponent(DB_USER)}:${encodeURIComponent(DB_PASSWORD || '')}`;
+  return `postgresql://${credentials}@${DB_HOST}:${DB_PORT || 5432}/${DB_NAME || 'parentix'}`;
+};
+
+const databaseUrl = buildDatabaseUrl();
 const usePostgres = /^postgres(ql)?:\/\//.test(databaseUrl);
 
 const env = Object.freeze({

@@ -1,4 +1,11 @@
 node_modules
-*.sqlite
-.env
 npm-debug.log
+*.log
+*.sqlite
+*.sqlite3
+.env
+.env.*
+tests
+__mocks__
+coverage
+.nyc_output

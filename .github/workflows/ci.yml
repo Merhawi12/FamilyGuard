@@ -6,35 +6,70 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  server-tests:
-    name: Server tests
+  api:
+    name: API tests
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: server
+        working-directory: services/api
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: server/package-lock.json
+          cache-dependency-path: services/api/package-lock.json
       - run: npm ci
       - run: npm test
 
-  client-build:
-    name: Client build
+  web:
+    name: Web builds
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: client
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: client/package-lock.json
+          cache-dependency-path: package-lock.json
+      # One install at the workspace root covers the shared package and both apps.
       - run: npm ci
+      - run: npm run lint
       - run: npm run build
+
+  infrastructure:
+    name: Infrastructure synth
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure/aws
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: infrastructure/aws/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      # Synthesising both environments catches template errors before a deploy.
+      - run: npx cdk synth -c env=dev --quiet
+      - run: npx cdk synth -c env=prod --quiet
+
+  image:
+    name: API image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/api
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

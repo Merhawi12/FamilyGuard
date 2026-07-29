@@ -1,4 +1,4 @@
-const { Device, Alert, Message, Child } = require('../models');
+const { Device, Message, Child } = require('../models');
 const { createAlert } = require('../utils/alertHelper');
 const { detectCyberbullying } = require('../utils/cyberbullyingDetector');
 const logger = require('../utils/logger');

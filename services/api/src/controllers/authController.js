@@ -156,7 +156,7 @@ const login = async (req, res, next) => {
   }
 };
 
-const me = async (req, res, next) => {
+const me = async (req, res) => {
   res.json(serializeUser(req.user));
 };
 

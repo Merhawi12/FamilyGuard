@@ -16,6 +16,8 @@ export default function AdminAuditLogs() {
       .finally(() => setLoading(false));
   };
 
+  // The list loads once on mount; reloads are triggered explicitly by actions.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, []);
 
   return (

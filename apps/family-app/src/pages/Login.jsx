@@ -12,8 +12,9 @@ export default function Login() {
   const [resendCooldown, setResendCooldown] = useState(0);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotSent, setForgotSent] = useState(false);
+  const [mfa, setMfa] = useState({ preAuthToken: '', code: '' });
 
-  const { login, register, verifyEmail } = useAuth();
+  const { login, completeMfa, register, verifyEmail } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const redirectPlan = new URLSearchParams(location.search).get('redirect');
@@ -24,13 +25,14 @@ export default function Login() {
     setLoading(true);
     try {
       if (tab === 'login') {
-        await login(form.email, form.password);
-        if (redirectPlan === 'premium' || redirectPlan === 'family') {
-          const res = await payments.createCheckoutSession(redirectPlan);
-          window.location.href = res.data.url;
+        const result = await login(form.email, form.password);
+        // Accounts with MFA on get a challenge instead of a session.
+        if (result.mfaRequired) {
+          setMfa({ preAuthToken: result.preAuthToken, code: '' });
+          setTab('mfa');
           return;
         }
-        navigate('/dashboard');
+        await finishSignIn();
       } else {
         await register(form.name, form.email, form.password);
         setPendingEmail(form.email);
@@ -44,12 +46,35 @@ export default function Login() {
         setTab('verify');
         return;
       }
-      const msg = data?.error;
-      if (!err.response || (err.response.status >= 500 && !msg)) {
-        setError('Backend server is not running. Start it with: cd server && npm run dev');
-      } else {
-        setError(msg || `Server error (${err.response?.status})`);
-      }
+      setError(
+        err.response
+          ? errorMessage(err, `Server error (${err.response.status})`)
+          : 'Could not reach the Parentix service. Check your connection and try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Shared tail of a successful sign-in, with or without MFA.
+  const finishSignIn = async () => {
+    if (redirectPlan === 'premium' || redirectPlan === 'family') {
+      const res = await payments.createCheckoutSession(redirectPlan);
+      window.location.href = res.data.url;
+      return;
+    }
+    navigate('/dashboard');
+  };
+
+  const handleMfa = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      await completeMfa(mfa.preAuthToken, mfa.code.trim());
+      await finishSignIn();
+    } catch (err) {
+      setError(errorMessage(err, 'That code was not accepted.'));
     } finally {
       setLoading(false);
     }
@@ -135,8 +160,48 @@ export default function Login() {
           <p className="text-gray-500 text-sm mt-2">Parental Control & Digital Safety</p>
         </div>
 
-        {/* Verify Email Step */}
-        {tab === 'verify' ? (
+        {/* Two-factor challenge — shown when the account has MFA enabled */}
+        {tab === 'mfa' ? (
+          <div>
+            <div className="text-center mb-6">
+              <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <span className="text-2xl">🔐</span>
+              </div>
+              <h2 className="text-xl font-bold text-gray-900">Two-factor authentication</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Enter the 6-digit code from your authenticator app, or one of your backup codes.
+              </p>
+            </div>
+
+            <form onSubmit={handleMfa} className="space-y-5">
+              <input
+                className="input text-center text-2xl tracking-[0.4em] py-3"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus
+                maxLength={10}
+                value={mfa.code}
+                onChange={(e) => setMfa((m) => ({ ...m, code: e.target.value }))}
+                required
+              />
+
+              {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+
+              <button type="submit" disabled={loading} className="btn-primary w-full py-3">
+                {loading ? 'Verifying...' : 'Verify'}
+              </button>
+            </form>
+
+            <div className="text-center mt-4">
+              <button
+                onClick={() => { setTab('login'); setError(''); setMfa({ preAuthToken: '', code: '' }); }}
+                className="text-sm text-gray-400 hover:text-gray-600"
+              >
+                ← Back to sign in
+              </button>
+            </div>
+          </div>
+        ) : tab === 'verify' ? (
           <div>
             <div className="text-center mb-6">
               <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">

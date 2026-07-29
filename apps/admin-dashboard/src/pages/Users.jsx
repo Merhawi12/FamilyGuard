@@ -54,6 +54,8 @@ export default function AdminUsers() {
       .finally(() => setLoading(false));
   };
 
+  // Re-runs when a filter changes; 'load' is recreated each render by design.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [filters.role, filters.plan, filters.status]);
 
   const runAction = async (id, fn) => {

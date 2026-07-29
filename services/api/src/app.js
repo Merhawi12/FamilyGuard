@@ -21,21 +21,47 @@ app.set('trust proxy', env.trustProxy);
 app.disable('x-powered-by');
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
-// Same-origin deployments (CloudFront routing /api/* to the ALB) send no Origin
-// header at all; cross-origin callers must be on the allowlist.
-const corsOptions = {
-  origin(origin, callback) {
-    if (!origin || env.corsOrigins.includes(origin.replace(/\/$/, ''))) return callback(null, true);
-    callback(new Error(`Origin ${origin} is not allowed by CORS`));
-  },
-  credentials: true,
+/**
+ * An origin is allowed when it is on the configured allowlist, or when it is
+ * simply the host the request already arrived on.
+ *
+ * The second case is what makes the CloudFront deployment work: the web apps
+ * and `/api/*` are served from the same distribution, so a browser POST carries
+ * `Origin: https://<distribution>` even though nothing is cross-origin. Treating
+ * that as allowed means the API does not need to be redeployed with each new
+ * CloudFront domain, and it grants nothing a same-origin request did not
+ * already have.
+ */
+const isAllowedOrigin = (origin, req) => {
+  if (!origin) return true; // non-browser client, or a same-origin GET
+  const normalized = origin.replace(/\/$/, '');
+  if (env.corsOrigins.includes(normalized)) return true;
+
+  const host = req?.headers?.host;
+  return !!host && (normalized === `https://${host}` || normalized === `http://${host}`);
 };
 
-const io = new Server(httpServer, { cors: corsOptions });
+const corsDelegate = (req, callback) => {
+  const origin = req.headers?.origin;
+  if (isAllowedOrigin(origin, req)) return callback(null, { origin: origin || true, credentials: true });
+  callback(null, { origin: false });
+};
+
+const io = new Server(httpServer, {
+  cors: {
+    origin(origin, callback) {
+      // Socket.IO's handshake carries no Express request, so only the
+      // configured allowlist applies here.
+      if (!origin || env.corsOrigins.includes(origin.replace(/\/$/, ''))) return callback(null, true);
+      callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    },
+    credentials: true,
+  },
+});
 attachSocketAuth(io);
 
 app.use(helmet());
-app.use(cors(corsOptions));
+app.use(cors(corsDelegate));
 app.use(compression());
 
 // ── Request context ──────────────────────────────────────────────────────────
