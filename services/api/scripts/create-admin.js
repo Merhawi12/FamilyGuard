@@ -121,11 +121,17 @@ const run = async () => {
     // Promoting an existing account leaves its password alone unless one was
     // explicitly supplied — an operator running this twice should not silently
     // lock the person out.
-    const updates = { role, isActive: true, emailVerified: true };
+    //
+    // The failed-login lockout is always cleared: this script is the recovery
+    // path, and resetting someone's password only to leave them locked out for
+    // another 15 minutes is not a useful outcome.
+    const wasLocked = !!existing.lockedUntil && new Date() < new Date(existing.lockedUntil);
+    const updates = { role, isActive: true, emailVerified: true, failedLoginAttempts: 0, lockedUntil: null };
     if (supplied) updates.passwordHash = password;
 
     await existing.update(updates);
     console.log(`Updated ${email}: role=${role}, active, verified.`);
+    if (wasLocked) console.log('Cleared the failed-login lockout.');
     console.log(supplied ? 'Password was reset to the value you supplied.' : 'Password unchanged.');
   } else {
     await User.create({
