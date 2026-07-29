@@ -1,4 +1,4 @@
-rootProject.name = 'FamilyGuard'
+rootProject.name = 'Parentix'
 
 dependencyResolutionManagement {
   versionCatalogs {

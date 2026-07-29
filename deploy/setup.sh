@@ -18,14 +18,14 @@ sudo apt install -y nginx postgresql postgresql-contrib
 echo "=== 4. Set up PostgreSQL ==="
 sudo systemctl start postgresql
 sudo systemctl enable postgresql
-sudo -u postgres psql -c "CREATE USER familyguard WITH PASSWORD 'change_this_password';"
-sudo -u postgres psql -c "CREATE DATABASE familyguard OWNER familyguard;"
+sudo -u postgres psql -c "CREATE USER parentix WITH PASSWORD 'change_this_password';"
+sudo -u postgres psql -c "CREATE DATABASE parentix OWNER parentix;"
 
 echo "=== 5. Clone repository ==="
 # Replace with your actual GitHub repo URL
-read -p "Enter your GitHub repo URL (e.g. https://github.com/you/familyguard.git): " REPO_URL
-git clone "$REPO_URL" /home/ubuntu/familyguard
-cd /home/ubuntu/familyguard
+read -p "Enter your GitHub repo URL (e.g. https://github.com/you/parentix.git): " REPO_URL
+git clone "$REPO_URL" /home/ubuntu/parentix
+cd /home/ubuntu/parentix
 
 echo "=== 6. Install backend dependencies ==="
 cd server && npm install --production
@@ -35,7 +35,7 @@ PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
 cat > .env <<EOF
 NODE_ENV=production
 PORT=5000
-DATABASE_URL=postgresql://familyguard:change_this_password@localhost:5432/familyguard
+DATABASE_URL=postgresql://parentix:change_this_password@localhost:5432/parentix
 JWT_SECRET=$(openssl rand -hex 32)
 JWT_EXPIRES_IN=7d
 CLIENT_URL=http://$PUBLIC_IP
@@ -44,9 +44,9 @@ SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=
 SMTP_PASS=
-SMTP_FROM=FamilyGuard <noreply@familyguard.com>
+SMTP_FROM=Parentix <noreply@parentix.ca>
 EOF
-echo ".env created — edit /home/ubuntu/familyguard/server/.env to fill in SMTP settings"
+echo ".env created — edit /home/ubuntu/parentix/server/.env to fill in SMTP settings"
 
 echo "=== 8. Build React frontend ==="
 cd ../client
@@ -54,13 +54,13 @@ npm install
 VITE_API_URL="" npm run build
 
 echo "=== 9. Copy frontend build to Nginx ==="
-sudo mkdir -p /var/www/familyguard
-sudo cp -r dist/* /var/www/familyguard/
-sudo chown -R www-data:www-data /var/www/familyguard
+sudo mkdir -p /var/www/parentix
+sudo cp -r dist/* /var/www/parentix/
+sudo chown -R www-data:www-data /var/www/parentix
 
 echo "=== 10. Configure Nginx ==="
-sudo cp ../deploy/nginx.conf /etc/nginx/sites-available/familyguard
-sudo ln -sf /etc/nginx/sites-available/familyguard /etc/nginx/sites-enabled/familyguard
+sudo cp ../deploy/nginx.conf /etc/nginx/sites-available/parentix
+sudo ln -sf /etc/nginx/sites-available/parentix /etc/nginx/sites-enabled/parentix
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 sudo systemctl enable nginx

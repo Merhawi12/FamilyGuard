@@ -1,4 +1,4 @@
-package com.familyguard
+package com.parentix
 
 import android.app.AppOpsManager
 import android.app.usage.UsageStatsManager

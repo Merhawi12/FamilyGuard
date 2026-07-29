@@ -115,6 +115,12 @@ const updateRole = async (req, res) => {
     const user = await User.findByPk(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
+    // Only a full admin may grant or revoke the admin role. A support user with
+    // the manage_users permission must not be able to escalate anyone (incl. self) to admin.
+    if ((role === 'admin' || user.role === 'admin') && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only an admin can grant or revoke admin privileges' });
+    }
+
     const previousRole = user.role;
     await user.update({ role, permissions });
 

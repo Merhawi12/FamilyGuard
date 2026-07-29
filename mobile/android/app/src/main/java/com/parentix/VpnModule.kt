@@ -1,4 +1,4 @@
-package com.familyguard
+package com.parentix
 
 import android.app.Activity
 import android.content.Intent
@@ -32,18 +32,18 @@ class VpnModule(private val ctx: ReactApplicationContext) :
     @ReactMethod
     fun startVpn(domains: ReadableArray, promise: Promise) {
         val list = ArrayList<String>().apply { for (i in 0 until domains.size()) domains.getString(i)?.let { add(it) } }
-        FamilyGuardVpnService.instance?.let { it.updateBlockedDomains(list); promise.resolve(true); return }
+        ParentixVpnService.instance?.let { it.updateBlockedDomains(list); promise.resolve(true); return }
         if (VpnService.prepare(ctx) != null) { promise.reject("PERMISSION_REQUIRED", "Call requestPermission first"); return }
-        ctx.startService(Intent(ctx, FamilyGuardVpnService::class.java).apply {
-            action = FamilyGuardVpnService.ACTION_START
-            putStringArrayListExtra(FamilyGuardVpnService.EXTRA_DOMAINS, list)
+        ctx.startService(Intent(ctx, ParentixVpnService::class.java).apply {
+            action = ParentixVpnService.ACTION_START
+            putStringArrayListExtra(ParentixVpnService.EXTRA_DOMAINS, list)
         })
         promise.resolve(true)
     }
 
     @ReactMethod
     fun stopVpn(promise: Promise) {
-        ctx.startService(Intent(ctx, FamilyGuardVpnService::class.java).apply { action = FamilyGuardVpnService.ACTION_STOP })
+        ctx.startService(Intent(ctx, ParentixVpnService::class.java).apply { action = ParentixVpnService.ACTION_STOP })
         promise.resolve(true)
     }
 

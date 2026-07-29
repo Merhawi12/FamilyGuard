@@ -1,4 +1,4 @@
-package com.familyguard.child
+package com.parentix.child
 
 import android.app.Application
 import android.content.res.Configuration
@@ -26,9 +26,9 @@ class MainApplication : Application(), ReactApplication {
         object : DefaultReactNativeHost(this) {
           override fun getPackages(): List<ReactPackage> {
             return PackageList(this).packages + listOf(
-              com.familyguard.UsageStatsPackage(),
-              com.familyguard.AppBlockerPackage(),
-              com.familyguard.VpnPackage(),
+              com.parentix.UsageStatsPackage(),
+              com.parentix.AppBlockerPackage(),
+              com.parentix.VpnPackage(),
             )
           }
 

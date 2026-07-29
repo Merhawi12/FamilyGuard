@@ -105,7 +105,7 @@ export default function LandingPage() {
       {/* Navbar */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur border-b border-gray-100">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link to="/"><img src="/logo.png" alt="FamilyGuard" className="h-16 w-auto" /></Link>
+          <Link to="/"><img src="/logo.png" alt="Parentix" className="h-16 w-auto" /></Link>
 
           {/* Desktop links */}
           <div className="hidden md:flex items-center gap-4">
@@ -155,7 +155,7 @@ export default function LandingPage() {
             <span className="text-blue-600">online</span>
           </h1>
           <p className="text-base md:text-xl text-gray-500 max-w-2xl mx-auto mb-8 md:mb-10 leading-relaxed">
-            FamilyGuard gives parents complete visibility and control over their children's digital lives —
+            Parentix gives parents complete visibility and control over their children's digital lives —
             screen time, location, app usage, and more, all from one dashboard.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 md:gap-4 justify-center">
@@ -182,7 +182,7 @@ export default function LandingPage() {
               <div className="w-3 h-3 rounded-full bg-red-400" />
               <div className="w-3 h-3 rounded-full bg-yellow-400" />
               <div className="w-3 h-3 rounded-full bg-green-400" />
-              <span className="ml-4 text-xs text-gray-400 font-mono truncate">familyguard.app/dashboard</span>
+              <span className="ml-4 text-xs text-gray-400 font-mono truncate">parentix.ca/dashboard</span>
             </div>
             <div className="p-4 md:p-8 grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
               {[
@@ -237,18 +237,18 @@ export default function LandingPage() {
       <section id="about" className="py-14 md:py-24 px-4 md:px-6 bg-white">
         <div className="max-w-4xl mx-auto text-center">
           <span className="inline-block bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full mb-4 uppercase tracking-wide">
-            About FamilyGuard
+            About Parentix
           </span>
           <h2 className="text-4xl font-bold text-gray-900 mb-6">
             One platform. Complete family protection.
           </h2>
           <p className="text-lg text-gray-500 leading-relaxed mb-8">
-            FamilyGuard is a parental control and digital safety platform that gives parents complete visibility
+            Parentix is a parental control and digital safety platform that gives parents complete visibility
             and control over their children's digital lives from a single, easy-to-use dashboard.
           </p>
           <p className="text-lg text-gray-500 leading-relaxed">
             As children spend more time online, parents struggle to monitor screen time, social media usage,
-            online safety, location, and digital habits. FamilyGuard solves this problem by providing
+            online safety, location, and digital habits. Parentix solves this problem by providing
             real-time monitoring, intelligent alerts, and powerful parental controls across smartphones,
             tablets, and computers.
           </p>
@@ -288,7 +288,7 @@ export default function LandingPage() {
             Everything in one place
           </h2>
           <p className="text-xl text-blue-100 leading-relaxed mb-10">
-            FamilyGuard combines all essential parental control and child safety tools into one platform —
+            Parentix combines all essential parental control and child safety tools into one platform —
             replacing the patchwork of separate apps with a single, unified solution that leaves no gaps in protection.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-left">
@@ -343,7 +343,7 @@ export default function LandingPage() {
             </span>
             <h2 className="text-4xl font-bold text-gray-900 mb-4">Built for families and institutions</h2>
             <p className="text-lg text-gray-500 max-w-2xl mx-auto">
-              FamilyGuard serves anyone responsible for the digital safety of children.
+              Parentix serves anyone responsible for the digital safety of children.
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
@@ -391,7 +391,7 @@ export default function LandingPage() {
               Start free and upgrade when you're ready. No hidden fees. No contracts. No surprises.
             </p>
             <p className="text-gray-500 max-w-2xl mx-auto">
-              FamilyGuard is designed to grow with your family. Whether you're protecting one child or managing
+              Parentix is designed to grow with your family. Whether you're protecting one child or managing
               multiple devices, you'll only pay for what you need.
             </p>
           </div>
@@ -589,7 +589,7 @@ export default function LandingPage() {
         <div className="max-w-3xl mx-auto text-center">
           <h2 className="text-4xl font-bold text-white mb-4">Start protecting your family today</h2>
           <p className="text-blue-100 text-lg mb-8">
-            Join thousands of parents using FamilyGuard to keep their children safe online.
+            Join thousands of parents using Parentix to keep their children safe online.
           </p>
           <Link
             to="/login"
@@ -602,13 +602,13 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer className="py-10 px-6 bg-gray-900 text-center">
-        <Link to="/"><img src="/logo.png" alt="FamilyGuard" className="h-10 w-auto mx-auto mb-4 opacity-80" /></Link>
+        <Link to="/"><img src="/logo.png" alt="Parentix" className="h-10 w-auto mx-auto mb-4 opacity-80" /></Link>
         <div className="flex justify-center gap-6 mb-4">
           <Link to="/privacy-policy" className="text-gray-400 hover:text-white text-sm transition">Privacy Policy</Link>
           <Link to="/terms" className="text-gray-400 hover:text-white text-sm transition">Terms of Service</Link>
         </div>
         <p className="text-gray-400 text-sm">
-          &copy; {new Date().getFullYear()} FamilyGuard. Parental Control & Digital Safety.
+          &copy; {new Date().getFullYear()} Parentix. Parental Control & Digital Safety.
         </p>
       </footer>
     </div>

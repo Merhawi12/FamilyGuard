@@ -18,9 +18,13 @@ const haversineMeters = (lat1, lng1, lat2, lng2) => {
 // Body: { childId, deviceId, latitude, longitude, accuracy?, speed?, heading?, address? }
 const postLocation = async (req, res) => {
   try {
-    const { childId, deviceId, latitude, longitude, accuracy, speed, heading, address } = req.body;
-    if (!childId || !deviceId || latitude == null || longitude == null) {
-      return res.status(400).json({ error: 'childId, deviceId, latitude, longitude are required' });
+    // Identity comes from the authenticated device token (authenticateDevice),
+    // NOT from the request body — prevents spoofing another child's location.
+    const childId = req.childId;
+    const deviceId = req.deviceId;
+    const { latitude, longitude, accuracy, speed, heading, address } = req.body;
+    if (latitude == null || longitude == null) {
+      return res.status(400).json({ error: 'latitude and longitude are required' });
     }
 
     const location = await Location.create({

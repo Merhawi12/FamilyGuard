@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const jwt = require('jsonwebtoken');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const { sequelize } = require('./config/db');
@@ -10,10 +11,46 @@ const initSocketHandlers = require('./sockets/deviceEvents');
 const { analyzeParent } = require('./utils/safetyAnalyzer');
 
 const app = express();
+// Behind the nginx reverse proxy (one hop): trust X-Forwarded-* so req.ip and
+// rate-limiting key off the real client address, not nginx's localhost.
+app.set('trust proxy', 1);
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: { origin: process.env.CLIENT_URL || 'http://localhost:3000', credentials: true },
+});
+
+// ── Socket.IO handshake authentication ───────────────────────────────────────
+// Every socket must present a valid JWT (parent session token OR device token).
+// The authenticated identity is stored on socket.data and is the ONLY source of
+// truth for room membership — client-supplied ids are never trusted.
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error('Authentication required'));
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    if (decoded.deviceId && decoded.childId) {
+      const device = await Device.findByPk(decoded.deviceId);
+      if (!device || !device.isActive) return next(new Error('Device revoked'));
+      const child = await Child.findByPk(decoded.childId, { attributes: ['id', 'parentId'] });
+      if (!child) return next(new Error('Child not found'));
+      socket.data.role = 'child';
+      socket.data.deviceId = decoded.deviceId;
+      socket.data.childId = decoded.childId;
+      socket.data.parentId = child.parentId;
+    } else if (decoded.id) {
+      const user = await User.findByPk(decoded.id, { attributes: ['id', 'isActive'] });
+      if (!user || !user.isActive) return next(new Error('Unauthorized'));
+      socket.data.role = 'parent';
+      socket.data.parentId = user.id;
+    } else {
+      return next(new Error('Invalid token'));
+    }
+    next();
+  } catch {
+    next(new Error('Invalid token'));
+  }
 });
 
 app.use(helmet());
@@ -44,9 +81,19 @@ app.use('/api/contacts', require('./routes/contacts'));
 app.use('/api/contact', require('./routes/contactForm'));
 app.use('/api/notifications', require('./routes/notifications'));
 
+// Health check for load balancers / uptime monitoring
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+});
+
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+  const status = err.status || 500;
+  // Never leak internal error details (Sequelize/DB messages, stack) to clients in production
+  const message = status < 500 || process.env.NODE_ENV !== 'production'
+    ? (err.message || 'Internal server error')
+    : 'Internal server error';
+  res.status(status).json({ error: message });
 });
 
 app.set('io', io);
@@ -82,7 +129,7 @@ const startServer = async () => {
     await addIndexIfMissing('alerts', ['parent_id']);
     await addIndexIfMissing('alerts', ['child_id']);
 
-    httpServer.listen(PORT, () => console.log(`FamilyGuard server running on port ${PORT}`));
+    httpServer.listen(PORT, () => console.log(`Parentix server running on port ${PORT}`));
 
     // Hourly safety pattern analysis for all parents
     setInterval(async () => {
@@ -103,4 +150,10 @@ const startServer = async () => {
   }
 };
 
-startServer();
+// Only auto-boot when run directly (node src/app.js). When imported (e.g. by the
+// test suite via supertest) the caller controls DB setup and lifecycle.
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = { app, httpServer, io, startServer };

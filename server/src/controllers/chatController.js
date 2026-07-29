@@ -65,9 +65,11 @@ const sendMessage = async (req, res) => {
 // Called by the mobile app — no parent auth, identified by childId + deviceId pairing
 const receiveFromChild = async (req, res) => {
   try {
-    const { childId } = req.params;
-    const { text, messageType = 'normal', deviceId } = req.body;
-    if (!text?.trim() || !deviceId) return res.status(400).json({ error: 'text and deviceId are required' });
+    // Identity comes from the authenticated device token (authenticateDevice).
+    const childId = req.childId;
+    const deviceId = req.deviceId;
+    const { text, messageType = 'normal' } = req.body;
+    if (!text?.trim()) return res.status(400).json({ error: 'text is required' });
 
     const child = await Child.findByPk(childId, { attributes: ['id', 'parentId'] });
     if (!child) return res.status(404).json({ error: 'Child not found' });

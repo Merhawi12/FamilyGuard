@@ -50,7 +50,7 @@ export default function HomeScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>🛡️ FamilyGuard</Text>
+      <Text style={styles.title}>🛡️ Parentix</Text>
       <Text style={styles.sub}>Device ID: {deviceId?.slice(0, 8) ?? '—'}...</Text>
 
       {/* Monitoring status */}

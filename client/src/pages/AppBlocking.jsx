@@ -77,12 +77,12 @@ export default function AppBlocking() {
           <div className="bg-blue-50 rounded-xl p-4 text-left max-w-sm mx-auto text-sm space-y-2">
             <p className="font-semibold text-blue-700">How to get started:</p>
             <ol className="text-gray-600 space-y-1 list-decimal list-inside">
-              <li>Go to <a href="/children" className="text-blue-600 underline font-medium">Children</a> and add a child profile</li>
+              <li>Go to <a href="/dashboard/children" className="text-blue-600 underline font-medium">Children</a> and add a child profile</li>
               <li>Link their device using the QR code or 8-digit code</li>
               <li>Come back here to block apps & websites</li>
             </ol>
           </div>
-          <a href="/children" className="btn-primary inline-block mt-6 px-6">Go to Children →</a>
+          <a href="/dashboard/children" className="btn-primary inline-block mt-6 px-6">Go to Children →</a>
         </div>
       ) : null}
 

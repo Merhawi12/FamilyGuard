@@ -11,7 +11,7 @@ const sequelize = isPostgres
     })
   : new Sequelize({
       dialect: 'sqlite',
-      storage: process.env.DB_PATH || './familyguard.sqlite',
+      storage: process.env.DB_PATH || './parentix.sqlite',
       logging: false,
     });
 

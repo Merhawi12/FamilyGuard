@@ -6,7 +6,7 @@ export default function PrivacyPolicy() {
       {/* Navbar */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur border-b border-gray-100">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link to="/"><img src="/logo.png" alt="FamilyGuard" className="h-16 w-auto" /></Link>
+          <Link to="/"><img src="/logo.png" alt="Parentix" className="h-16 w-auto" /></Link>
           <div className="flex items-center gap-4">
             <Link to="/login" className="text-sm font-medium text-gray-600 hover:text-blue-600 transition">Sign In</Link>
             <Link to="/login" className="text-sm font-medium bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
@@ -32,12 +32,12 @@ export default function PrivacyPolicy() {
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-3">1. Introduction</h2>
               <p>
-                FamilyGuard ("we", "our", or "us") is committed to protecting the privacy of parents and children
+                Parentix ("we", "our", or "us") is committed to protecting the privacy of parents and children
                 who use our platform. This Privacy Policy explains how we collect, use, disclose, and safeguard
                 your information when you use our parental control and digital safety services.
               </p>
               <p className="mt-3">
-                By using FamilyGuard, you agree to the collection and use of information in accordance with this policy.
+                By using Parentix, you agree to the collection and use of information in accordance with this policy.
               </p>
             </section>
 
@@ -57,7 +57,7 @@ export default function PrivacyPolicy() {
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-3">3. How We Use Your Information</h2>
               <ul className="list-disc pl-6 space-y-2">
-                <li>To provide, operate, and maintain the FamilyGuard platform.</li>
+                <li>To provide, operate, and maintain the Parentix platform.</li>
                 <li>To send you alerts, notifications, and activity reports.</li>
                 <li>To improve and personalize your experience.</li>
                 <li>To process subscriptions and manage billing.</li>
@@ -69,7 +69,7 @@ export default function PrivacyPolicy() {
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-3">4. Children's Privacy</h2>
               <p>
-                FamilyGuard is designed for use by parents to monitor their minor children. We do not knowingly
+                Parentix is designed for use by parents to monitor their minor children. We do not knowingly
                 collect personal information directly from children under 13 without verifiable parental consent.
                 All child data is collected through the parent's account and is accessible only to that parent.
               </p>
@@ -130,7 +130,7 @@ export default function PrivacyPolicy() {
               <h2 className="text-xl font-bold text-gray-900 mb-3">10. Changes to This Policy</h2>
               <p>
                 We may update this Privacy Policy from time to time. We will notify you of significant changes
-                by email or through a notice on our platform. Continued use of FamilyGuard after changes
+                by email or through a notice on our platform. Continued use of Parentix after changes
                 constitutes acceptance of the updated policy.
               </p>
             </section>
@@ -139,8 +139,8 @@ export default function PrivacyPolicy() {
               <h2 className="text-xl font-bold text-gray-900 mb-3">11. Contact Us</h2>
               <p>If you have questions about this Privacy Policy, please contact us at:</p>
               <div className="mt-3 p-4 bg-gray-50 rounded-xl border border-gray-200 text-sm">
-                <p><strong>FamilyGuard Support</strong></p>
-                <p>Email: privacy@familyguard.app</p>
+                <p><strong>Parentix Support</strong></p>
+                <p>Email: privacy@parentix.ca</p>
               </div>
             </section>
 
@@ -150,12 +150,12 @@ export default function PrivacyPolicy() {
 
       {/* Footer */}
       <footer className="py-10 px-6 bg-gray-900 text-center">
-        <Link to="/"><img src="/logo.png" alt="FamilyGuard" className="h-10 w-auto mx-auto mb-4 opacity-80" /></Link>
+        <Link to="/"><img src="/logo.png" alt="Parentix" className="h-10 w-auto mx-auto mb-4 opacity-80" /></Link>
         <div className="flex justify-center gap-6 mb-4">
           <Link to="/privacy-policy" className="text-gray-400 hover:text-white text-sm transition">Privacy Policy</Link>
           <Link to="/terms" className="text-gray-400 hover:text-white text-sm transition">Terms of Service</Link>
         </div>
-        <p className="text-gray-400 text-sm">&copy; {new Date().getFullYear()} FamilyGuard. Parental Control & Digital Safety.</p>
+        <p className="text-gray-400 text-sm">&copy; {new Date().getFullYear()} Parentix. Parental Control & Digital Safety.</p>
       </footer>
     </div>
   );

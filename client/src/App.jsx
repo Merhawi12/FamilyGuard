@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
+import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
@@ -38,50 +39,60 @@ const PrivateRoute = ({ children }) => {
   return user ? children : <Navigate to="/login" replace />;
 };
 
+// Gate admin routes to staff roles — the backend already 403s each call, but the
+// UI must not render the admin dashboard for a regular parent who guesses the URL.
+const AdminRoute = ({ children }) => {
+  const { user } = useAuth();
+  if (user && (user.role === 'admin' || user.role === 'support')) return children;
+  return <Navigate to="/dashboard" replace />;
+};
+
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<GoToLanding />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route
-            path="/dashboard"
-            element={
-              <PrivateRoute>
-                <SocketProvider>
-                  <Layout />
-                </SocketProvider>
-              </PrivateRoute>
-            }
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="children" element={<Children />} />
-            <Route path="screen-time" element={<ScreenTime />} />
-            <Route path="blocking" element={<AppBlocking />} />
-            <Route path="activity" element={<ActivityLog />} />
-            <Route path="reports" element={<Reports />} />
-            <Route path="alerts" element={<Alerts />} />
-            <Route path="location" element={<Location />} />
-            <Route path="messages" element={<Messages />} />
-            <Route path="contacts" element={<Contacts />} />
-            <Route path="admin" element={<AdminLayout />}>
-              <Route index element={<AdminOverview />} />
-              <Route path="users" element={<AdminUsers />} />
-              <Route path="sessions" element={<AdminSessions />} />
-              <Route path="billing" element={<AdminBilling />} />
-              <Route path="notifications" element={<AdminNotifications />} />
-              <Route path="settings" element={<AdminSettings />} />
-              <Route path="audit-logs" element={<AdminAuditLogs />} />
+    <ErrorBoundary>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<GoToLanding />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route
+              path="/dashboard"
+              element={
+                <PrivateRoute>
+                  <SocketProvider>
+                    <Layout />
+                  </SocketProvider>
+                </PrivateRoute>
+              }
+            >
+              <Route index element={<Dashboard />} />
+              <Route path="children" element={<Children />} />
+              <Route path="screen-time" element={<ScreenTime />} />
+              <Route path="blocking" element={<AppBlocking />} />
+              <Route path="activity" element={<ActivityLog />} />
+              <Route path="reports" element={<Reports />} />
+              <Route path="alerts" element={<Alerts />} />
+              <Route path="location" element={<Location />} />
+              <Route path="messages" element={<Messages />} />
+              <Route path="contacts" element={<Contacts />} />
+              <Route path="admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
+                <Route index element={<AdminOverview />} />
+                <Route path="users" element={<AdminUsers />} />
+                <Route path="sessions" element={<AdminSessions />} />
+                <Route path="billing" element={<AdminBilling />} />
+                <Route path="notifications" element={<AdminNotifications />} />
+                <Route path="settings" element={<AdminSettings />} />
+                <Route path="audit-logs" element={<AdminAuditLogs />} />
+              </Route>
+              <Route path="settings" element={<Settings />} />
             </Route>
-            <Route path="settings" element={<Settings />} />
-          </Route>
-          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-          <Route path="/terms" element={<Terms />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

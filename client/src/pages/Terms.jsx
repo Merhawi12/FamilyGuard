@@ -6,7 +6,7 @@ export default function Terms() {
       {/* Navbar */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur border-b border-gray-100">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link to="/"><img src="/logo.png" alt="FamilyGuard" className="h-16 w-auto" /></Link>
+          <Link to="/"><img src="/logo.png" alt="Parentix" className="h-16 w-auto" /></Link>
           <div className="flex items-center gap-4">
             <Link to="/login" className="text-sm font-medium text-gray-600 hover:text-blue-600 transition">Sign In</Link>
             <Link to="/login" className="text-sm font-medium bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
@@ -32,7 +32,7 @@ export default function Terms() {
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-3">1. Acceptance of Terms</h2>
               <p>
-                By accessing or using FamilyGuard ("the Service"), you agree to be bound by these Terms of
+                By accessing or using Parentix ("the Service"), you agree to be bound by these Terms of
                 Service. If you do not agree to these terms, please do not use the Service. These terms apply
                 to all users, including parents, guardians, and any other individuals who access the platform.
               </p>
@@ -41,7 +41,7 @@ export default function Terms() {
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-3">2. Description of Service</h2>
               <p>
-                FamilyGuard is a parental control and digital safety platform that allows parents and guardians
+                Parentix is a parental control and digital safety platform that allows parents and guardians
                 to monitor and manage their children's digital activities, including screen time, app usage,
                 location tracking, and web browsing — all from a single dashboard.
               </p>
@@ -68,7 +68,7 @@ export default function Terms() {
 
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-3">5. Acceptable Use</h2>
-              <p className="mb-3">You agree to use FamilyGuard only for lawful purposes. You may not:</p>
+              <p className="mb-3">You agree to use Parentix only for lawful purposes. You may not:</p>
               <ul className="list-disc pl-6 space-y-2">
                 <li>Use the Service to monitor individuals without proper legal authority (e.g., non-custodial monitoring without consent).</li>
                 <li>Attempt to access, tamper with, or disrupt the Service or its servers.</li>
@@ -103,7 +103,7 @@ export default function Terms() {
               <h2 className="text-xl font-bold text-gray-900 mb-3">8. Parental Consent & Child Monitoring</h2>
               <p>
                 You represent and warrant that you have the legal right and authority to monitor the children
-                added to your account. FamilyGuard is intended solely for monitoring minor children by their
+                added to your account. Parentix is intended solely for monitoring minor children by their
                 parents or legal guardians. Misuse of the Service to monitor adults or individuals without
                 consent is strictly prohibited and may violate applicable laws.
               </p>
@@ -112,8 +112,8 @@ export default function Terms() {
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-3">9. Intellectual Property</h2>
               <p>
-                All content, features, and functionality of FamilyGuard — including but not limited to software,
-                design, text, graphics, and logos — are the exclusive property of FamilyGuard and are protected
+                All content, features, and functionality of Parentix — including but not limited to software,
+                design, text, graphics, and logos — are the exclusive property of Parentix and are protected
                 by applicable intellectual property laws. You may not reproduce or distribute any part of the
                 Service without prior written permission.
               </p>
@@ -124,7 +124,7 @@ export default function Terms() {
               <p>
                 The Service is provided "as is" and "as available" without warranties of any kind, express or
                 implied. We do not warrant that the Service will be uninterrupted, error-free, or completely
-                secure. FamilyGuard is a tool to assist parents — it does not guarantee complete protection
+                secure. Parentix is a tool to assist parents — it does not guarantee complete protection
                 from all online threats.
               </p>
             </section>
@@ -132,7 +132,7 @@ export default function Terms() {
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-3">11. Limitation of Liability</h2>
               <p>
-                To the maximum extent permitted by law, FamilyGuard shall not be liable for any indirect,
+                To the maximum extent permitted by law, Parentix shall not be liable for any indirect,
                 incidental, special, or consequential damages arising from your use of the Service. Our total
                 liability to you shall not exceed the amount you paid us in the 12 months preceding the claim.
               </p>
@@ -160,8 +160,8 @@ export default function Terms() {
               <h2 className="text-xl font-bold text-gray-900 mb-3">14. Contact Us</h2>
               <p>If you have questions about these Terms, please contact us at:</p>
               <div className="mt-3 p-4 bg-gray-50 rounded-xl border border-gray-200 text-sm">
-                <p><strong>FamilyGuard Support</strong></p>
-                <p>Email: legal@familyguard.app</p>
+                <p><strong>Parentix Support</strong></p>
+                <p>Email: legal@parentix.ca</p>
               </div>
             </section>
 
@@ -171,12 +171,12 @@ export default function Terms() {
 
       {/* Footer */}
       <footer className="py-10 px-6 bg-gray-900 text-center">
-        <Link to="/"><img src="/logo.png" alt="FamilyGuard" className="h-10 w-auto mx-auto mb-4 opacity-80" /></Link>
+        <Link to="/"><img src="/logo.png" alt="Parentix" className="h-10 w-auto mx-auto mb-4 opacity-80" /></Link>
         <div className="flex justify-center gap-6 mb-4">
           <Link to="/privacy-policy" className="text-gray-400 hover:text-white text-sm transition">Privacy Policy</Link>
           <Link to="/terms" className="text-gray-400 hover:text-white text-sm transition">Terms of Service</Link>
         </div>
-        <p className="text-gray-400 text-sm">&copy; {new Date().getFullYear()} FamilyGuard. Parental Control & Digital Safety.</p>
+        <p className="text-gray-400 text-sm">&copy; {new Date().getFullYear()} Parentix. Parental Control & Digital Safety.</p>
       </footer>
     </div>
   );

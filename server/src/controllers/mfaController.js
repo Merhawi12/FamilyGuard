@@ -7,7 +7,7 @@ const { User } = require('../models');
 const { auditLog } = require('../utils/auditLogger');
 const { createSession } = require('../utils/session');
 
-const APP_NAME = 'FamilyGuard';
+const APP_NAME = 'Parentix';
 const BACKUP_CODE_COUNT = 8;
 
 // POST /api/auth/mfa/setup  (authenticated, mfa not yet enabled)

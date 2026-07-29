@@ -15,7 +15,11 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err.response?.status === 401) {
+    // Only force a redirect when an existing session expires — not for the login
+    // request itself, so the form can render "invalid credentials" instead of flashing.
+    const url = err.config?.url || '';
+    const isAuthAttempt = url.includes('/auth/login') || url.includes('/auth/register') || url.includes('/auth/me');
+    if (err.response?.status === 401 && !isAuthAttempt) {
       localStorage.removeItem('fg_token');
       window.location.href = '/login';
     }

@@ -28,7 +28,7 @@ export default function LinkScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>🛡️ FamilyGuard</Text>
+      <Text style={styles.title}>🛡️ Parentix</Text>
       <Text style={styles.subtitle}>Enter the linking code from your parent's app</Text>
       <TextInput
         style={styles.input}

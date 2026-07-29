@@ -1,0 +1,23 @@
+{
+  "name": "Parentix — Parental Control & Digital Safety",
+  "short_name": "Parentix",
+  "description": "Parental control dashboard for screen time, location, app blocking, and family safety alerts.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "500x500",
+      "type": "image/png"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

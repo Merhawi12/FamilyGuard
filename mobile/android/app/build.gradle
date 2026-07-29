@@ -83,9 +83,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.familyguard.child'
+    namespace 'com.parentix.child'
     defaultConfig {
-        applicationId 'com.familyguard.child'
+        applicationId 'com.parentix.child'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -93,6 +93,20 @@ android {
 
         buildConfigField("boolean", "REACT_NATIVE_UNSTABLE_USE_RUNTIME_SCHEDULER_ALWAYS", (findProperty("reactNative.unstable_useRuntimeSchedulerAlways") ?: true).toString())
     }
+    // Release signing credentials come from a git-ignored keystore.properties at
+    // the android/ root (generate via generate-release-keystore.sh; see
+    // deploy/PRODUCTION_HARDENING.md). If it's absent, release falls back to the
+    // DEBUG key with a loud warning so local/dev builds still work — but such a
+    // build must never be uploaded to Google Play.
+    def keystorePropsFile = rootProject.file("keystore.properties")
+    def hasReleaseKeystore = keystorePropsFile.exists()
+    def keystoreProps = new Properties()
+    if (hasReleaseKeystore) {
+        keystoreProps.load(new FileInputStream(keystorePropsFile))
+    } else {
+        logger.warn("⚠️  keystore.properties not found — release builds will be signed with the DEBUG key. Do NOT publish this build.")
+    }
+
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -100,15 +114,21 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (hasReleaseKeystore) {
+            release {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
             shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"

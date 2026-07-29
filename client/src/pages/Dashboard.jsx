@@ -1,19 +1,56 @@
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { children as childrenApi, alerts as alertsApi } from '../services/api';
+import { children as childrenApi, alerts as alertsApi, reports as reportsApi } from '../services/api';
 import StatsCard from '../components/StatsCard';
+
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function formatMinutes(total) {
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
 
 export default function Dashboard() {
   const [childList, setChildList] = useState([]);
   const [alertList, setAlertList] = useState([]);
+  const [weeklyUsage, setWeeklyUsage] = useState([]);
+  const [todayMinutes, setTodayMinutes] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     Promise.all([childrenApi.list(), alertsApi.list()])
-      .then(([c, a]) => {
-        setChildList(Array.isArray(c.data) ? c.data : []);
+      .then(async ([c, a]) => {
+        const children = Array.isArray(c.data) ? c.data : [];
+        setChildList(children);
         setAlertList(Array.isArray(a.data) ? a.data : []);
+
+        if (children.length === 0) return;
+
+        const weeklyReports = await Promise.all(
+          children.map((child) => reportsApi.weekly(child.id).catch(() => null))
+        );
+
+        const minutesByDay = {};
+        weeklyReports.forEach((r) => {
+          const breakdown = r?.data?.dailyBreakdown;
+          if (!breakdown) return;
+          Object.entries(breakdown).forEach(([day, minutes]) => {
+            minutesByDay[day] = (minutesByDay[day] || 0) + minutes;
+          });
+        });
+
+        const today = new Date();
+        const days = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(d.getDate() - i);
+          const key = d.toISOString().split('T')[0];
+          days.push({ day: DAY_LABELS[d.getDay()], minutes: minutesByDay[key] || 0 });
+        }
+        setWeeklyUsage(days);
+        setTodayMinutes(days[days.length - 1].minutes);
       })
       .catch((err) => {
         console.error('[Dashboard] fetch error:', err.message);
@@ -24,12 +61,6 @@ export default function Dashboard() {
 
   const totalDevices = childList.reduce((s, c) => s + (c.devices?.length || 0), 0);
   const unreadAlerts = alertList.filter((a) => !a.isRead).length;
-
-  const sampleUsage = [
-    { day: 'Mon', minutes: 85 }, { day: 'Tue', minutes: 120 },
-    { day: 'Wed', minutes: 60 }, { day: 'Thu', minutes: 95 },
-    { day: 'Fri', minutes: 140 }, { day: 'Sat', minutes: 180 }, { day: 'Sun', minutes: 110 },
-  ];
 
   if (loading) return <div className="text-gray-400 text-sm p-4">Loading...</div>;
   if (error) return (
@@ -53,20 +84,24 @@ export default function Dashboard() {
         <StatsCard icon="👨‍👩‍👧" title="Children" value={childList.length} color="blue" />
         <StatsCard icon="📱" title="Devices" value={totalDevices} color="green" />
         <StatsCard icon="🔔" title="Unread Alerts" value={unreadAlerts} color="red" />
-        <StatsCard icon="⏱️" title="Avg. Screen Time" value="2h 15m" subtitle="Today" color="yellow" />
+        <StatsCard icon="⏱️" title="Screen Time" value={formatMinutes(todayMinutes)} subtitle="Today" color="yellow" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         <div className="card">
           <h2 className="font-semibold mb-4 text-sm md:text-base">Screen Time This Week</h2>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={sampleUsage}>
-              <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
-              <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} width={35} />
-              <Tooltip formatter={(v) => [`${v} min`]} />
-              <Bar dataKey="minutes" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {weeklyUsage.length === 0 ? (
+            <p className="text-gray-400 text-sm">No activity recorded yet</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={weeklyUsage}>
+                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
+                <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} width={35} />
+                <Tooltip formatter={(v) => [`${v} min`]} />
+                <Bar dataKey="minutes" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         <div className="card">

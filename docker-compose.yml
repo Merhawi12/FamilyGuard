@@ -4,9 +4,9 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_DB: familyguard
-      POSTGRES_USER: familyguard
-      POSTGRES_PASSWORD: familyguard_secret
+      POSTGRES_DB: parentix
+      POSTGRES_USER: parentix
+      POSTGRES_PASSWORD: parentix_secret
     ports:
       - '5432:5432'
     volumes:
@@ -23,7 +23,7 @@ services:
       - '5000:5000'
     environment:
       - NODE_ENV=development
-      - DATABASE_URL=postgresql://familyguard:familyguard_secret@postgres:5432/familyguard
+      - DATABASE_URL=postgresql://parentix:parentix_secret@postgres:5432/parentix
       - REDIS_URL=redis://redis:6379
       - JWT_SECRET=change_this_in_production
       - CLIENT_URL=http://localhost:3000

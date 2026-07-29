@@ -17,13 +17,13 @@ const STEPS = [
   {
     id: 'usage',
     title: 'Usage Access',
-    description: 'Required to track screen time. Goes to Android Settings → Apps → Usage Access → FamilyGuard.',
+    description: 'Required to track screen time. Goes to Android Settings → Apps → Usage Access → Parentix.',
     icon: '📊',
   },
   {
     id: 'accessibility',
     title: 'Accessibility Service',
-    description: 'Required to block apps. Goes to Android Settings → Accessibility → FamilyGuard → Enable.',
+    description: 'Required to block apps. Goes to Android Settings → Accessibility → Parentix → Enable.',
     icon: '🔒',
   },
   {
@@ -70,10 +70,10 @@ export default function PermissionsScreen({ navigation }) {
         if (!bgGranted) Alert.alert('Background location', 'Background location was not granted. Location tracking will only work while the app is open.');
       } else if (id === 'usage') {
         UsageStats.openSettings();
-        Alert.alert('Usage Access', 'Find FamilyGuard in the list and enable it, then return here.');
+        Alert.alert('Usage Access', 'Find Parentix in the list and enable it, then return here.');
       } else if (id === 'accessibility') {
         AppBlocker.openSettings();
-        Alert.alert('Accessibility', 'Find FamilyGuard, tap it, and toggle it on, then return here.');
+        Alert.alert('Accessibility', 'Find Parentix, tap it, and toggle it on, then return here.');
       } else if (id === 'vpn') {
         const already = await VpnControl.requestPermission();
         if (!already) Alert.alert('VPN', 'Accept the VPN permission dialog when it appears.');
@@ -87,7 +87,7 @@ export default function PermissionsScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>🛡️ FamilyGuard</Text>
+      <Text style={styles.title}>🛡️ Parentix</Text>
       <Text style={styles.subtitle}>Grant the permissions below so monitoring can work.</Text>
 
       <ScrollView style={styles.list} contentContainerStyle={{ gap: 12 }}>

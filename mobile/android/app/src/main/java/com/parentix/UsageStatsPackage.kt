@@ -1,4 +1,4 @@
-package com.familyguard
+package com.parentix
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule

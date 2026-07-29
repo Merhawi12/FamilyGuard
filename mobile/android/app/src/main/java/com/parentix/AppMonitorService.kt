@@ -1,4 +1,4 @@
-package com.familyguard
+package com.parentix
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
@@ -12,6 +12,10 @@ class AppMonitorService : AccessibilityService() {
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             notificationTimeout = 100
         }
+        // The system can restart this service after the app process is killed, with
+        // an empty in-memory block set. Restore the persisted rules so enforcement
+        // continues without the user reopening the app.
+        AppBlockerModule.loadPersisted(applicationContext)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -26,6 +30,9 @@ class AppMonitorService : AccessibilityService() {
 
         if (blocked.contains("*") || blocked.contains(pkg)) {
             performGlobalAction(GLOBAL_ACTION_HOME)
+            // Alert the parent for specific-app blocks only; the "*" case is the
+            // screen-time limit, which is reported separately by the RN layer.
+            if (!blocked.contains("*")) AppBlockerModule.notifyBlocked(pkg)
         }
     }
 

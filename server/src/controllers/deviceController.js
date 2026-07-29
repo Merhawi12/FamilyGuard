@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const QRCode = require('qrcode');
+const { Op } = require('sequelize');
 const { Device, Child, AppRule, WebsiteRule, ScreenTimeRule, ActivityLog } = require('../models');
 const { generateLinkingCode } = require('../utils/crypto');
 const { auditLog } = require('../utils/auditLogger');
@@ -105,13 +106,44 @@ const deviceHeartbeat = async (req, res) => {
 };
 
 // POST /api/devices/me/activity — log app usage without requiring parent auth
+// App-usage stats arrive as the running cumulative total for the day, so we
+// upsert a single row per (child, app, day) instead of creating a duplicate
+// on every sync cycle. Discrete events (web visits, other categories) are appended.
 const deviceLogActivity = async (req, res) => {
   try {
     const { appName, appPackage, category, startTime, endTime, durationMinutes, url } = req.body;
+
+    if (category === 'app_usage' && appPackage) {
+      const dayStart = new Date();
+      dayStart.setHours(0, 0, 0, 0);
+
+      const existing = await ActivityLog.findOne({
+        where: {
+          childId: req.childId,
+          appPackage,
+          category: 'app_usage',
+          startTime: { [Op.gte]: dayStart },
+        },
+        order: [['startTime', 'ASC']],
+      });
+
+      if (existing) {
+        // Client sends today's cumulative minutes — keep the max so a late/partial
+        // sync can never shrink the recorded total.
+        await existing.update({
+          durationMinutes: Math.max(existing.durationMinutes || 0, durationMinutes || 0),
+          endTime: endTime || new Date(),
+          appName: appName || existing.appName,
+          deviceId: req.deviceId,
+        });
+        return res.status(200).json(existing);
+      }
+    }
+
     const log = await ActivityLog.create({
       deviceId: req.deviceId,
       childId: req.childId,
-      appName, appPackage, category, startTime, endTime, durationMinutes, url,
+      appName, appPackage, category, startTime: startTime || new Date(), endTime, durationMinutes, url,
     });
     res.status(201).json(log);
   } catch (err) {

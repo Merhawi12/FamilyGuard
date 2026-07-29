@@ -9,3 +9,8 @@ coverage/
 .cache/
 *.sqlite
 *.sqlite3
+
+# Android release signing — never commit these
+keystore.properties
+parentix-release.keystore
+*.jks

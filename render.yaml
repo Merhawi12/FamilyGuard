@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: familyguard-api
+    name: parentix-api
     runtime: node
     rootDir: server
     buildCommand: npm install
@@ -16,11 +16,11 @@ services:
         generateValue: true
       - key: DATABASE_URL
         fromDatabase:
-          name: familyguard-db
+          name: parentix-db
           property: connectionString
 
 databases:
-  - name: familyguard-db
-    databaseName: familyguard
-    user: familyguard
+  - name: parentix-db
+    databaseName: parentix
+    user: parentix
     plan: free

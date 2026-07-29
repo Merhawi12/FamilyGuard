@@ -1,4 +1,4 @@
-package com.familyguard.child
+package com.parentix.child
 
 import android.os.Build
 import android.os.Bundle

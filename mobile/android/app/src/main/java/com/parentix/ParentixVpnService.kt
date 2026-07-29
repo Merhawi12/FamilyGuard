@@ -1,8 +1,10 @@
-package com.familyguard
+package com.parentix
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -24,16 +26,33 @@ import kotlin.concurrent.thread
  * Fake DNS:      10.0.0.1  (routed through the tunnel)
  * Real upstream: 8.8.8.8:53
  */
-class FamilyGuardVpnService : VpnService() {
+class ParentixVpnService : VpnService() {
 
     companion object {
-        const val ACTION_START = "com.familyguard.VPN_START"
-        const val ACTION_STOP  = "com.familyguard.VPN_STOP"
+        const val ACTION_START = "com.parentix.VPN_START"
+        const val ACTION_STOP  = "com.parentix.VPN_STOP"
         const val EXTRA_DOMAINS = "domains"
-        const val CHANNEL_ID = "fg_vpn"
+        const val CHANNEL_ID = "px_vpn"
         const val NOTIF_ID = 2
 
-        var instance: FamilyGuardVpnService? = null
+        private const val PREFS = "px_blocking"
+        private const val KEY_DOMAINS = "blocked_domains"
+
+        var instance: ParentixVpnService? = null
+
+        fun persistDomains(ctx: Context, domains: Collection<String>) {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putStringSet(KEY_DOMAINS, HashSet(domains)).apply()
+        }
+
+        fun loadPersistedDomains(ctx: Context): Set<String> =
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getStringSet(KEY_DOMAINS, emptySet()) ?: emptySet()
+
+        fun clearPersistedDomains(ctx: Context) {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().remove(KEY_DOMAINS).apply()
+        }
     }
 
     private var vpnIface: ParcelFileDescriptor? = null
@@ -41,9 +60,22 @@ class FamilyGuardVpnService : VpnService() {
     private val blockedDomains = mutableSetOf<String>()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) { stopVpn(); return START_NOT_STICKY }
+        if (intent?.action == ACTION_STOP) {
+            clearPersistedDomains(applicationContext)
+            stopVpn()
+            return START_NOT_STICKY
+        }
 
-        val domains = intent?.getStringArrayListExtra(EXTRA_DOMAINS) ?: arrayListOf()
+        // On a sticky restart the intent is null; fall back to the persisted list so
+        // website blocking keeps working after the process/service is killed.
+        val fromIntent = intent?.getStringArrayListExtra(EXTRA_DOMAINS)
+        val domains = if (fromIntent != null) {
+            persistDomains(applicationContext, fromIntent)
+            fromIntent
+        } else {
+            loadPersistedDomains(applicationContext).toList()
+        }
+
         blockedDomains.clear()
         blockedDomains.addAll(domains.map { it.lowercase().trimEnd('.') })
 
@@ -58,6 +90,7 @@ class FamilyGuardVpnService : VpnService() {
     fun updateBlockedDomains(domains: List<String>) {
         blockedDomains.clear()
         blockedDomains.addAll(domains.map { it.lowercase().trimEnd('.') })
+        persistDomains(applicationContext, domains)
     }
 
     private fun startVpn() {
@@ -67,10 +100,10 @@ class FamilyGuardVpnService : VpnService() {
             .addDnsServer("10.0.0.1")
             .addRoute("10.0.0.1", 32)
             .addDisallowedApplication(packageName)
-            .setSession("FamilyGuard")
+            .setSession("Parentix")
             .setBlocking(false)
             .establish()
-        thread(name = "fg-vpn-worker", isDaemon = true) { processDnsPackets() }
+        thread(name = "px-vpn-worker", isDaemon = true) { processDnsPackets() }
     }
 
     private fun stopVpn() {
@@ -182,15 +215,23 @@ class FamilyGuardVpnService : VpnService() {
 
     private fun startForegroundNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "FamilyGuard VPN", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL_ID, "Parentix VPN", NotificationManager.IMPORTANCE_LOW)
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
         }
-        startForeground(NOTIF_ID, NotificationCompat.Builder(this, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentTitle("FamilyGuard")
+            .setContentTitle("Parentix")
             .setContentText("Website filtering active")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
-            .build())
+            .build()
+        // Android 14 (API 34) requires a declared foregroundServiceType, or
+        // startForeground throws MissingForegroundServiceTypeException. The type is
+        // only required/valid from API 34 up; older versions take the untyped call.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIF_ID, notification)
+        }
     }
 }

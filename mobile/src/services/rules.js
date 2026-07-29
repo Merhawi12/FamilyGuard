@@ -2,7 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { io } from 'socket.io-client';
 import { device as deviceApi } from './api';
 
-const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'http://18.226.58.189';
+const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://parentix.ca';
 const POLL_INTERVAL = 5 * 60 * 1000; // 5 min
 
 let _rules = { appRules: [], websiteRules: [], screenTimeRule: null };
@@ -32,19 +32,24 @@ export async function startRulesSync(onUpdate) {
   // Poll every 5 minutes as a safety net
   _pollTimer = setInterval(fetchRules, POLL_INTERVAL);
 
-  // Real-time socket updates
-  const childId = await SecureStore.getItemAsync('fg_child_id');
-  if (!childId) return;
+  // Real-time socket updates — authenticate the handshake with the device token.
+  // The server derives the child identity from the token and auto-joins the room.
+  const token = await SecureStore.getItemAsync('fg_device_token');
+  if (!token) return;
 
-  _socket = io(SOCKET_URL, { transports: ['websocket'] });
-  _socket.on('connect', () => {
-    _socket.emit('join:child', childId);
-  });
+  _socket = io(SOCKET_URL, { transports: ['websocket'], auth: { token } });
   _socket.on('rules_updated', fetchRules);
   _socket.on('screen_time_updated', (rule) => {
     _rules = { ..._rules, screenTimeRule: rule };
     if (_onUpdate) _onUpdate(_rules);
   });
+}
+
+// Emit an event on the authenticated device socket (used for child-originated
+// alerts). No-op until the socket is connected; the server derives child/parent
+// identity from the handshake token, so callers never send ids.
+export function emitEvent(event, data = {}) {
+  if (_socket && _socket.connected) _socket.emit(event, data);
 }
 
 export function stopRulesSync() {

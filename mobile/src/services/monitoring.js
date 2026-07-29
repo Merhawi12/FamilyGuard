@@ -3,13 +3,22 @@ import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as SecureStore from 'expo-secure-store';
 import { device as deviceApi, location as locationApi } from './api';
-import { startRulesSync, stopRulesSync, getRules } from './rules';
+import { startRulesSync, stopRulesSync, getRules, emitEvent } from './rules';
 import AppBlocker from '../native/AppBlocker';
 import UsageStats from '../native/UsageStats';
 import VpnControl from '../native/VpnControl';
 
 const BG_TASK = 'fg-monitoring-task';
 const LOCATION_TASK = 'fg-location-task';
+
+// Packages excluded from screen-time totals (own app, launchers, core system UI)
+const EXCLUDED_PACKAGES = new Set(['com.parentix']);
+const isExcludedPackage = (pkg) =>
+  EXCLUDED_PACKAGES.has(pkg) ||
+  pkg.startsWith('com.android.launcher') ||
+  pkg.startsWith('com.google.android.apps.nexuslauncher') ||
+  pkg === 'com.android.systemui' ||
+  pkg.startsWith('com.android.settings');
 
 let _state = {
   status: {
@@ -20,7 +29,10 @@ let _state = {
   },
   rules: { appRules: [], websiteRules: [], screenTimeRule: null },
   todayMinutes: 0,
+  screenTimeAlertedDate: null, // last date we alerted the parent about the limit
 };
+
+let _blockSub = null; // native onAppBlocked subscription
 
 export function getMonitoringStatus() {
   return { ..._state, rules: getRules() };
@@ -64,6 +76,7 @@ async function syncUsageStats() {
 
   for (const [packageName, data] of Object.entries(stats)) {
     if (data.minutes < 1) continue;
+    if (isExcludedPackage(packageName)) continue;
     totalMinutes += data.minutes;
 
     try {
@@ -85,6 +98,13 @@ async function syncUsageStats() {
   if (screenTimeRule?.dailyLimitMinutes && totalMinutes >= screenTimeRule.dailyLimitMinutes) {
     AppBlocker.setBlockedApps(['*']); // block everything
     // The accessibility service will handle home screen redirect
+
+    // Notify the parent once per day that the limit was reached.
+    const today = new Date().toISOString().slice(0, 10);
+    if (_state.screenTimeAlertedDate !== today) {
+      _state.screenTimeAlertedDate = today;
+      emitEvent('alert:screen_time_exceeded');
+    }
   }
 }
 
@@ -121,7 +141,7 @@ async function startLocationTracking() {
     distanceInterval: 50,       // or every 50m
     showsBackgroundLocationIndicator: true,
     foregroundService: {
-      notificationTitle: 'FamilyGuard',
+      notificationTitle: 'Parentix',
       notificationBody: 'Location monitoring active',
       notificationColor: '#2563eb',
     },
@@ -149,6 +169,13 @@ export async function startMonitoring() {
   await startRulesSync(applyRules);
   await syncUsageStats();
 
+  // Relay native "a blocked app was opened" events to the parent as alerts.
+  _blockSub?.remove();
+  _blockSub = AppBlocker.onAppBlocked?.((packageName) => {
+    const rule = getRules().appRules?.find((r) => r.appPackage === packageName);
+    emitEvent('alert:blocked_app', { appName: rule?.appName || packageName });
+  });
+
   // Register background fetch (runs every ~15 min on Android)
   try {
     await BackgroundFetch.registerTaskAsync(BG_TASK, {
@@ -169,6 +196,8 @@ export async function startMonitoring() {
 
 export function stopMonitoring() {
   stopRulesSync();
+  _blockSub?.remove();
+  _blockSub = null;
   VpnControl.stopVpn().catch(() => {});
   AppBlocker.setBlockedApps([]);
   _state.status = { monitoring: false, appBlocking: false, websiteBlocking: false, locationTracking: false };

@@ -71,8 +71,9 @@ router.post('/customer-portal', authenticate, async (req, res) => {
 
 // GET /api/payments/subscription
 router.get('/subscription', authenticate, async (req, res) => {
+  let user;
   try {
-    const user = await User.findByPk(req.user.id);
+    user = await User.findByPk(req.user.id);
     if (!user.stripeSubscriptionId) {
       return res.json({ status: user.subscriptionStatus || 'trial', plan: user.plan });
     }
@@ -107,7 +108,10 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     try {
       await Transaction.create({ ...data, stripeEventId: event.id });
     } catch (err) {
-      if (!err.message?.includes('UNIQUE')) console.error('Transaction log error:', err.message);
+      // A duplicate stripeEventId (already-processed event) surfaces as a
+      // SequelizeUniqueConstraintError whose message is just "Validation error" —
+      // check the error type, not the text, so real failures still get logged.
+      if (err.name !== 'SequelizeUniqueConstraintError') console.error('Transaction log error:', err.message);
     }
   };
 

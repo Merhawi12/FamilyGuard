@@ -5,6 +5,7 @@
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
@@ -39,15 +40,15 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="com.familyguard.child"/>
+        <data android:scheme="com.parentix.child"/>
       </intent-filter>
     </activity>
     <activity android:name="com.facebook.react.devsupport.DevSettingsActivity" android:exported="false"/>
 
     <service
-      android:name="com.familyguard.AppMonitorService"
+      android:name="com.parentix.AppMonitorService"
       android:exported="true"
-      android:label="FamilyGuard"
+      android:label="Parentix"
       android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
       <intent-filter>
         <action android:name="android.accessibilityservice.AccessibilityService"/>
@@ -58,16 +59,20 @@
     </service>
 
     <service
-      android:name="com.familyguard.FamilyGuardVpnService"
+      android:name="com.parentix.ParentixVpnService"
       android:exported="false"
+      android:foregroundServiceType="specialUse"
       android:permission="android.permission.BIND_VPN_SERVICE">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="DNS content filtering for parental controls (website blocking)"/>
       <intent-filter>
         <action android:name="android.net.VpnService"/>
       </intent-filter>
     </service>
 
     <receiver
-      android:name="com.familyguard.BootReceiver"
+      android:name="com.parentix.BootReceiver"
       android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.BOOT_COMPLETED"/>

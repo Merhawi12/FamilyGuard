@@ -22,7 +22,13 @@ const createChild = async (req, res) => {
 const updateChild = async (req, res) => {
   const child = await Child.findOne({ where: { id: req.params.id, parentId: req.user.id } });
   if (!child) return res.status(404).json({ error: 'Child not found' });
-  await child.update(req.body);
+  // Whitelist updatable fields — never allow parentId/id/isActive reassignment via body
+  const { name, age, avatar } = req.body;
+  const updates = {};
+  if (name !== undefined) updates.name = name;
+  if (age !== undefined) updates.age = age;
+  if (avatar !== undefined) updates.avatar = avatar;
+  await child.update(updates);
   res.json(child);
 };
 

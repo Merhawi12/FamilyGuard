@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "FamilyGuard",
-    "slug": "familyguard-child",
+    "name": "Parentix",
+    "slug": "parentix-child",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -9,7 +9,7 @@
       "backgroundColor": "#2563eb"
     },
     "android": {
-      "package": "com.familyguard.child",
+      "package": "com.parentix.child",
       "versionCode": 1,
       "permissions": [
         "ACCESS_FINE_LOCATION",
@@ -26,9 +26,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "FamilyGuard needs location access to keep your child safe.",
-          "locationAlwaysPermission": "FamilyGuard needs background location to monitor your child's whereabouts.",
-          "locationWhenInUsePermission": "FamilyGuard needs location access for safety monitoring."
+          "locationAlwaysAndWhenInUsePermission": "Parentix needs location access to keep your child safe.",
+          "locationAlwaysPermission": "Parentix needs background location to monitor your child's whereabouts.",
+          "locationWhenInUsePermission": "Parentix needs location access for safety monitoring."
         }
       ],
       [
@@ -44,6 +44,6 @@
         "projectId": "b9ba998c-af61-4f0c-a1ce-3b13cde4311f"
       }
     },
-    "owner": "familyguard"
+    "owner": "parentix"
   }
 }

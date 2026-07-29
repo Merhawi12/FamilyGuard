@@ -16,7 +16,11 @@ const updateRule = async (req, res) => {
   let rule = await ScreenTimeRule.findOne({ where: { childId: child.id } });
   if (!rule) rule = await ScreenTimeRule.create({ childId: child.id });
 
-  await rule.update(req.body);
+  // Whitelist updatable fields — never allow childId/id reassignment via body
+  const allowed = ['dailyLimitMinutes', 'schedule', 'bedtimeEnabled', 'bedtimeStart', 'bedtimeEnd', 'isActive'];
+  const updates = {};
+  for (const key of allowed) if (req.body[key] !== undefined) updates[key] = req.body[key];
+  await rule.update(updates);
 
   const io = req.app.get('io');
   io.to(`child:${child.id}`).emit('screen_time_updated', rule);

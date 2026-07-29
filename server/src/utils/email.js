@@ -16,16 +16,16 @@ const sendWelcomeEmail = async ({ name, email }) => {
   if (!process.env.SMTP_HOST) return;
 
   await transporter.sendMail({
-    from: `"FamilyGuard" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    from: `"Parentix" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
     to: email,
-    subject: 'Welcome to FamilyGuard!',
+    subject: 'Welcome to Parentix!',
     html: `
-      <h2>Hi ${name}, welcome to FamilyGuard!</h2>
+      <h2>Hi ${name}, welcome to Parentix!</h2>
       <p>Your account has been created successfully.</p>
       <p>You have a <strong>7-day free trial</strong> — enjoy full access while you get started.</p>
       <p>If you have any questions, just reply to this email.</p>
       <br/>
-      <p>— The FamilyGuard Team</p>
+      <p>— The Parentix Team</p>
     `,
   });
 };
@@ -34,12 +34,12 @@ const sendAdminRegistrationNotification = async ({ name, email }) => {
   if (!process.env.SMTP_HOST) return;
 
   await transporter.sendMail({
-    from: `"FamilyGuard" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    from: `"Parentix" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
     to: ADMIN_EMAIL,
     subject: 'New User Registered',
     html: `
       <h2>New Registration</h2>
-      <p>A new user has signed up for FamilyGuard:</p>
+      <p>A new user has signed up for Parentix:</p>
       <ul>
         <li><strong>Name:</strong> ${name}</li>
         <li><strong>Email:</strong> ${email}</li>
@@ -56,9 +56,9 @@ const sendVerificationEmail = async ({ name, email, code }) => {
   }
 
   await transporter.sendMail({
-    from: `"FamilyGuard" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    from: `"Parentix" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
     to: email,
-    subject: 'Verify your FamilyGuard account',
+    subject: 'Verify your Parentix account',
     html: `
       <h2>Hi ${name},</h2>
       <p>Your verification code is:</p>
@@ -66,7 +66,7 @@ const sendVerificationEmail = async ({ name, email, code }) => {
       <p>This code expires in <strong>15 minutes</strong>.</p>
       <p>If you didn't create an account, you can ignore this email.</p>
       <br/>
-      <p>— The FamilyGuard Team</p>
+      <p>— The Parentix Team</p>
     `,
   });
 };
@@ -80,17 +80,17 @@ const sendPasswordResetEmail = async ({ name, email, token }) => {
   }
 
   await transporter.sendMail({
-    from: `"FamilyGuard" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    from: `"Parentix" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
     to: email,
-    subject: 'Reset your FamilyGuard password',
+    subject: 'Reset your Parentix password',
     html: `
       <h2>Hi ${name},</h2>
-      <p>We received a request to reset your FamilyGuard password. Click below to choose a new one:</p>
+      <p>We received a request to reset your Parentix password. Click below to choose a new one:</p>
       <p><a href="${resetUrl}" style="display:inline-block;background:#4F46E5;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">Reset Password</a></p>
       <p>This link expires in <strong>30 minutes</strong>.</p>
       <p>If you didn't request this, you can safely ignore this email — your password won't change.</p>
       <br/>
-      <p>— The FamilyGuard Team</p>
+      <p>— The Parentix Team</p>
     `,
   });
 };
@@ -115,18 +115,18 @@ const sendAlertEmail = async ({ name, email, type, message, severity }) => {
   const color = severity === 'high' ? '#DC2626' : severity === 'medium' ? '#D97706' : '#2563EB';
 
   await transporter.sendMail({
-    from: `"FamilyGuard" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    from: `"Parentix" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
     to: email,
-    subject: `⚠️ FamilyGuard Alert: ${label}`,
+    subject: `⚠️ Parentix Alert: ${label}`,
     html: `
       <div style="font-family:sans-serif;max-width:520px;margin:auto;">
-        <h2 style="color:#1e293b;">FamilyGuard Alert</h2>
+        <h2 style="color:#1e293b;">Parentix Alert</h2>
         <div style="background:#f8fafc;border-left:4px solid ${color};padding:16px 20px;border-radius:4px;margin:16px 0;">
           <p style="margin:0 0 6px;font-weight:700;color:${color};">${label}</p>
           <p style="margin:0;color:#334155;">${message}</p>
         </div>
-        <p style="color:#64748b;font-size:.9rem;">Hi ${name}, this alert was triggered on your FamilyGuard dashboard. Log in to review the details.</p>
-        <p style="margin-top:24px;color:#94a3b8;font-size:.8rem;">— The FamilyGuard Team</p>
+        <p style="color:#64748b;font-size:.9rem;">Hi ${name}, this alert was triggered on your Parentix dashboard. Log in to review the details.</p>
+        <p style="margin-top:24px;color:#94a3b8;font-size:.8rem;">— The Parentix Team</p>
       </div>
     `,
   });
@@ -142,7 +142,7 @@ const sendContactFormEmail = async ({ name, email, message }) => {
   }
 
   await transporter.sendMail({
-    from: `"FamilyGuard" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    from: `"Parentix" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
     to: ADMIN_EMAIL,
     replyTo: email,
     subject: `New Contact Form Message from ${name}`,

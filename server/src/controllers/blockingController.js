@@ -10,15 +10,18 @@ const getAppRules = async (req, res) => {
 
 const addAppRule = async (req, res) => {
   if (!(await verifyChild(req.user.id, req.params.childId))) return res.status(404).json({ error: 'Child not found' });
-  const rule = await AppRule.create({ childId: req.params.childId, ...req.body });
+  // childId last so a body-supplied childId cannot override the verified param
+  const rule = await AppRule.create({ ...req.body, childId: req.params.childId });
   req.app.get('io').to(`child:${req.params.childId}`).emit('rules_updated', { type: 'app' });
   res.status(201).json(rule);
 };
 
 const removeAppRule = async (req, res) => {
+  if (!(await verifyChild(req.user.id, req.params.childId))) return res.status(404).json({ error: 'Child not found' });
   const rule = await AppRule.findOne({ where: { id: req.params.ruleId, childId: req.params.childId } });
   if (!rule) return res.status(404).json({ error: 'Rule not found' });
   await rule.destroy();
+  req.app.get('io').to(`child:${req.params.childId}`).emit('rules_updated', { type: 'app' });
   res.json({ message: 'Rule removed' });
 };
 
@@ -30,15 +33,18 @@ const getWebsiteRules = async (req, res) => {
 
 const addWebsiteRule = async (req, res) => {
   if (!(await verifyChild(req.user.id, req.params.childId))) return res.status(404).json({ error: 'Child not found' });
-  const rule = await WebsiteRule.create({ childId: req.params.childId, ...req.body });
+  // childId last so a body-supplied childId cannot override the verified param
+  const rule = await WebsiteRule.create({ ...req.body, childId: req.params.childId });
   req.app.get('io').to(`child:${req.params.childId}`).emit('rules_updated', { type: 'website' });
   res.status(201).json(rule);
 };
 
 const removeWebsiteRule = async (req, res) => {
+  if (!(await verifyChild(req.user.id, req.params.childId))) return res.status(404).json({ error: 'Child not found' });
   const rule = await WebsiteRule.findOne({ where: { id: req.params.ruleId, childId: req.params.childId } });
   if (!rule) return res.status(404).json({ error: 'Rule not found' });
   await rule.destroy();
+  req.app.get('io').to(`child:${req.params.childId}`).emit('rules_updated', { type: 'website' });
   res.json({ message: 'Rule removed' });
 };
 

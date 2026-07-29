@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'familyguard-api',
+      name: 'parentix-api',
       script: 'src/app.js',
       cwd: __dirname,
       instances: 1,

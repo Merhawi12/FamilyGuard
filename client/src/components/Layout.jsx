@@ -31,7 +31,7 @@ export default function Layout() {
             <span className="block w-5 h-0.5 bg-gray-700" />
             <span className="block w-5 h-0.5 bg-gray-700" />
           </button>
-          <span className="md:hidden text-sm font-semibold text-gray-700 flex-1">FamilyGuard</span>
+          <span className="md:hidden text-sm font-semibold text-gray-700 flex-1">Parentix</span>
           <div className="ml-auto flex items-center gap-1">
             <NotificationBell />
             <AlertBell />

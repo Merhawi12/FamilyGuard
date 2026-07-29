@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authenticateDevice } = require('../middleware/auth');
 const { getMessages, sendMessage, receiveFromChild } = require('../controllers/chatController');
 
 const childMsgLimiter = rateLimit({
@@ -11,8 +11,9 @@ const childMsgLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Child device posts a message (no parent session — identified by childId route param)
-router.post('/:childId/messages/from-child', childMsgLimiter, receiveFromChild);
+// Child device posts a message — authenticated with the device token.
+// The child is derived from the token, not the route param.
+router.post('/:childId/messages/from-child', childMsgLimiter, authenticateDevice, receiveFromChild);
 
 // Parent reads and sends messages
 router.use(authenticate);

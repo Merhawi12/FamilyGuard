@@ -37,7 +37,7 @@ export default function Sidebar({ open, onClose }) {
       {/* Logo */}
       <div className="p-4 border-b border-gray-100 flex items-center justify-between">
         <NavLink to="/" onClick={onClose}>
-          <img src="/logo.png" alt="FamilyGuard" className="h-14 w-auto mx-auto" />
+          <img src="/logo.png" alt="Parentix" className="h-14 w-auto mx-auto" />
         </NavLink>
         {/* Close button — mobile only */}
         <button
