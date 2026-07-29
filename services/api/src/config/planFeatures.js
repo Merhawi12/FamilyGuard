@@ -6,6 +6,9 @@ const DEFAULT_PLAN_FEATURES = {
   family: ['gps_tracking', 'geofencing', 'website_filtering', 'ai_safety'],
 };
 
+// What a new account gets during its 7-day trial (see middleware/featureGate).
+const TRIAL_PLAN = 'premium';
+
 const FEATURE_LABELS = {
   gps_tracking: 'Real-time GPS Tracking',
   geofencing: 'Geofencing / Safe Zones',
@@ -13,4 +16,4 @@ const FEATURE_LABELS = {
   ai_safety: 'AI Safety & Cyberbullying Detection',
 };
 
-module.exports = { DEFAULT_PLAN_FEATURES, FEATURE_LABELS };
+module.exports = { DEFAULT_PLAN_FEATURES, TRIAL_PLAN, FEATURE_LABELS };

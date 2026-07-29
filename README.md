@@ -80,6 +80,7 @@ password-reset links are written to the API log instead.
 | `npm run build`             | Production build of both web apps                 |
 | `npm run lint`              | ESLint over both web apps, shared, and the API    |
 | `npm test`                  | API test suite (Jest + supertest)                 |
+| `npm run test:e2e`          | Boots a real server and walks the full workflow   |
 | `npm run infra:synth`       | Synthesize the CloudFormation templates           |
 | `npm run infra:deploy`      | Deploy all infrastructure stacks                  |
 | `npm --prefix services/api run migrate` | Apply pending database migrations     |

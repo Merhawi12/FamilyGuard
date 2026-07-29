@@ -148,6 +148,21 @@ direction — a web change against an unchanged API — order does not matter.
 
 ---
 
+### 2.5 Before you release
+
+```bash
+npm test           # 109 API tests
+npm run test:e2e   # boots a real server, walks the full parent/child workflow
+npm run build      # both web apps
+npm run lint
+```
+
+`test:e2e` covers what the in-process suite cannot: the network path, Socket.IO
+over a real connection, device linking end to end, and tenant isolation between
+two live accounts.
+
+---
+
 ## 3. Verifying a release
 
 ```bash

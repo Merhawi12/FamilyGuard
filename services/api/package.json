@@ -15,7 +15,8 @@
     "migrate:status": "node scripts/migrate.js status",
     "test": "jest --runInBand",
     "test:watch": "jest --runInBand --watch",
-    "test:coverage": "jest --runInBand --coverage"
+    "test:coverage": "jest --runInBand --coverage",
+    "test:e2e": "node scripts/e2e.mjs"
   },
   "jest": {
     "testEnvironment": "node",

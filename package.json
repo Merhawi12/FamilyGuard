@@ -25,7 +25,8 @@
     "test:api": "npm --prefix services/api test",
     "install:all": "npm install && npm --prefix services/api ci && npm --prefix apps/child-app ci && npm --prefix infrastructure/aws ci",
     "infra:synth": "npm --prefix infrastructure/aws run synth",
-    "infra:deploy": "npm --prefix infrastructure/aws run deploy"
+    "infra:deploy": "npm --prefix infrastructure/aws run deploy",
+    "test:e2e": "npm --prefix services/api run test:e2e"
   },
   "devDependencies": {
     "eslint": "^8.57.1",

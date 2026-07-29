@@ -26,6 +26,9 @@ jobs:
           cache-dependency-path: services/api/package-lock.json
       - run: npm ci
       - run: npm test
+      # Boots a real server and walks the full parent/child workflow over HTTP
+      # and Socket.IO, which the in-process suite cannot cover.
+      - run: npm run test:e2e
 
   web:
     name: Web builds

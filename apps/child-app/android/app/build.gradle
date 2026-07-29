@@ -95,7 +95,7 @@ android {
     }
     // Release signing credentials come from a git-ignored keystore.properties at
     // the android/ root (generate via generate-release-keystore.sh; see
-    // deploy/PRODUCTION_HARDENING.md). If it's absent, release falls back to the
+    // docs/DEPLOYMENT.md). If it's absent, release falls back to the
     // DEBUG key with a loud warning so local/dev builds still work — but such a
     // build must never be uploaded to Google Play.
     def keystorePropsFile = rootProject.file("keystore.properties")
