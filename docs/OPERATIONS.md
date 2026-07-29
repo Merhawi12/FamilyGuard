@@ -137,7 +137,11 @@ node services/api/scripts/create-admin.js --email person@example.com --role supp
 In AWS, run it as a one-off ECS task on the API task definition (see
 `docs/DEPLOYMENT.md` §1.6); the generated password appears in that task's log
 stream once. Re-running promotes an existing account without touching its
-password unless `--password` is passed.
+password unless one is explicitly supplied.
+
+To set the password yourself, use `--password-stdin` or the `ADMIN_PASSWORD`
+environment variable. Avoid `--password <value>`: it is captured in shell
+history and visible in `ps` output to other users on the host.
 
 To demote someone, change their role from the Admin Dashboard rather than with
 this script, so the change is captured in the audit log.

@@ -8,10 +8,16 @@
  *
  *   node scripts/create-admin.js --email you@example.com --name "Your Name"
  *   node scripts/create-admin.js --email you@example.com --role support
- *   node scripts/create-admin.js --email you@example.com --password '...'
+ *   echo 'secret' | node scripts/create-admin.js --email you@example.com --password-stdin
+ *   ADMIN_PASSWORD=secret node scripts/create-admin.js --email you@example.com
  *
- * With no --password a strong one is generated and printed once. The account is
- * created already email-verified, since there is no inbox step for staff.
+ * With no password supplied a strong one is generated and printed once. The
+ * account is created already email-verified, since there is no inbox step for
+ * staff.
+ *
+ * Prefer --password-stdin or ADMIN_PASSWORD over --password: an argument is
+ * visible in shell history and in `ps` output to every other user on the host
+ * for as long as the process runs.
  */
 const crypto = require('node:crypto');
 const { sequelize } = require('../src/config/db');
@@ -19,6 +25,14 @@ const { env } = require('../src/config/env');
 const { User } = require('../src/models');
 
 const ROLES = ['admin', 'support'];
+
+const USAGE = `Usage:
+  node scripts/create-admin.js --email <address> [--name "Full Name"] [--role admin|support]
+
+Password (optional — one is generated and printed if omitted):
+  --password-stdin        read it from stdin        (preferred)
+  ADMIN_PASSWORD=...      read it from the environment
+  --password <value>      discouraged: visible in shell history and ps output`;
 
 const parseArgs = (argv) => {
   const args = {};
@@ -35,13 +49,53 @@ const parseArgs = (argv) => {
 const generatePassword = () =>
   `Px${crypto.randomBytes(12).toString('base64url').replace(/[^A-Za-z0-9]/g, '')}${crypto.randomInt(10, 100)}`;
 
+const readStdin = () =>
+  new Promise((resolve, reject) => {
+    let buffer = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      buffer += chunk;
+    });
+    process.stdin.on('end', () => resolve(buffer));
+    process.stdin.on('error', reject);
+  });
+
+/**
+ * @returns {{ value: string, supplied: boolean }} `supplied` is false when the
+ * value was generated here, which is what decides whether to print it and
+ * whether promoting an existing account should touch its password at all.
+ */
+const resolvePassword = async (args) => {
+  if (args['password-stdin']) {
+    const value = (await readStdin()).replace(/\r?\n$/, '');
+    if (!value) {
+      console.error('--password-stdin was given but stdin was empty.');
+      process.exit(2);
+    }
+    return { value, supplied: true };
+  }
+
+  if (process.env.ADMIN_PASSWORD) return { value: process.env.ADMIN_PASSWORD, supplied: true };
+
+  if (typeof args.password === 'string') {
+    console.warn(
+      'Warning: --password is visible in shell history and in `ps` output.\n' +
+        '         Prefer --password-stdin or the ADMIN_PASSWORD environment variable.\n' +
+        '         Treat this password as compromised and change it after signing in.\n'
+    );
+    return { value: args.password, supplied: true };
+  }
+
+  return { value: generatePassword(), supplied: false };
+};
+
 const run = async () => {
   const args = parseArgs(process.argv.slice(2));
   const email = typeof args.email === 'string' ? args.email.trim().toLowerCase() : '';
   const role = typeof args.role === 'string' ? args.role : 'admin';
 
-  if (!email || !email.includes('@')) {
-    console.error('Usage: node scripts/create-admin.js --email <address> [--name "Full Name"] [--role admin|support] [--password <value>]');
+  if (args.help || !email || !email.includes('@')) {
+    console.error(USAGE);
     process.exit(2);
   }
 
@@ -50,7 +104,8 @@ const run = async () => {
     process.exit(2);
   }
 
-  const password = typeof args.password === 'string' ? args.password : generatePassword();
+  const { value: password, supplied } = await resolvePassword(args);
+
   if (password.length < env.auth.minPasswordLength || !/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
     console.error(
       `The password must be at least ${env.auth.minPasswordLength} characters and contain a letter and a digit.`
@@ -67,12 +122,11 @@ const run = async () => {
     // explicitly supplied — an operator running this twice should not silently
     // lock the person out.
     const updates = { role, isActive: true, emailVerified: true };
-    if (typeof args.password === 'string') updates.passwordHash = password;
+    if (supplied) updates.passwordHash = password;
 
     await existing.update(updates);
     console.log(`Updated ${email}: role=${role}, active, verified.`);
-    if (updates.passwordHash) console.log('Password was reset to the value you supplied.');
-    else console.log('Password unchanged.');
+    console.log(supplied ? 'Password was reset to the value you supplied.' : 'Password unchanged.');
   } else {
     await User.create({
       name: typeof args.name === 'string' ? args.name : 'Parentix Staff',
@@ -85,7 +139,7 @@ const run = async () => {
     });
 
     console.log(`Created ${email} with role ${role}.`);
-    if (typeof args.password !== 'string') {
+    if (!supplied) {
       console.log('\n  Generated password (shown once — store it in a password manager):\n');
       console.log(`      ${password}\n`);
     }

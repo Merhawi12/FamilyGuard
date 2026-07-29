@@ -83,6 +83,20 @@ export interface ParentixConfig {
   retainDataOnDelete: boolean;
 }
 
+/**
+ * Where contact-form submissions and new-registration notices are sent.
+ *
+ * These messages carry other people's personal data — a visitor's name, email
+ * and message; a new parent's name and email. A shared, controlled role mailbox
+ * on the company domain is the right destination for that once real users are
+ * signing up; a personal consumer mailbox is fine for getting started but has no
+ * access controls, no retention policy, and no way to hand over.
+ *
+ * Overridable so it can be changed without a code change or a new commit:
+ *   PARENTIX_ADMIN_EMAIL=ops@parentix.ca npm run infra:deploy
+ */
+const adminEmail = process.env.PARENTIX_ADMIN_EMAIL || 'merhawigu@gmail.com';
+
 const dev: ParentixConfig = {
   envName: 'dev',
   region: 'us-east-2',
@@ -99,7 +113,7 @@ const dev: ParentixConfig = {
     deletionProtection: false,
   },
   redis: { enabled: false, nodeType: 'cache.t4g.micro' },
-  email: { fromAddress: 'Parentix <no-reply@parentix.ca>', adminAddress: 'merhawigu@gmail.com' },
+  email: { fromAddress: 'Parentix <no-reply@parentix.ca>', adminAddress: adminEmail },
   retainDataOnDelete: false,
 };
 
@@ -129,7 +143,7 @@ const prod: ParentixConfig = {
   },
   // More than one API task means Socket.IO events must cross tasks.
   redis: { enabled: true, nodeType: 'cache.t4g.micro' },
-  email: { fromAddress: 'Parentix <no-reply@parentix.ca>', adminAddress: 'merhawigu@gmail.com' },
+  email: { fromAddress: 'Parentix <no-reply@parentix.ca>', adminAddress: adminEmail },
   retainDataOnDelete: true,
 };
 

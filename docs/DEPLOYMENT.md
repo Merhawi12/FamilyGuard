@@ -29,7 +29,15 @@ the first production deploy set at least:
 - `appUrl` / `adminUrl` — absolute URLs of the two web apps. These end up in
   password-reset emails and in the S3 CORS allowlist, so they must be right.
 - `email.fromAddress` — a **verified** SES identity.
-- `email.adminAddress` — where contact-form messages go.
+- `email.adminAddress` — where contact-form messages and new-registration
+  notices go. Override without editing code:
+  `PARENTIX_ADMIN_EMAIL=ops@parentix.ca npm run infra:deploy`.
+
+  These messages carry other people's personal data (a visitor's name, email and
+  message; a new parent's name and email). Before real users start signing up,
+  point this at a controlled role mailbox on the company domain rather than a
+  personal account — a personal mailbox has no access control, no retention
+  policy, and no clean handover.
 
 Custom domains are optional. Without them everything still works over the
 generated CloudFront and ALB hostnames, but the CloudFront → ALB hop is plain
@@ -117,8 +125,22 @@ node services/api/scripts/create-admin.js --email you@example.com --name "Your N
 node services/api/scripts/create-admin.js --email you@example.com --role support
 ```
 
+To choose the password yourself, pipe it in rather than passing it as an
+argument — an argument is recorded in shell history and is readable in `ps`
+output by any other user on the host while the process runs:
+
+```bash
+echo 'your-password' | node services/api/scripts/create-admin.js \
+  --email you@example.com --password-stdin
+
+# or
+ADMIN_PASSWORD='your-password' node services/api/scripts/create-admin.js --email you@example.com
+```
+
+`--password <value>` still works but warns, and should be treated as burnt.
+
 Re-running against an existing address promotes it and leaves the password alone
-unless `--password` is given, so it is safe to repeat.
+unless one is explicitly supplied, so it is safe to repeat.
 
 > `ADMIN_EMAIL` is a different thing: it is where contact-form messages and
 > new-registration notices are sent. It grants no access on its own.
