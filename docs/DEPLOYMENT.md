@@ -85,7 +85,45 @@ Add the DKIM records SES returns to DNS, then request production access from the
 SES console. Until that is granted, signup verification and password-reset mail
 will only reach verified addresses.
 
-### 1.6 Point Stripe at the webhook
+### 1.6 Create the first staff account
+
+The Admin Dashboard has no sign-up, so the first account has to be seeded. Run
+the script as a one-off ECS task on the API image, using the running service's
+network and task definition so it inherits the database secret:
+
+```bash
+CLUSTER=parentix-prod
+TASK_DEF=$(aws ecs describe-services --cluster $CLUSTER --services parentix-api-prod \
+  --query 'services[0].taskDefinition' --output text)
+NETWORK=$(aws ecs describe-services --cluster $CLUSTER --services parentix-api-prod \
+  --query 'services[0].networkConfiguration' --output json)
+
+aws ecs run-task \
+  --cluster $CLUSTER \
+  --task-definition "$TASK_DEF" \
+  --launch-type FARGATE \
+  --network-configuration "$NETWORK" \
+  --overrides '{"containerOverrides":[{"name":"web","command":[
+    "node","scripts/create-admin.js","--email","you@example.com","--name","Your Name"]}]}'
+```
+
+The generated password is printed once, to that task's CloudWatch log stream.
+Read it, store it in a password manager, and enable MFA immediately.
+
+Locally the same script runs directly:
+
+```bash
+node services/api/scripts/create-admin.js --email you@example.com --name "Your Name"
+node services/api/scripts/create-admin.js --email you@example.com --role support
+```
+
+Re-running against an existing address promotes it and leaves the password alone
+unless `--password` is given, so it is safe to repeat.
+
+> `ADMIN_EMAIL` is a different thing: it is where contact-form messages and
+> new-registration notices are sent. It grants no access on its own.
+
+### 1.7 Point Stripe at the webhook
 
 Create an endpoint at `https://<api-domain>/api/payments/webhook` subscribed to
 `checkout.session.completed` and `customer.subscription.deleted`, then put its

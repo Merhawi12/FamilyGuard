@@ -99,7 +99,7 @@ const dev: ParentixConfig = {
     deletionProtection: false,
   },
   redis: { enabled: false, nodeType: 'cache.t4g.micro' },
-  email: { fromAddress: 'Parentix <no-reply@parentix.ca>', adminAddress: '' },
+  email: { fromAddress: 'Parentix <no-reply@parentix.ca>', adminAddress: 'merhawigu@gmail.com' },
   retainDataOnDelete: false,
 };
 
@@ -129,7 +129,7 @@ const prod: ParentixConfig = {
   },
   // More than one API task means Socket.IO events must cross tasks.
   redis: { enabled: true, nodeType: 'cache.t4g.micro' },
-  email: { fromAddress: 'Parentix <no-reply@parentix.ca>', adminAddress: 'support@parentix.ca' },
+  email: { fromAddress: 'Parentix <no-reply@parentix.ca>', adminAddress: 'merhawigu@gmail.com' },
   retainDataOnDelete: true,
 };
 
