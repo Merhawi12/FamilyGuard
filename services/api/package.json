@@ -1,0 +1,68 @@
+{
+  "name": "@parentix/api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Parentix API — Express + Sequelize + Socket.IO backend running on ECS Fargate.",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "migrate": "node scripts/migrate.js up",
+    "migrate:down": "node scripts/migrate.js down",
+    "migrate:status": "node scripts/migrate.js status",
+    "test": "jest --runInBand",
+    "test:watch": "jest --runInBand --watch",
+    "test:coverage": "jest --runInBand --coverage"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "setupFiles": [
+      "<rootDir>/tests/env.setup.js"
+    ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/tests/db.setup.js"
+    ],
+    "testMatch": [
+      "<rootDir>/tests/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/server.js"
+    ]
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.583.0",
+    "@aws-sdk/client-sesv2": "^3.583.0",
+    "@aws-sdk/s3-request-presigner": "^3.583.0",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^8.0.10",
+    "otplib": "^13.4.1",
+    "pg": "^8.11.3",
+    "pg-hstore": "^2.3.4",
+    "qrcode": "^1.5.3",
+    "redis": "^4.6.14",
+    "sequelize": "^6.35.1",
+    "socket.io": "^4.6.2",
+    "sqlite3": "^6.0.1",
+    "stripe": "^22.2.0",
+    "umzug": "^3.8.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2",
+    "socket.io-client": "^4.8.3",
+    "supertest": "^6.3.4"
+  }
+}

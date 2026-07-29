@@ -1,14 +1,42 @@
+# Dependencies
 node_modules/
+
+# Environment files — never commit real secrets
 .env
 .env.local
+.env.*.local
+
+# Build output
 dist/
 build/
-.DS_Store
+.vite/
+cdk.out/
+*.tsbuildinfo
+
+# Local databases
+*.sqlite
+*.sqlite3
+
+# Logs / caches / coverage
 *.log
 coverage/
 .cache/
-*.sqlite
-*.sqlite3
+.nyc_output/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# React Native / Expo generated
+apps/child-app/.expo/
+apps/child-app/android/.gradle/
+apps/child-app/android/app/build/
+apps/child-app/android/build/
+apps/child-app/android/local.properties
+*.apk
+*.aab
 
 # Android release signing — never commit these
 keystore.properties

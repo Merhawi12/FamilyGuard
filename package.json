@@ -1,5 +1,35 @@
 {
-  "dependencies": {
-    "rsync": "^0.6.1"
+  "name": "parentix",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Parentix — parental control & digital safety platform (Admin Dashboard, Family App, Child App, AWS backend)",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "packages/shared",
+    "apps/admin-dashboard",
+    "apps/family-app"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev:family": "npm run dev --workspace apps/family-app",
+    "dev:admin": "npm run dev --workspace apps/admin-dashboard",
+    "dev:api": "npm --prefix services/api run dev",
+    "dev:child": "npm --prefix apps/child-app run start",
+    "build": "npm run build --workspace apps/family-app && npm run build --workspace apps/admin-dashboard",
+    "build:family": "npm run build --workspace apps/family-app",
+    "build:admin": "npm run build --workspace apps/admin-dashboard",
+    "lint": "eslint apps/admin-dashboard/src apps/family-app/src packages/shared/src services/api/src",
+    "test": "npm --prefix services/api test",
+    "test:api": "npm --prefix services/api test",
+    "install:all": "npm install && npm --prefix services/api ci && npm --prefix apps/child-app ci && npm --prefix infrastructure/aws ci",
+    "infra:synth": "npm --prefix infrastructure/aws run synth",
+    "infra:deploy": "npm --prefix infrastructure/aws run deploy"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^4.6.2"
   }
 }
