@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { GoogleMap, useLoadScript, Marker, Circle, InfoWindow } from '@react-google-maps/api';
-import { api, children as childrenApi, locations as locationsApi, safeZones as safeZonesApi, useSocket } from '@parentix/shared';
+import { children as childrenApi, locations as locationsApi, safeZones as safeZonesApi, useSocket, errorMessage } from '@parentix/shared';
 
 const ZONE_COLORS = {
   home:   { stroke: '#3b82f6', fill: '#3b82f6' },
@@ -14,9 +14,16 @@ const MAP_STYLES = [
 
 const DEFAULT_CENTER = { lat: 9.0251, lng: 38.7469 }; // Addis Ababa
 
+const MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY || '';
+
 export default function Location() {
+  // An empty key still loads the Maps script successfully, so `loadError` stays
+  // null and Google paints its own "can't load Google Maps" overlay instead.
+  // Catch the missing key ourselves and explain it rather than showing that.
+  const mapsKeyMissing = !MAPS_API_KEY;
+
   const { isLoaded, loadError } = useLoadScript({
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_KEY || '',
+    googleMapsApiKey: MAPS_API_KEY,
   });
 
   const [childList, setChildList]   = useState([]);
@@ -99,19 +106,19 @@ export default function Location() {
 
   const simulateLocation = async ({ latitude, longitude, address }) => {
     if (!selected) return;
-    const deviceId = selected.devices?.[0]?.id || '00000000-0000-0000-0000-000000000001';
     setSimulating(true);
     try {
-      await api.post('/locations', {
-        childId: selected.id, deviceId,
-        latitude: parseFloat(latitude), longitude: parseFloat(longitude),
-        accuracy: 10, address: address || null,
+      await locationsApi.setManual(selected.id, {
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        accuracy: 10,
+        address: address || null,
       });
       await loadLocation(selected);
       setShowSimForm(false);
       setSimForm({ lat: '', lng: '', address: '' });
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to simulate location');
+      alert(errorMessage(err, 'Failed to set the location'));
     } finally {
       setSimulating(false);
     }
@@ -132,7 +139,7 @@ export default function Location() {
     setSimGeoError('');
 
     if (!window.google?.maps?.Geocoder) {
-      setSimGeoError('Google Maps not loaded yet. Check your API key in client/.env');
+      setSimGeoError('Google Maps not loaded yet. Check your API key in apps/family-app/.env');
       return;
     }
 
@@ -252,20 +259,31 @@ export default function Location() {
 
                   {/* Google Map */}
                   <div style={{ height: '420px' }}>
-                    {loadError && (
+                    {mapsKeyMissing && (
                       <div className="h-full flex items-center justify-center bg-gray-50">
-                        <div className="text-center">
-                          <p className="text-red-500 font-medium text-sm">Failed to load Google Maps</p>
-                          <p className="text-gray-400 text-xs mt-1">Check your API key in client/.env</p>
+                        <div className="text-center px-6">
+                          <p className="text-gray-600 font-medium text-sm">Map unavailable</p>
+                          <p className="text-gray-400 text-xs mt-1">
+                            Set <code>VITE_GOOGLE_MAPS_KEY</code> in <code>apps/family-app/.env</code> to show the map.
+                            Location history below still works.
+                          </p>
                         </div>
                       </div>
                     )}
-                    {!isLoaded && !loadError && (
+                    {loadError && !mapsKeyMissing && (
+                      <div className="h-full flex items-center justify-center bg-gray-50">
+                        <div className="text-center">
+                          <p className="text-red-500 font-medium text-sm">Failed to load Google Maps</p>
+                          <p className="text-gray-400 text-xs mt-1">Check your API key in apps/family-app/.env</p>
+                        </div>
+                      </div>
+                    )}
+                    {!isLoaded && !loadError && !mapsKeyMissing && (
                       <div className="h-full flex items-center justify-center bg-gray-50">
                         <p className="text-gray-400 text-sm">Loading map…</p>
                       </div>
                     )}
-                    {isLoaded && !loadError && (
+                    {isLoaded && !loadError && !mapsKeyMissing && (
                       <GoogleMap
                         mapContainerStyle={{ width: '100%', height: '100%' }}
                         center={mapCenter}
@@ -420,7 +438,7 @@ export default function Location() {
                         <button
                           type="button"
                           onClick={geocodeAddress}
-                          disabled={simulating || !simForm.address.trim() || !isLoaded}
+                          disabled={simulating || !simForm.address.trim() || !isLoaded || mapsKeyMissing}
                           className="px-4 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 transition disabled:opacity-50 shrink-0"
                         >
                           {simulating ? '…' : 'Go'}

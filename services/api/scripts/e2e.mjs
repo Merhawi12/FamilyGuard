@@ -344,8 +344,10 @@ const run = async () => {
   const audit = await call('GET', '/audit', { token: parentToken });
   check('the audit log is readable and non-empty', audit.status === 200 && (audit.data?.rows?.length ?? audit.data?.length ?? 0) > 0);
 
-  const sessions = await call('GET', '/admin/sessions/active', { token: parentToken });
-  check('active sessions are listed', sessions.status === 200 && Array.isArray(sessions.data));
+  // Paginated: { rows, count }.
+  const sessions = await call('GET', '/admin/sessions/active?limit=10', { token: parentToken });
+  check('active sessions are listed', sessions.status === 200 && Array.isArray(sessions.data?.rows));
+  check('the session list reports a total for paging', (sessions.data?.count ?? 0) > 0, JSON.stringify(sessions.data?.count));
 
   // ── 12. Contact form ───────────────────────────────────────────────────────
   step('Marketing contact form');
@@ -395,7 +397,14 @@ const updateUser = (email, updates) =>
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`failed to update ${email}`))));
   });
 
-const promoteToAdmin = (email) => updateUser(email, { role: 'admin' });
+const promoteToAdmin = (email) =>
+  updateUser(email, {
+    role: 'super_admin',
+    permissions: [
+      'manage_users', 'manage_sessions', 'manage_billing',
+      'manage_settings', 'send_notifications', 'view_audit_logs',
+    ],
+  });
 const expireTrial = (email) => updateUser(email, { trialEndsAt: new Date(Date.now() - 86400000).toISOString() });
 const restoreTrial = (email) => updateUser(email, { trialEndsAt: new Date(Date.now() + 86400000).toISOString() });
 

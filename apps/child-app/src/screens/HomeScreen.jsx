@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import { startMonitoring, stopMonitoring, getMonitoringStatus } from '../services/monitoring';
+import { startMonitoring, getMonitoringStatus } from '../services/monitoring';
 
-export default function HomeScreen() {
+export default function HomeScreen({ navigation }) {
   const [status, setStatus] = useState({
     monitoring: false,
     appBlocking: false,
@@ -53,6 +53,11 @@ export default function HomeScreen() {
       <Text style={styles.title}>🛡️ Parentix</Text>
       <Text style={styles.sub}>Device ID: {deviceId?.slice(0, 8) ?? '—'}...</Text>
 
+      <TouchableOpacity style={styles.messagesBtn} onPress={() => navigation.navigate('Messages')}>
+        <Text style={styles.messagesText}>💬  Messages</Text>
+        <Text style={styles.messagesHint}>Talk to your parent, or send an SOS</Text>
+      </TouchableOpacity>
+
       {/* Monitoring status */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Monitoring Status</Text>
@@ -95,7 +100,7 @@ export default function HomeScreen() {
           <Text style={styles.cardTitle}>Blocked Websites ({blockedSites.length})</Text>
           {blockedSites.map((r) => (
             <View key={r.id} style={styles.row}>
-              <Text style={styles.rowLabel}>{r.domain}</Text>
+              <Text style={styles.rowLabel}>{r.url || r.category}</Text>
               <Text style={styles.badge}>Blocked</Text>
             </View>
           ))}
@@ -142,4 +147,7 @@ const styles = StyleSheet.create({
   muted: { color: '#9ca3af', fontSize: 14 },
   refreshBtn: { backgroundColor: '#eff6ff', borderRadius: 12, padding: 14, alignItems: 'center' },
   refreshText: { color: '#2563eb', fontWeight: '600' },
+  messagesBtn: { backgroundColor: '#2563eb', borderRadius: 16, padding: 16 },
+  messagesText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  messagesHint: { color: '#dbeafe', fontSize: 12, marginTop: 2 },
 });

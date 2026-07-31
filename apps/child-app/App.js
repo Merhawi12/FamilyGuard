@@ -5,6 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import LinkScreen from './src/screens/LinkScreen';
 import PermissionsScreen from './src/screens/PermissionsScreen';
 import HomeScreen from './src/screens/HomeScreen';
+import MessagesScreen from './src/screens/MessagesScreen';
 
 const Stack = createStackNavigator();
 
@@ -25,6 +26,7 @@ export default function App() {
         <Stack.Screen name="Link" component={LinkScreen} />
         <Stack.Screen name="Permissions" component={PermissionsScreen} />
         <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="Messages" component={MessagesScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

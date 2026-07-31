@@ -14,8 +14,37 @@ const haversineMeters = (lat1, lng1, lat2, lng2) => {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
+/**
+ * Persists a fix and fans out the consequences: push it to the parent's socket
+ * and run the geofence transitions.
+ *
+ * `touchDevice` is only true for a report that really came from the device —
+ * a position the parent typed in says nothing about whether the phone is alive,
+ * so it must not refresh `lastSeen`.
+ */
+const recordLocation = async (req, { childId, deviceId, parentId, fix, touchDevice }) => {
+  const { latitude, longitude, accuracy, speed, heading, address } = fix;
+
+  const location = await Location.create({
+    childId, deviceId, latitude, longitude, accuracy, speed, heading, address,
+    recordedAt: new Date(),
+  });
+
+  if (touchDevice) await Device.update({ lastSeen: new Date() }, { where: { id: deviceId } });
+
+  const io = req.app.get('io');
+  io.to(`parent:${parentId}`).emit('location:update', {
+    childId, latitude, longitude, accuracy, speed, heading, address,
+    recordedAt: location.recordedAt,
+  });
+
+  await checkGeofences(req, parentId, childId, latitude, longitude, io);
+
+  return location;
+};
+
 // POST /api/locations  — called by child device (mobile app)
-// Body: { childId, deviceId, latitude, longitude, accuracy?, speed?, heading?, address? }
+// Body: { latitude, longitude, accuracy?, speed?, heading?, address? }
 const postLocation = async (req, res, next) => {
   try {
     // Identity comes from the authenticated device token (authenticateDevice),
@@ -27,26 +56,62 @@ const postLocation = async (req, res, next) => {
       return res.status(400).json({ error: 'latitude and longitude are required' });
     }
 
-    const location = await Location.create({
-      childId, deviceId, latitude, longitude, accuracy, speed, heading, address,
-      recordedAt: new Date(),
+    const child = await Child.findByPk(childId, { attributes: ['parentId'] });
+    if (!child) return res.status(404).json({ error: 'Child not found' });
+
+    const location = await recordLocation(req, {
+      childId,
+      deviceId,
+      parentId: child.parentId,
+      fix: { latitude, longitude, accuracy, speed, heading, address },
+      touchDevice: true,
     });
 
-    // Update device heartbeat
-    await Device.update({ lastSeen: new Date() }, { where: { id: deviceId } });
+    res.status(201).json(location);
+  } catch (err) {
+    next(err);
+  }
+};
 
-    // Broadcast real-time update to parent via socket
-    const child = await Child.findByPk(childId, { attributes: ['parentId'] });
-    if (child) {
-      const io = req.app.get('io');
-      io.to(`parent:${child.parentId}`).emit('location:update', {
-        childId, latitude, longitude, accuracy, speed, heading, address,
-        recordedAt: location.recordedAt,
-      });
+/**
+ * POST /api/locations/:childId/manual  — the parent sets the position by hand
+ * from the dashboard ("use my location", or an address search).
+ *
+ * The device route above derives its identity from the device token so a phone
+ * can only ever report its own position. A parent has no device token, so this
+ * route authorises through child ownership instead.
+ */
+const setManualLocation = async (req, res, next) => {
+  try {
+    const child = await Child.findOne({ where: { id: req.params.childId, parentId: req.user.id } });
+    if (!child) return res.status(404).json({ error: 'Child not found' });
 
-      // Geofence check
-      await checkGeofences(req, child.parentId, childId, latitude, longitude, io);
+    const { latitude, longitude, accuracy, address } = req.body;
+    if (latitude == null || longitude == null) {
+      return res.status(400).json({ error: 'latitude and longitude are required' });
     }
+
+    // Every location belongs to a device, so there has to be one to attribute
+    // the fix to.
+    const device = await Device.findOne({ where: { childId: child.id }, order: [['createdAt', 'ASC']] });
+    if (!device) {
+      return res.status(400).json({ error: 'Link a device to this child before setting a location' });
+    }
+
+    const location = await recordLocation(req, {
+      childId: child.id,
+      deviceId: device.id,
+      parentId: req.user.id,
+      fix: {
+        latitude,
+        longitude,
+        accuracy: accuracy ?? null,
+        speed: null,
+        heading: null,
+        address: address ?? null,
+      },
+      touchDevice: false,
+    });
 
     res.status(201).json(location);
   } catch (err) {
@@ -142,4 +207,4 @@ const getHistory = async (req, res, next) => {
   }
 };
 
-module.exports = { postLocation, getCurrentLocation, getHistory };
+module.exports = { postLocation, setManualLocation, getCurrentLocation, getHistory };

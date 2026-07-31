@@ -1,14 +1,12 @@
-import * as SecureStore from 'expo-secure-store';
-import { io } from 'socket.io-client';
 import { device as deviceApi } from './api';
+import { connectSocket, onSocket, emitSocket } from './socket';
 
-const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.parentix.ca';
 const POLL_INTERVAL = 5 * 60 * 1000; // 5 min
 
 let _rules = { appRules: [], websiteRules: [], screenTimeRule: null };
-let _socket = null;
 let _pollTimer = null;
 let _onUpdate = null;
+let _unsubscribers = [];
 
 export function getRules() {
   return _rules;
@@ -18,7 +16,7 @@ export async function fetchRules() {
   try {
     const res = await deviceApi.getRules();
     _rules = res.data;
-    if (_onUpdate) _onUpdate(_rules);
+    if (_onUpdate) await _onUpdate(_rules);
   } catch (e) {
     console.warn('[rules] fetch failed:', e.message);
   }
@@ -29,31 +27,31 @@ export async function startRulesSync(onUpdate) {
 
   await fetchRules();
 
-  // Poll every 5 minutes as a safety net
+  // Poll as a safety net for a missed socket event or a long offline stretch.
+  clearInterval(_pollTimer);
   _pollTimer = setInterval(fetchRules, POLL_INTERVAL);
 
-  // Real-time socket updates — authenticate the handshake with the device token.
-  // The server derives the child identity from the token and auto-joins the room.
-  const token = await SecureStore.getItemAsync('fg_device_token');
-  if (!token) return;
+  await connectSocket();
 
-  _socket = io(SOCKET_URL, { transports: ['websocket'], auth: { token } });
-  _socket.on('rules_updated', fetchRules);
-  _socket.on('screen_time_updated', (rule) => {
+  _unsubscribers.push(onSocket('rules_updated', fetchRules));
+  _unsubscribers.push(onSocket('screen_time_updated', async (rule) => {
     _rules = { ..._rules, screenTimeRule: rule };
-    if (_onUpdate) _onUpdate(_rules);
-  });
+    if (_onUpdate) await _onUpdate(_rules);
+  }));
 }
 
-// Emit an event on the authenticated device socket (used for child-originated
-// alerts). No-op until the socket is connected; the server derives child/parent
-// identity from the handshake token, so callers never send ids.
+/**
+ * Emit a child-originated event on the authenticated device socket. The server
+ * derives child/parent identity from the handshake, so callers never send ids.
+ */
 export function emitEvent(event, data = {}) {
-  if (_socket && _socket.connected) _socket.emit(event, data);
+  return emitSocket(event, data);
 }
 
 export function stopRulesSync() {
   clearInterval(_pollTimer);
-  _socket?.disconnect();
-  _socket = null;
+  _pollTimer = null;
+  _unsubscribers.forEach((off) => off());
+  _unsubscribers = [];
+  _onUpdate = null;
 }

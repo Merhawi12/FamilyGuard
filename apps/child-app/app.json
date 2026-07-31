@@ -37,6 +37,9 @@
         "projectId": "b9ba998c-af61-4f0c-a1ce-3b13cde4311f"
       }
     },
-    "owner": "parentix"
+    "owner": "parentix",
+    "platforms": [
+      "android"
+    ]
   }
 }

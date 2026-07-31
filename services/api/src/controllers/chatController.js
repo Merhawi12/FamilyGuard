@@ -101,4 +101,37 @@ const receiveFromChild = async (req, res, next) => {
   }
 };
 
-module.exports = { getMessages, sendMessage, receiveFromChild };
+/**
+ * GET /api/chats/me/messages — the child device reads its own thread.
+ *
+ * The parent-facing `GET /:childId/messages` needs a parent session, so without
+ * this the child app could send messages but never see the conversation. The
+ * child is taken from the device token, so there is no id to tamper with.
+ */
+const getMyMessages = async (req, res, next) => {
+  try {
+    const child = await Child.findByPk(req.childId, { attributes: ['id', 'parentId'] });
+    if (!child) return res.status(404).json({ error: 'Child not found' });
+
+    const { limit = 50, offset = 0 } = req.query;
+    const messages = await Message.findAndCountAll({
+      where: { parentId: child.parentId, childId: child.id },
+      order: [['createdAt', 'ASC']],
+      limit: Math.min(parseInt(limit), 200),
+      offset: parseInt(offset),
+    });
+
+    // Mirror of the parent side: opening the thread clears the unread flag on
+    // the messages the other party sent.
+    await Message.update(
+      { isRead: true },
+      { where: { parentId: child.parentId, childId: child.id, senderRole: 'parent', isRead: false } }
+    );
+
+    res.json(messages);
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { getMessages, sendMessage, receiveFromChild, getMyMessages };

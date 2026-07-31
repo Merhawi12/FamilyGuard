@@ -1,8 +1,8 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-// The child device talks to the API directly rather than through the CloudFront
-// distribution that fronts the web apps.
+// The child device talks to the API hostname directly rather than through the
+// app hostnames that front the web apps.
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.parentix.ca/api';
 
 const api = axios.create({ baseURL: API_URL });
@@ -29,6 +29,14 @@ export const location = {
   // Device-authenticated: the server derives childId and deviceId from the
   // device token, so neither may be supplied in the body.
   post: (data) => api.post('/locations', data),
+};
+
+// ── Family chat ──────────────────────────────────────────────────────────────
+export const chat = {
+  /** This device's own thread — the child comes from the device token. */
+  getMyMessages: (params) => api.get('/chats/me/messages', { params }),
+  /** REST fallback when the socket is down. `childId` is ignored by the server. */
+  sendFromChild: (childId, data) => api.post(`/chats/${childId}/messages/from-child`, data),
 };
 
 export default api;

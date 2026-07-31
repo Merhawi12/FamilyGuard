@@ -105,3 +105,84 @@ describe('Chat REST — child device side (from-child)', () => {
     expect(alert.childId).toBe(child.id);
   });
 });
+
+/**
+ * The parent-facing `GET /:childId/messages` needs a parent session, so without
+ * this route the child app could send messages but never see the conversation.
+ */
+describe('Chat REST — child device reads its own thread', () => {
+  it('returns the thread for the child in the device token', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+    const device = await createDevice(child.id);
+    const token = tokenFor(parent);
+
+    await request(app).post(`/api/chats/${child.id}/messages`)
+      .set('Authorization', `Bearer ${token}`).send({ text: 'from parent' });
+    await request(app).post(`/api/chats/${child.id}/messages/from-child`)
+      .set('Authorization', `Bearer ${deviceToken(device)}`).send({ text: 'from child' });
+
+    const res = await request(app).get('/api/chats/me/messages')
+      .set('Authorization', `Bearer ${deviceToken(device)}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.rows.map((m) => m.text)).toEqual(['from parent', 'from child']);
+    expect(res.body.count).toBe(2);
+  });
+
+  it('marks the parent\'s messages read once the child opens the thread', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+    const device = await createDevice(child.id);
+
+    await request(app).post(`/api/chats/${child.id}/messages`)
+      .set('Authorization', `Bearer ${tokenFor(parent)}`).send({ text: 'unread' });
+
+    await request(app).get('/api/chats/me/messages').set('Authorization', `Bearer ${deviceToken(device)}`);
+
+    const message = await Message.findOne({ where: { childId: child.id, senderRole: 'parent' } });
+    expect(message.isRead).toBe(true);
+  });
+
+  it('never leaks another family\'s thread', async () => {
+    const [mine, theirs] = [await createUser(), await createUser()];
+    const myChild = await createChild(mine.id);
+    const theirChild = await createChild(theirs.id);
+    const myDevice = await createDevice(myChild.id);
+
+    await request(app).post(`/api/chats/${theirChild.id}/messages`)
+      .set('Authorization', `Bearer ${tokenFor(theirs)}`).send({ text: 'private' });
+
+    const res = await request(app).get('/api/chats/me/messages')
+      .set('Authorization', `Bearer ${deviceToken(myDevice)}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.count).toBe(0);
+  });
+
+  it('refuses a parent session and an unauthenticated caller', async () => {
+    const parent = await createUser();
+    await createChild(parent.id);
+
+    expect((await request(app).get('/api/chats/me/messages')).status).toBe(401);
+    expect((await request(app).get('/api/chats/me/messages')
+      .set('Authorization', `Bearer ${tokenFor(parent)}`)).status).toBe(401);
+  });
+
+  it('paginates', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+    const device = await createDevice(child.id);
+
+    for (let i = 0; i < 3; i += 1) {
+      await request(app).post(`/api/chats/${child.id}/messages`)
+        .set('Authorization', `Bearer ${tokenFor(parent)}`).send({ text: `m${i}` });
+    }
+
+    const res = await request(app).get('/api/chats/me/messages?limit=2&offset=0')
+      .set('Authorization', `Bearer ${deviceToken(device)}`);
+
+    expect(res.body.rows).toHaveLength(2);
+    expect(res.body.count).toBe(3);
+  });
+});

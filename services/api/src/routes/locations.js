@@ -2,7 +2,7 @@ const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const { authenticate, authenticateDevice } = require('../middleware/auth');
 const { requireFeature } = require('../middleware/featureGate');
-const { postLocation, getCurrentLocation, getHistory } = require('../controllers/locationController');
+const { postLocation, setManualLocation, getCurrentLocation, getHistory } = require('../controllers/locationController');
 
 // Mobile app posts location — rate-limited and authenticated with the device token.
 // childId/deviceId are derived from the token, never from the request body.
@@ -14,6 +14,10 @@ const locationPostLimiter = rateLimit({
 });
 
 router.post('/', locationPostLimiter, authenticateDevice, postLocation);
+
+// Parent sets a position by hand from the dashboard. Authorised by ownership of
+// the child rather than a device token, which a parent never holds.
+router.post('/:childId/manual', locationPostLimiter, authenticate, requireFeature('gps_tracking'), setManualLocation);
 
 // Parent dashboard reads location — requires auth
 router.get('/:childId/current', authenticate, requireFeature('gps_tracking'), getCurrentLocation);

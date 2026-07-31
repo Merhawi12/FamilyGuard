@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Platform,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert,
 } from 'react-native';
 import * as Location from 'expo-location';
 import UsageStats from '../native/UsageStats';
@@ -43,18 +43,27 @@ export default function PermissionsScreen({ navigation }) {
   });
 
   const checkAll = async () => {
-    const [locFg] = await Location.getForegroundPermissionsAsync();
-    const [locBg] = await Location.getBackgroundPermissionsAsync();
-    const usage = await UsageStats.hasPermission();
-    const accessibility = await AppBlocker.isAccessibilityEnabled();
-    const vpn = await VpnControl.hasPermission();
+    // These resolve to a permission *object*, not a tuple — array-destructuring
+    // them threw, so this whole check used to fail and every row rendered as
+    // "not granted" no matter what the child had actually allowed.
+    try {
+      const [locFg, locBg, usage, accessibility, vpn] = await Promise.all([
+        Location.getForegroundPermissionsAsync(),
+        Location.getBackgroundPermissionsAsync(),
+        UsageStats.hasPermission(),
+        AppBlocker.isAccessibilityEnabled(),
+        VpnControl.hasPermission(),
+      ]);
 
-    setStatuses({
-      location: locFg.granted && locBg.granted,
-      usage,
-      accessibility,
-      vpn,
-    });
+      setStatuses({
+        location: !!locFg?.granted && !!locBg?.granted,
+        usage: !!usage,
+        accessibility: !!accessibility,
+        vpn: !!vpn,
+      });
+    } catch (e) {
+      console.warn('[permissions] check failed:', e?.message);
+    }
   };
 
   useEffect(() => {
