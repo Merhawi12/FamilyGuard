@@ -25,8 +25,8 @@ output "admin_url" {
 }
 
 output "load_balancer_ip" {
-  description = "Point every hostname's A record at this address."
-  value       = google_compute_global_address.lb.address
+  description = "Point every hostname's A record at this address. Empty without a domain — no load balancer, no address."
+  value       = local.use_domain ? google_compute_global_address.lb[0].address : ""
 }
 
 output "dns_name_servers" {

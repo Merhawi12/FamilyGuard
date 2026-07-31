@@ -174,7 +174,12 @@ resource "google_compute_managed_ssl_certificate" "main" {
   }
 }
 
+# Guarded like everything else here: a reserved global address is billed even
+# when nothing is attached to it, so creating one in an environment with no load
+# balancer is a standing charge for an IP that routes nowhere.
 resource "google_compute_global_address" "lb" {
+  count = local.use_domain ? 1 : 0
+
   name = "${local.prefix}-lb-ip"
 
   depends_on = [google_project_service.services]
@@ -193,7 +198,7 @@ resource "google_compute_global_forwarding_rule" "https" {
 
   name                  = "${local.prefix}-https"
   target                = google_compute_target_https_proxy.main[0].id
-  ip_address            = google_compute_global_address.lb.id
+  ip_address            = google_compute_global_address.lb[0].id
   port_range            = "443"
   load_balancing_scheme = "EXTERNAL_MANAGED"
 }
@@ -224,7 +229,7 @@ resource "google_compute_global_forwarding_rule" "http" {
 
   name                  = "${local.prefix}-http"
   target                = google_compute_target_http_proxy.redirect[0].id
-  ip_address            = google_compute_global_address.lb.id
+  ip_address            = google_compute_global_address.lb[0].id
   port_range            = "80"
   load_balancing_scheme = "EXTERNAL_MANAGED"
 }

@@ -30,5 +30,5 @@ resource "google_dns_record_set" "hosts" {
   # Short, so a load-balancer address change propagates quickly. These records
   # point at an anycast IP that does not move in normal operation.
   ttl     = 300
-  rrdatas = [google_compute_global_address.lb.address]
+  rrdatas = [google_compute_global_address.lb[0].address]
 }
