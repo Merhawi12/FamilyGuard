@@ -27,8 +27,27 @@ case "$ENV_NAME" in
   *) die "usage: $0 <dev|prod> [plan|apply|destroy|output]" ;;
 esac
 
-command -v terraform >/dev/null 2>&1 || die "terraform is required but not installed."
-command -v gcloud   >/dev/null 2>&1 || die "gcloud is required but not installed."
+command -v gcloud >/dev/null 2>&1 || die "gcloud is required but not installed."
+
+# Not `command -v terraform`: Cloud Shell ships a shim of that name whose only
+# job is to print installation instructions, and it satisfies `command -v`
+# perfectly well. Ask for a version banner instead, which only the real binary
+# produces — otherwise the run continues and silently does nothing.
+if ! terraform version 2>/dev/null | grep -q '^Terraform v'; then
+  die "terraform is not installed, or is the Cloud Shell placeholder.
+
+       Cloud Shell does not ship Terraform, and an apt install does not survive
+       the session. Install it under \$HOME, which does:
+
+         TF=1.9.8
+         mkdir -p ~/bin
+         curl -fsSL \"https://releases.hashicorp.com/terraform/\${TF}/terraform_\${TF}_linux_amd64.zip\" -o /tmp/tf.zip
+         unzip -oq /tmp/tf.zip -d ~/bin && chmod +x ~/bin/terraform
+         grep -q 'HOME/bin' ~/.bashrc || echo 'export PATH=\"\$HOME/bin:\$PATH\"' >> ~/.bashrc
+         export PATH=\"\$HOME/bin:\$PATH\"
+
+       Then re-run this script."
+fi
 
 VAR_FILE="envs/${ENV_NAME}.tfvars"
 [ -f "$VAR_FILE" ] || die "Missing ${VAR_FILE}"

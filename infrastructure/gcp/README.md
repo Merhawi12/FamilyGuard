@@ -88,10 +88,26 @@ marketing pages alone if that is ever worth splitting out.
 
 ### Or use Cloud Shell
 
-[Cloud Shell](https://shell.cloud.google.com) already has gcloud, Terraform,
-Docker, git and Node, and is already authenticated — no local install, and no
-`gcloud auth application-default login`, because credentials come from the
-metadata server.
+[Cloud Shell](https://shell.cloud.google.com) has gcloud, Docker, git and Node,
+and is already authenticated — no `gcloud auth application-default login`,
+because credentials come from the metadata server.
+
+**It does not have Terraform.** There is a command of that name, but it is a
+placeholder that prints installation instructions and exits. Its suggested
+`apt install` also does not survive the session: only `$HOME` persists. Install
+the binary there instead, once:
+
+```bash
+TF=1.9.8
+mkdir -p ~/bin
+curl -fsSL "https://releases.hashicorp.com/terraform/${TF}/terraform_${TF}_linux_amd64.zip" -o /tmp/tf.zip
+unzip -oq /tmp/tf.zip -d ~/bin && chmod +x ~/bin/terraform
+grep -q 'HOME/bin' ~/.bashrc || echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
+export PATH="$HOME/bin:$PATH"
+terraform version      # must print "Terraform v1.9.8", not install instructions
+```
+
+Then:
 
 ```bash
 git clone https://github.com/Merhawi12/FamilyGuard.git
@@ -99,8 +115,7 @@ cd FamilyGuard && git checkout restructure/three-apps-aws
 ./infrastructure/gcp/deploy.sh dev plan
 ```
 
-Two things to know: the home directory persists but anything outside it is wiped
-between sessions, and a session times out after about an hour idle. A long
+One more thing to know: a session times out after about an hour idle. A long
 `apply` is fine; walking away mid-apply is not, because an interrupted run can
 leave state and reality out of step. Re-running `apply` reconciles it.
 
