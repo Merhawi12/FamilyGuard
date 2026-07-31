@@ -47,6 +47,45 @@ gcloud config set project parentix-4be0d
 Terraform ≥ 1.6, the gcloud CLI, and Docker for image builds. Billing must be
 enabled on the project — `terraform apply` enables the ~16 APIs it needs itself.
 
+### `parentix-4be0d` is a Firebase project
+
+That is fine — a Firebase project *is* a Google Cloud project, with Firebase
+layered on top. Nothing here touches Firestore, Firebase Hosting, App Engine or
+the default `*.appspot.com` / `*.firebasestorage.app` bucket, and
+`disable_on_destroy = false` on the API enablement means a `terraform destroy`
+cannot switch off an API that Firebase is relying on.
+
+**But billing has to be on the Blaze plan.** A Firebase project on the free Spark
+plan has no billing account attached, and Cloud Run, Cloud SQL, Memorystore and
+Artifact Registry all refuse to be created without one. Check before you plan:
+
+```bash
+gcloud beta billing projects describe parentix-4be0d \
+  --format='value(billingEnabled)'
+```
+
+`False` means every `apply` will fail on the first billable resource. Upgrade in
+the Firebase console under **Settings → Usage and billing**. Blaze is
+pay-as-you-go, not a flat fee, so an idle dev environment still costs about what
+the table further down says — but set a budget alert, because nothing here caps
+itself.
+
+### Why not Firebase Hosting for the web apps?
+
+It is a fair question given the project is already on Firebase, and it would be
+appealing: proper SPA rewrites (no 404-on-deep-link caveat), free TLS, a global
+CDN, and no ~$18/month load balancer.
+
+**Firebase Hosting does not proxy WebSockets.** Socket.IO carries alerts, chat
+and location for this product; through Firebase Hosting it would be stuck on
+HTTP long-polling. Splitting static onto Firebase Hosting and the API onto its
+own hostname avoids that, but reintroduces cross-origin calls and a build-time
+`VITE_API_URL`, which is exactly what the same-origin routing here exists to
+avoid.
+
+So the load balancer stays. Firebase Hosting remains a reasonable home for the
+marketing pages alone if that is ever worth splitting out.
+
 ### Or use Cloud Shell
 
 [Cloud Shell](https://shell.cloud.google.com) already has gcloud, Terraform,
