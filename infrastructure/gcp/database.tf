@@ -21,6 +21,11 @@ resource "google_sql_database_instance" "main" {
   deletion_protection = var.db_deletion_protection
 
   settings {
+    # Stated explicitly on purpose. The API now defaults new instances to
+    # ENTERPRISE_PLUS, which accepts only db-perf-optimized-N-* tiers, so
+    # omitting this makes a perfectly valid db-f1-micro fail at create time
+    # with "Invalid Tier for (ENTERPRISE_PLUS) Edition".
+    edition           = var.db_edition
     tier              = var.db_tier
     availability_type = var.db_availability_type
     disk_size         = var.db_disk_size_gb

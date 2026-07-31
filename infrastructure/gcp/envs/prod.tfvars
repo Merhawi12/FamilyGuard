@@ -28,7 +28,11 @@ api_memory        = "1Gi"
 
 # 1 vCPU / 3.75 GB. db-f1-micro is a shared-core instance with no performance
 # guarantee and is not suitable for production traffic.
-db_tier = "db-custom-1-3840"
+#
+# ENTERPRISE_PLUS would add a data cache and near-zero-downtime maintenance, but
+# only accepts db-perf-optimized-N-* tiers, which start considerably higher.
+db_edition = "ENTERPRISE"
+db_tier    = "db-custom-1-3840"
 
 db_disk_size_gb = 20
 # Synchronous standby in a second zone. Roughly doubles the database cost and is

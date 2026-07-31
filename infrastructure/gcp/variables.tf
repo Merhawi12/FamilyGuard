@@ -112,8 +112,33 @@ variable "api_max_instances" {
 
 # ── Database (Cloud SQL) ─────────────────────────────────────────────────────
 
+variable "db_edition" {
+  description = <<-EOT
+    Cloud SQL edition. Must be stated explicitly: the API's own default has
+    moved to ENTERPRISE_PLUS, which rejects every tier except the
+    db-perf-optimized-N-* family — so leaving this unset makes an otherwise
+    valid db-f1-micro or db-custom-* fail at create time.
+
+    ENTERPRISE covers shared-core (db-f1-micro, db-g1-small) and custom
+    (db-custom-N-M) tiers, and is what this deployment sizes for.
+    ENTERPRISE_PLUS buys a data cache and near-zero-downtime maintenance at
+    substantially higher cost, and would need the tier changed to match.
+  EOT
+  type        = string
+  default     = "ENTERPRISE"
+
+  validation {
+    condition     = contains(["ENTERPRISE", "ENTERPRISE_PLUS"], var.db_edition)
+    error_message = "db_edition must be ENTERPRISE or ENTERPRISE_PLUS."
+  }
+}
+
 variable "db_tier" {
-  description = "Cloud SQL machine type, e.g. db-f1-micro, db-custom-1-3840."
+  description = <<-EOT
+    Cloud SQL machine type. Must be valid for db_edition: shared-core
+    (db-f1-micro, db-g1-small) and custom (db-custom-N-M) tiers are
+    ENTERPRISE only; ENTERPRISE_PLUS takes db-perf-optimized-N-* instead.
+  EOT
   type        = string
   default     = "db-f1-micro"
 }

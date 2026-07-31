@@ -19,6 +19,9 @@ api_max_instances = 2
 api_cpu           = "1"
 api_memory        = "512Mi"
 
+# Shared-core, and the cheapest thing that runs Postgres. Valid only on the
+# ENTERPRISE edition — ENTERPRISE_PLUS rejects it.
+db_edition               = "ENTERPRISE"
 db_tier                  = "db-f1-micro"
 db_disk_size_gb          = 10
 db_availability_type     = "ZONAL"
