@@ -1,31 +1,47 @@
-import { useEffect, useState } from 'react';
-import { admin as adminApi, errorMessage } from '@parentix/shared';
+import { useEffect, useState, useCallback } from 'react';
+import { admin as adminApi, errorMessage, Pagination, hasPermission, useAuth, PERMISSIONS } from '@parentix/shared';
+
+const PAGE_SIZE = 50;
 
 export default function AdminNotifications() {
+  const { user: me } = useAuth();
   const [users, setUsers] = useState([]);
   const [sent, setSent] = useState([]);
+  const [sentCount, setSentCount] = useState(0);
+  const [sentOffset, setSentOffset] = useState(0);
+  const [loadingSent, setLoadingSent] = useState(true);
   const [form, setForm] = useState({ target: 'broadcast', userId: '', title: '', message: '', type: 'info' });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [sending, setSending] = useState(false);
 
-  const loadSent = () =>
-    adminApi
-      .listSentNotifications()
-      .then((r) => setSent(r.data))
-      .catch((e) => setError(errorMessage(e, 'Failed to load sent notifications')));
+  const loadSent = useCallback((nextOffset = sentOffset) => {
+    setLoadingSent(true);
+    return adminApi
+      .listSentNotifications({ limit: PAGE_SIZE, offset: nextOffset })
+      .then((r) => { setSent(r.data.rows); setSentCount(r.data.count); })
+      .catch((e) => setError(errorMessage(e, 'Failed to load sent notifications')))
+      .finally(() => setLoadingSent(false));
+  }, [sentOffset]);
+
+  useEffect(() => { loadSent(sentOffset); }, [sentOffset, loadSent]);
 
   useEffect(() => {
+    // Picking a single recipient needs the directory, which this role may not
+    // have — without it only broadcast is offered.
+    if (!hasPermission(me, PERMISSIONS.MANAGE_USERS)) return;
     adminApi
       .listUsers({ limit: 200 })
       .then((r) => setUsers(r.data.rows))
       .catch((e) => setError(errorMessage(e, 'Failed to load the recipient list')));
-    loadSent();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [me]);
 
   const handleSend = async (e) => {
     e.preventDefault();
+    // A broadcast reaches every customer at once and cannot be recalled.
+    if (form.target === 'broadcast'
+      && !window.confirm('Send this to every customer? A broadcast cannot be recalled.')) return;
+
     setError(''); setSuccess(''); setSending(true);
     try {
       const payload = {
@@ -37,7 +53,8 @@ export default function AdminNotifications() {
       const res = await adminApi.sendNotification(payload);
       setSuccess(res.data.message);
       setForm({ ...form, title: '', message: '' });
-      loadSent();
+      // Newest first — jump back to page one so the send is visible.
+      if (sentOffset === 0) await loadSent(0); else setSentOffset(0);
     } catch (e) { setError(errorMessage(e, 'Failed to send notification')); }
     finally { setSending(false); }
   };
@@ -66,7 +83,7 @@ export default function AdminNotifications() {
 
       <div className="card p-0 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-800">Sent History ({sent.length})</h2>
+          <h2 className="font-semibold text-gray-800">Sent History ({sentCount})</h2>
         </div>
         {sent.length === 0 ? (
           <div className="text-center py-12 text-gray-400 text-sm">No notifications sent yet.</div>
@@ -96,6 +113,13 @@ export default function AdminNotifications() {
             </table>
           </div>
         )}
+
+        <div className="px-6 pb-4">
+          <Pagination
+            offset={sentOffset} limit={PAGE_SIZE} count={sentCount}
+            onChange={setSentOffset} disabled={loadingSent} label="notifications"
+          />
+        </div>
       </div>
     </div>
   );

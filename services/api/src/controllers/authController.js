@@ -5,6 +5,8 @@ const { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEma
 const { auditLog } = require('../utils/auditLogger');
 const { createSession, revokeSession, revokeAllSessions } = require('../utils/session');
 const { serializeUser } = require('../utils/serializers');
+// Registration, reset, change and staff account creation all run the same check.
+const { passwordProblem } = require('../utils/password');
 const { env } = require('../config/env');
 const logger = require('../utils/logger');
 
@@ -13,21 +15,6 @@ const generateVerificationCode = () => String(crypto.randomInt(100000, 1000000))
 // Short-lived token used as the first-factor proof before MFA is verified
 const signPreAuthToken = (id) =>
   jwt.sign({ id, mfaRequired: true }, env.auth.jwtSecret, { expiresIn: '5m' });
-
-/**
- * Rejects passwords the platform will not accept anywhere — registration,
- * reset, and change all run the same check.
- * @returns {string|null} the reason it was rejected, or null if acceptable.
- */
-const passwordProblem = (password) => {
-  if (!password || password.length < env.auth.minPasswordLength) {
-    return `Password must be at least ${env.auth.minPasswordLength} characters`;
-  }
-  if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
-    return 'Password must contain at least one letter and one number';
-  }
-  return null;
-};
 
 const register = async (req, res, next) => {
   try {
@@ -135,6 +122,15 @@ const login = async (req, res, next) => {
 
     if (!user.emailVerified) {
       return res.status(403).json({ error: 'Please verify your email before logging in', emailVerificationRequired: true });
+    }
+
+    // A deactivated account must not get as far as a session. `authenticate`
+    // already rejects one, so without this the caller is handed a token that
+    // fails on its very next request — and a blocked user still lands a row in
+    // the active-sessions view.
+    if (!user.isActive) {
+      auditLog(req, { userId: user.id, action: 'auth.login_blocked_inactive', metadata: { email } });
+      return res.status(403).json({ error: 'This account has been deactivated. Contact an administrator.' });
     }
 
     if (user.failedLoginAttempts > 0 || user.lockedUntil) {

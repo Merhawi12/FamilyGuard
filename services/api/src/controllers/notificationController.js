@@ -1,6 +1,7 @@
 const { Notification, User } = require('../models');
 const { Op } = require('sequelize');
 const { auditLog } = require('../utils/auditLogger');
+const { STAFF_ROLES } = require('../config/roles');
 
 // GET /api/notifications — the current user's own notifications
 const listMine = async (req, res, next) => {
@@ -50,7 +51,11 @@ const send = async (req, res, next) => {
 
     let recipients;
     if (broadcast) {
-      recipients = await User.findAll({ where: { role: { [Op.ne]: 'admin' } }, attributes: ['id'] });
+      // A broadcast is a customer announcement — no department account should receive it.
+      recipients = await User.findAll({
+        where: { role: { [Op.notIn]: STAFF_ROLES } },
+        attributes: ['id'],
+      });
     } else {
       const user = await User.findByPk(userId);
       if (!user) return res.status(404).json({ error: 'User not found' });
@@ -77,8 +82,10 @@ const send = async (req, res, next) => {
 // GET /api/notifications/sent — admin's view of what's been sent
 const listSent = async (req, res, next) => {
   try {
-    const { limit = 200, offset = 0 } = req.query;
-    const notifications = await Notification.findAll({
+    const { limit = 50, offset = 0 } = req.query;
+    // findAndCountAll so the console can page — a broadcast writes one row per
+    // customer, so this table grows far faster than the others.
+    const notifications = await Notification.findAndCountAll({
       where: { createdBy: { [Op.ne]: null } },
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email'] }],
       order: [['createdAt', 'DESC']],

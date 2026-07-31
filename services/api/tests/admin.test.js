@@ -23,9 +23,9 @@ describe('Admin access control (requireRole + requirePermission)', () => {
     expect(res.status).toBe(403);
   });
 
-  it('200 for a support user with manage_users, and for an admin', async () => {
+  it('200 for a support user with manage_users, and for a super admin', async () => {
     const support = await createUser({ role: 'support', permissions: ['manage_users'] });
-    const admin = await createUser({ role: 'admin' });
+    const admin = await createUser({ role: 'super_admin' });
     expect((await request(app).get('/api/admin/users').set(bearer(support))).status).toBe(200);
     expect((await request(app).get('/api/admin/users').set(bearer(admin))).status).toBe(200);
   });
@@ -33,7 +33,7 @@ describe('Admin access control (requireRole + requirePermission)', () => {
 
 describe('Admin user management', () => {
   it('creates a user with a hashed password; rejects duplicates and missing fields', async () => {
-    const admin = await createUser({ role: 'admin' });
+    const admin = await createUser({ role: 'super_admin' });
 
     const missing = await request(app).post('/api/admin/users').set(bearer(admin)).send({ email: 'x@y.dev' });
     expect(missing.status).toBe(400);
@@ -53,7 +53,7 @@ describe('Admin user management', () => {
   });
 
   it('approveUser verifies + activates the account', async () => {
-    const admin = await createUser({ role: 'admin' });
+    const admin = await createUser({ role: 'super_admin' });
     const target = await createUser({ emailVerified: false, isActive: false });
 
     const res = await request(app).patch(`/api/admin/users/${target.id}/approve`).set(bearer(admin));
@@ -64,7 +64,7 @@ describe('Admin user management', () => {
   });
 
   it('toggleBlock flips isActive and revokes sessions when blocking', async () => {
-    const admin = await createUser({ role: 'admin' });
+    const admin = await createUser({ role: 'super_admin' });
     const client = await createUser({ role: 'parent' });
     // Give the client a live session.
     const login = await request(app).post('/api/auth/login').send({ email: client.email, password: DEFAULT_PASSWORD });
@@ -79,7 +79,7 @@ describe('Admin user management', () => {
   });
 
   it('updatePlan validates the plan and syncs isActive', async () => {
-    const admin = await createUser({ role: 'admin' });
+    const admin = await createUser({ role: 'super_admin' });
     const client = await createUser({ role: 'parent' });
 
     const bad = await request(app).patch(`/api/admin/clients/${client.id}/plan`).set(bearer(admin)).send({ plan: 'diamond' });
@@ -90,9 +90,9 @@ describe('Admin user management', () => {
     expect(suspend.body.isActive).toBe(false);
   });
 
-  it('will not delete/toggle an admin account via the client endpoints (404)', async () => {
-    const admin = await createUser({ role: 'admin' });
-    const otherAdmin = await createUser({ role: 'admin' });
+  it('will not delete/toggle a staff account via the client endpoints (404)', async () => {
+    const admin = await createUser({ role: 'super_admin' });
+    const otherAdmin = await createUser({ role: 'super_admin' });
 
     const del = await request(app).delete(`/api/admin/clients/${otherAdmin.id}`).set(bearer(admin));
     expect(del.status).toBe(404);
@@ -102,7 +102,7 @@ describe('Admin user management', () => {
 
 describe('Admin sessions', () => {
   it('lists active sessions and force-logout-user revokes the token', async () => {
-    const admin = await createUser({ role: 'admin' });
+    const admin = await createUser({ role: 'super_admin' });
     const user = await createUser({ role: 'parent' });
     const login = await request(app).post('/api/auth/login').send({ email: user.email, password: DEFAULT_PASSWORD });
     const userToken = login.body.token;
@@ -110,9 +110,11 @@ describe('Admin sessions', () => {
     // The session-backed token works before revocation.
     expect((await request(app).get('/api/auth/me').set('Authorization', `Bearer ${userToken}`)).status).toBe(200);
 
+    // Paginated, so the payload is { rows, count }.
     const list = await request(app).get('/api/admin/sessions/active').set(bearer(admin));
     expect(list.status).toBe(200);
-    expect(list.body.some((s) => s.userId === user.id)).toBe(true);
+    expect(list.body.count).toBeGreaterThanOrEqual(1);
+    expect(list.body.rows.some((s) => s.userId === user.id)).toBe(true);
 
     const revoke = await request(app).delete(`/api/admin/users/${user.id}/sessions`).set(bearer(admin));
     expect(revoke.status).toBe(200);
@@ -124,7 +126,7 @@ describe('Admin sessions', () => {
 
 describe('Admin settings, analytics & billing', () => {
   it('gets defaults and persists updated settings', async () => {
-    const admin = await createUser({ role: 'admin' });
+    const admin = await createUser({ role: 'super_admin' });
 
     const before = await request(app).get('/api/admin/settings').set(bearer(admin));
     expect(before.status).toBe(200);
@@ -139,7 +141,7 @@ describe('Admin settings, analytics & billing', () => {
   });
 
   it('returns an analytics summary shape', async () => {
-    const admin = await createUser({ role: 'admin' });
+    const admin = await createUser({ role: 'super_admin' });
     const res = await request(app).get('/api/admin/analytics').set(bearer(admin));
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('totalUsers');
@@ -148,7 +150,7 @@ describe('Admin settings, analytics & billing', () => {
   });
 
   it('lists transactions (permission-gated to manage_billing)', async () => {
-    const admin = await createUser({ role: 'admin' });
+    const admin = await createUser({ role: 'super_admin' });
     const res = await request(app).get('/api/admin/transactions').set(bearer(admin));
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('rows');

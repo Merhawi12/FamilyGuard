@@ -1,5 +1,6 @@
 const { getSetting } = require('../utils/settings');
 const { DEFAULT_PLAN_FEATURES, FEATURE_LABELS, TRIAL_PLAN } = require('../config/planFeatures');
+const { isStaffRole } = require('../config/roles');
 
 const trialIsActive = (user) => !!user.trialEndsAt && new Date() < new Date(user.trialEndsAt);
 
@@ -14,7 +15,8 @@ const trialIsActive = (user) => !!user.trialEndsAt && new Date() < new Date(user
 const effectivePlan = (user) => (user.plan === 'free' && trialIsActive(user) ? TRIAL_PLAN : user.plan);
 
 const requireFeature = (featureKey) => async (req, res, next) => {
-  if (req.user.role === 'admin') return next();
+  // Staff accounts are not on a plan — entitlements only mean anything for a parent.
+  if (isStaffRole(req.user.role)) return next();
 
   try {
     const planFeatures = await getSetting('planFeatures', DEFAULT_PLAN_FEATURES);

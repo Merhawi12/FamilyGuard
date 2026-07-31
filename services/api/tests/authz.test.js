@@ -93,20 +93,20 @@ describe('Authorization & IDOR', () => {
   });
 
   describe('Admin role escalation (M7)', () => {
-    it('forbids a support user (with manage_users) from promoting anyone to admin (403)', async () => {
+    it('forbids a support user (with manage_users) from promoting anyone to staff (403)', async () => {
       const support = await createUser({ role: 'support', permissions: ['manage_users'] });
       const victim = await createUser({ role: 'parent' });
 
       const res = await request(app)
         .patch(`/api/admin/users/${victim.id}/role`)
         .set('Authorization', `Bearer ${tokenFor(support)}`)
-        .send({ role: 'admin', permissions: [] });
+        .send({ role: 'super_admin', permissions: [] });
 
       expect(res.status).toBe(403);
     });
 
-    it('allows a full admin to change a role (200)', async () => {
-      const admin = await createUser({ role: 'admin' });
+    it('allows a super admin to change a role (200)', async () => {
+      const admin = await createUser({ role: 'super_admin' });
       const target = await createUser({ role: 'parent' });
 
       const res = await request(app)

@@ -1,16 +1,28 @@
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { useAuth } from '@parentix/shared';
+import { useAuth, PERMISSIONS, hasPermission, isSuperAdmin, roleLabel } from '@parentix/shared';
 
+/**
+ * `permission` hides a link the account cannot use; `superAdmin` marks the
+ * screens only a Super Admin gets. Presentation only — the API enforces both.
+ */
 const NAV = [
   { to: '/', label: 'Overview', icon: '📊', end: true },
-  { to: '/users', label: 'Users', icon: '👥' },
-  { to: '/sessions', label: 'Sessions', icon: '🔐' },
-  { to: '/billing', label: 'Billing', icon: '💳' },
-  { to: '/notifications', label: 'Notifications', icon: '🔔' },
-  { to: '/settings', label: 'Settings', icon: '⚙️' },
-  { to: '/audit-logs', label: 'Audit Logs', icon: '📋' },
+  { to: '/users', label: 'Users', icon: '👥', permission: PERMISSIONS.MANAGE_USERS },
+  { to: '/sessions', label: 'Sessions', icon: '🔐', permission: PERMISSIONS.MANAGE_SESSIONS },
+  { to: '/billing', label: 'Billing', icon: '💳', permission: PERMISSIONS.MANAGE_BILLING },
+  { to: '/notifications', label: 'Notifications', icon: '🔔', permission: PERMISSIONS.SEND_NOTIFICATIONS },
+  { to: '/settings', label: 'Settings', icon: '⚙️', permission: PERMISSIONS.MANAGE_SETTINGS },
+  { to: '/audit-logs', label: 'Audit Logs', icon: '📋', permission: PERMISSIONS.VIEW_AUDIT_LOGS },
+  { to: '/staff', label: 'Staff Accounts', icon: '🛡️', superAdmin: true },
+  { to: '/profile', label: 'My Profile', icon: '👤' },
 ];
+
+const visibleTo = (user) => NAV.filter((item) => {
+  if (item.superAdmin) return isSuperAdmin(user);
+  if (item.permission) return hasPermission(user, item.permission);
+  return true;
+});
 
 const linkClass = ({ isActive }) =>
   `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
@@ -23,7 +35,7 @@ export default function AdminLayout() {
 
   const nav = (
     <nav className="space-y-1">
-      {NAV.map(({ to, label, icon, end }) => (
+      {visibleTo(user).map(({ to, label, icon, end }) => (
         <NavLink key={to} to={to} end={end} className={linkClass} onClick={() => setMenuOpen(false)}>
           <span aria-hidden="true">{icon}</span>
           {label}
@@ -56,7 +68,7 @@ export default function AdminLayout() {
 
         <div className="mt-6 pt-4 border-t border-gray-100">
           <p className="px-3 text-sm font-medium text-gray-900 truncate">{user?.name}</p>
-          <p className="px-3 text-xs text-gray-400 capitalize">{user?.role}</p>
+          <p className="px-3 text-xs text-gray-400">{roleLabel(user?.role)}</p>
           <button onClick={logout} className="btn-ghost w-full text-left mt-2 px-3">
             Sign out
           </button>

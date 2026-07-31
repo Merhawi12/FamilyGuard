@@ -1,24 +1,34 @@
-import { useEffect, useState } from 'react';
-import { admin as adminApi, errorMessage } from '@parentix/shared';
+import { useEffect, useState, useCallback } from 'react';
+import { admin as adminApi, errorMessage, Pagination } from '@parentix/shared';
+
+const PAGE_SIZE = 50;
 
 export default function AdminAuditLogs() {
   const [logs, setLogs] = useState([]);
   const [count, setCount] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionFilter, setActionFilter] = useState('');
+  const [appliedFilter, setAppliedFilter] = useState('');
 
-  const load = () => {
+  /**
+   * The request depends on `appliedFilter`, not on what is currently typed —
+   * otherwise every keystroke in the filter box would fire another query.
+   */
+  const load = useCallback(() => {
     setLoading(true);
-    adminApi.getAuditLogs({ action: actionFilter || undefined })
+    return adminApi.getAuditLogs({ action: appliedFilter || undefined, limit: PAGE_SIZE, offset })
       .then((r) => { setLogs(r.data.rows); setCount(r.data.count); })
       .catch((e) => setError(errorMessage(e, 'Failed to load audit logs')))
       .finally(() => setLoading(false));
-  };
+  }, [appliedFilter, offset]);
 
-  // The list loads once on mount; reloads are triggered explicitly by actions.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // A new filter has to start from the first page, or the offset can land past
+  // the end of the smaller result set and show nothing.
+  const applyFilter = () => { setAppliedFilter(actionFilter); setOffset(0); };
 
   return (
     <div className="space-y-4">
@@ -30,9 +40,9 @@ export default function AdminAuditLogs() {
           placeholder="Filter by action prefix (e.g. admin., auth.)"
           value={actionFilter}
           onChange={(e) => setActionFilter(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && load()}
+          onKeyDown={(e) => e.key === 'Enter' && applyFilter()}
         />
-        <button onClick={load} className="btn-ghost text-sm">Filter</button>
+        <button onClick={applyFilter} className="btn-ghost text-sm">Filter</button>
       </div>
 
       <div className="card p-0 overflow-hidden">
@@ -70,6 +80,13 @@ export default function AdminAuditLogs() {
             </table>
           </div>
         )}
+
+        <div className="px-6 pb-4">
+          <Pagination
+            offset={offset} limit={PAGE_SIZE} count={count}
+            onChange={setOffset} disabled={loading} label="entries"
+          />
+        </div>
       </div>
     </div>
   );

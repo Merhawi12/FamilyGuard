@@ -9,6 +9,10 @@ export const auth = {
   resetPassword: (data) => api.post('/auth/reset-password', data),
   logout: () => api.post('/auth/logout'),
   me: () => api.get('/auth/me'),
+  /** Own profile: `{ name?, email? }`. */
+  updateProfile: (data) => api.put('/auth/profile', data),
+  /** Own password: `{ currentPassword, newPassword }`. */
+  changePassword: (data) => api.put('/auth/password', data),
   getNotificationPrefs: () => api.get('/auth/notification-prefs'),
   updateNotificationPrefs: (data) => api.put('/auth/notification-prefs', data),
 };
@@ -79,6 +83,8 @@ export const chats = {
 export const locations = {
   getCurrent: (childId) => api.get(`/locations/${childId}/current`),
   getHistory: (childId, params) => api.get(`/locations/${childId}/history`, { params }),
+  /** Parent-set position: `{ latitude, longitude, accuracy?, address? }`. */
+  setManual: (childId, data) => api.post(`/locations/${childId}/manual`, data),
 };
 
 export const safeZones = {
@@ -117,13 +123,23 @@ export const admin = {
   updatePlan: (id, plan) => api.patch(`/admin/clients/${id}/plan`, { plan }),
   deleteClient: (id) => api.delete(`/admin/clients/${id}`),
 
+  /** Staff accounts — Super Admin only. */
+  listStaff: () => api.get('/admin/staff'),
+  createStaff: (data) => api.post('/admin/staff', data),
+  updateStaff: (id, data) => api.put(`/admin/staff/${id}`, data),
+  setStaffStatus: (id, isActive) => api.patch(`/admin/staff/${id}/status`, { isActive }),
+  resetStaffPassword: (id, data = {}) => api.post(`/admin/staff/${id}/reset-password`, data),
+  deleteStaff: (id) => api.delete(`/admin/staff/${id}`),
+
   listUsers: (params) => api.get('/admin/users', { params }),
   createUser: (data) => api.post('/admin/users', data),
   updateUser: (id, data) => api.put(`/admin/users/${id}`, data),
   updateRole: (id, data) => api.patch(`/admin/users/${id}/role`, data),
   approveUser: (id) => api.patch(`/admin/users/${id}/approve`),
+  /** Customer password reset. `{ password }` sets it; omit to generate one. */
+  resetUserPassword: (id, data = {}) => api.post(`/admin/users/${id}/reset-password`, data),
 
-  listActiveSessions: () => api.get('/admin/sessions/active'),
+  listActiveSessions: (params) => api.get('/admin/sessions/active', { params }),
   listUserSessions: (id) => api.get(`/admin/users/${id}/sessions`),
   forceLogoutSession: (sessionId) => api.delete(`/admin/sessions/${sessionId}`),
   forceLogoutUser: (id) => api.delete(`/admin/users/${id}/sessions`),
@@ -137,7 +153,7 @@ export const admin = {
   getAnalytics: () => api.get('/admin/analytics'),
 
   sendNotification: (data) => api.post('/notifications', data),
-  listSentNotifications: () => api.get('/notifications/sent'),
+  listSentNotifications: (params) => api.get('/notifications/sent', { params }),
 
   getAuditLogs: (params) => api.get('/audit', { params }),
 };

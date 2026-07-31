@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { admin as adminApi, errorMessage } from '@parentix/shared';
+import { admin as adminApi, errorMessage, Pagination } from '@parentix/shared';
+
+const PAGE_SIZE = 50;
 
 const STATUS_COLORS = {
   succeeded: 'bg-green-100 text-green-700',
@@ -15,25 +17,26 @@ export default function AdminBilling() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState({ status: '', plan: '' });
+  const [offset, setOffset] = useState(0);
 
-  const load = () => {
+  // `filters` is state, so its identity only changes when a filter is picked.
+  useEffect(() => {
     setLoading(true);
-    adminApi.listTransactions(filters)
+    adminApi.listTransactions({ ...filters, limit: PAGE_SIZE, offset })
       .then((r) => { setTransactions(r.data.rows); setCount(r.data.count); })
       .catch((e) => setError(errorMessage(e, 'Failed to load transactions')))
       .finally(() => setLoading(false));
-  };
+  }, [filters, offset]);
 
-  // Re-runs when a filter changes; 'load' is recreated each render by design.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [filters.status, filters.plan]);
+  // A narrower filter can leave the current offset past the end of the results.
+  const changeFilter = (next) => { setFilters(next); setOffset(0); };
 
   return (
     <div className="space-y-4">
       {error && <div className="p-3 bg-red-50 text-red-700 rounded-xl text-sm">{error}</div>}
 
       <div className="flex flex-wrap gap-2">
-        <select className="input w-40" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+        <select className="input w-40" value={filters.status} onChange={(e) => changeFilter({ ...filters, status: e.target.value })}>
           <option value="">All statuses</option>
           <option value="succeeded">Succeeded</option>
           <option value="failed">Failed</option>
@@ -41,7 +44,7 @@ export default function AdminBilling() {
           <option value="past_due">Past Due</option>
           <option value="cancelled">Cancelled</option>
         </select>
-        <select className="input w-40" value={filters.plan} onChange={(e) => setFilters({ ...filters, plan: e.target.value })}>
+        <select className="input w-40" value={filters.plan} onChange={(e) => changeFilter({ ...filters, plan: e.target.value })}>
           <option value="">All plans</option>
           <option value="free">Free</option>
           <option value="premium">Premium</option>
@@ -91,6 +94,13 @@ export default function AdminBilling() {
             </table>
           </div>
         )}
+
+        <div className="px-6 pb-4">
+          <Pagination
+            offset={offset} limit={PAGE_SIZE} count={count}
+            onChange={setOffset} disabled={loading} label="transactions"
+          />
+        </div>
       </div>
     </div>
   );

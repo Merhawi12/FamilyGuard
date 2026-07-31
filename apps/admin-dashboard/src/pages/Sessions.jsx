@@ -1,32 +1,53 @@
-import { useEffect, useState } from 'react';
-import { admin as adminApi, errorMessage } from '@parentix/shared';
+import { useEffect, useState, useCallback } from 'react';
+import { admin as adminApi, errorMessage, Pagination } from '@parentix/shared';
+
+const PAGE_SIZE = 50;
 
 export default function AdminSessions() {
   const [sessions, setSessions] = useState([]);
+  const [count, setCount] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionId, setActionId] = useState(null);
 
-  const load = () =>
-    adminApi.listActiveSessions().then((r) => setSessions(r.data)).catch((e) => setError(errorMessage(e, 'Failed to load sessions'))).finally(() => setLoading(false));
+  const load = useCallback((nextOffset = offset) => {
+    setLoading(true);
+    return adminApi.listActiveSessions({ limit: PAGE_SIZE, offset: nextOffset })
+      .then((r) => { setSessions(r.data.rows); setCount(r.data.count); })
+      .catch((e) => setError(errorMessage(e, 'Failed to load sessions')))
+      .finally(() => setLoading(false));
+  }, [offset]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(offset); }, [offset, load]);
+
+  /**
+   * Revoking can empty the last page — step back one rather than leaving the
+   * admin looking at a blank table.
+   */
+  const reloadAfterRevoke = async () => {
+    const remaining = count - 1;
+    if (offset > 0 && offset >= remaining) setOffset(Math.max(0, offset - PAGE_SIZE));
+    else await load(offset);
+  };
 
   const forceLogout = async (sessionId) => {
+    if (!window.confirm('Sign this session out? The device will have to sign in again.')) return;
     setActionId(sessionId);
-    try { await adminApi.forceLogoutSession(sessionId); load(); }
+    try { await adminApi.forceLogoutSession(sessionId); await reloadAfterRevoke(); }
     catch (e) { setError(errorMessage(e, 'Failed to revoke session')); }
     finally { setActionId(null); }
   };
 
   const forceLogoutUser = async (userId) => {
+    if (!window.confirm('Sign this user out of every device?')) return;
     setActionId(userId);
-    try { await adminApi.forceLogoutUser(userId); load(); }
+    try { await adminApi.forceLogoutUser(userId); await reloadAfterRevoke(); }
     catch (e) { setError(errorMessage(e, 'Failed to revoke sessions')); }
     finally { setActionId(null); }
   };
 
-  if (loading) return <div className="text-gray-400">Loading active sessions...</div>;
+  if (loading && !sessions.length) return <div className="text-gray-400">Loading active sessions...</div>;
 
   return (
     <div className="space-y-4">
@@ -39,8 +60,8 @@ export default function AdminSessions() {
 
       <div className="card p-0 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-800">Active Sessions ({sessions.length})</h2>
-          <button onClick={load} className="text-xs text-blue-500 hover:underline">Refresh</button>
+          <h2 className="font-semibold text-gray-800">Active Sessions ({count})</h2>
+          <button onClick={() => load(offset)} className="text-xs text-blue-500 hover:underline">Refresh</button>
         </div>
 
         {sessions.length === 0 ? (
@@ -85,6 +106,13 @@ export default function AdminSessions() {
             </table>
           </div>
         )}
+
+        <div className="px-6 pb-4">
+          <Pagination
+            offset={offset} limit={PAGE_SIZE} count={count}
+            onChange={setOffset} disabled={loading} label="sessions"
+          />
+        </div>
       </div>
     </div>
   );

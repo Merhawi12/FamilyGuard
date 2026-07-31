@@ -2,15 +2,17 @@ const { User } = require('../models');
 const { Op } = require('sequelize');
 const { auditLog } = require('../utils/auditLogger');
 const { revokeAllSessions } = require('../utils/session');
-
-const PERMISSION_KEYS = ['manage_users', 'manage_billing', 'manage_settings', 'send_notifications', 'view_audit_logs', 'manage_sessions'];
+const { passwordProblem, generatePassword } = require('../utils/password');
+const {
+  PARENT_ROLE, ROLES, PERMISSION_KEYS, STAFF_ROLES, defaultPermissionsFor,
+} = require('../config/roles');
 
 const USER_ATTRS = ['id', 'name', 'email', 'plan', 'role', 'permissions', 'isActive', 'emailVerified', 'mfaEnabled', 'trialEndsAt', 'lastLoginAt', 'createdAt'];
 
 const listClients = async (req, res, next) => {
   try {
     const clients = await User.findAll({
-      where: { role: { [Op.ne]: 'admin' } },
+      where: { role: { [Op.notIn]: STAFF_ROLES } },
       attributes: ['id', 'name', 'email', 'plan', 'role', 'isActive', 'trialEndsAt', 'createdAt'],
       order: [['createdAt', 'DESC']],
     });
@@ -53,8 +55,14 @@ const listUsers = async (req, res, next) => {
 // POST /admin/users — admin-created account
 const createUser = async (req, res, next) => {
   try {
-    const { name, email, password, role = 'parent', plan = 'free', verified = true } = req.body;
+    const { name, email, password, role = PARENT_ROLE, plan = 'free', verified = true } = req.body;
     if (!name || !email || !password) return res.status(400).json({ error: 'Name, email, and password required' });
+
+    // This endpoint creates customers. A staff account carries privileges, so it
+    // has to come from /admin/staff, which only a Super Admin can reach.
+    if (role !== PARENT_ROLE) {
+      return res.status(400).json({ error: 'Staff accounts are created at /admin/staff' });
+    }
 
     const existing = await User.findOne({ where: { email } });
     if (existing) return res.status(409).json({ error: 'Email already registered' });
@@ -76,7 +84,8 @@ const createUser = async (req, res, next) => {
 const updateUser = async (req, res, next) => {
   try {
     const { name, email, plan } = req.body;
-    const user = await User.findByPk(req.params.id);
+    // Staff profiles are edited at /admin/staff.
+    const user = await User.findOne({ where: { id: req.params.id, role: { [Op.notIn]: STAFF_ROLES } } });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     if (email && email !== user.email) {
@@ -98,33 +107,59 @@ const updateUser = async (req, res, next) => {
   }
 };
 
-// PATCH /admin/users/:id/role — set role + granular permissions
+/**
+ * PATCH /admin/users/:id/role — move an account across the staff boundary.
+ *
+ * Any role change is a privilege change, so this is Super Admin only (enforced
+ * on the route). Editing an existing staff account's role and permissions is
+ * `/admin/staff/:id`; this is the endpoint that promotes a parent to staff or
+ * returns a staff account to being an ordinary parent.
+ */
 const updateRole = async (req, res, next) => {
   try {
-    const { role, permissions = [] } = req.body;
-    const allowedRoles = ['admin', 'parent', 'support'];
-    if (!allowedRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    const { role, permissions } = req.body;
+    const allowedRoles = [...STAFF_ROLES, PARENT_ROLE];
+    if (!allowedRoles.includes(role)) {
+      return res.status(400).json({ error: `Role must be one of: ${allowedRoles.join(', ')}` });
+    }
 
-    const invalidPerm = permissions.find((p) => !PERMISSION_KEYS.includes(p));
-    if (invalidPerm) return res.status(400).json({ error: `Unknown permission: ${invalidPerm}` });
+    if (Array.isArray(permissions)) {
+      const invalidPerm = permissions.find((p) => !PERMISSION_KEYS.includes(p));
+      if (invalidPerm) return res.status(400).json({ error: `Unknown permission: ${invalidPerm}` });
+    }
 
-    if (req.params.id === req.user.id && role !== 'admin') {
-      return res.status(400).json({ error: 'You cannot remove your own admin role' });
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot change your own role' });
     }
 
     const user = await User.findByPk(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // Only a full admin may grant or revoke the admin role. A support user with
-    // the manage_users permission must not be able to escalate anyone (incl. self) to admin.
-    if ((role === 'admin' || user.role === 'admin') && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Only an admin can grant or revoke admin privileges' });
+    // Never leave the platform without someone who can manage staff.
+    if (user.role === ROLES.SUPER_ADMIN && role !== ROLES.SUPER_ADMIN) {
+      const remaining = await User.count({
+        where: { role: ROLES.SUPER_ADMIN, isActive: true, id: { [Op.ne]: user.id } },
+      });
+      if (remaining === 0) {
+        return res.status(400).json({ error: 'This is the last Super Admin — promote another account first' });
+      }
     }
 
     const previousRole = user.role;
-    await user.update({ role, permissions });
+    // A parent holds no permissions; a staff role falls back to its defaults.
+    const nextPermissions = Array.isArray(permissions)
+      ? [...new Set(permissions)]
+      : (role === PARENT_ROLE ? [] : defaultPermissionsFor(role));
 
-    auditLog(req, { userId: req.user.id, action: 'admin.role_changed', entity: 'User', entityId: user.id, metadata: { previousRole, role, permissions } });
+    await user.update({ role, permissions: nextPermissions });
+
+    // The old token carries the old authority — force a fresh sign-in.
+    await revokeAllSessions(user.id);
+
+    auditLog(req, {
+      userId: req.user.id, action: 'admin.role_changed', entity: 'User', entityId: user.id,
+      metadata: { previousRole, role, permissions: nextPermissions },
+    });
 
     res.json({ id: user.id, role: user.role, permissions: user.permissions });
   } catch (err) {
@@ -133,9 +168,58 @@ const updateRole = async (req, res, next) => {
 };
 
 // PATCH /admin/users/:id/approve — manually verify + activate an account
+/**
+ * POST /admin/users/:id/reset-password — set a customer's password.
+ *
+ * `{ password }` assigns that exact value; omitting it generates a strong one
+ * and returns it once. Staff accounts are excluded: those are reset from
+ * `/admin/staff/:id/reset-password`, which only a Super Admin can reach.
+ *
+ * Whoever knew the old password loses the account, so every live session is
+ * revoked and the action is written to the audit log.
+ */
+const resetUserPassword = async (req, res, next) => {
+  try {
+    const user = await User.findOne({ where: { id: req.params.id, role: { [Op.notIn]: STAFF_ROLES } } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const { password } = req.body || {};
+    let generated = null;
+    if (password) {
+      const weak = passwordProblem(password);
+      if (weak) return res.status(400).json({ error: weak });
+    } else {
+      generated = generatePassword();
+    }
+
+    await user.update({
+      passwordHash: password || generated,
+      // A reset is also the way out of a failed-login lockout.
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+    });
+
+    await revokeAllSessions(user.id);
+
+    auditLog(req, {
+      userId: req.user.id,
+      action: 'admin.user_password_reset',
+      entity: 'User',
+      entityId: user.id,
+      metadata: { email: user.email, generated: !password },
+    });
+
+    res.json({ id: user.id, email: user.email, generatedPassword: generated });
+  } catch (err) {
+    next(err);
+  }
+};
+
 const approveUser = async (req, res, next) => {
   try {
-    const user = await User.findByPk(req.params.id);
+    // Not a route back into a deactivated staff account — approving one would
+    // otherwise re-activate a colleague a Super Admin had just switched off.
+    const user = await User.findOne({ where: { id: req.params.id, role: { [Op.notIn]: STAFF_ROLES } } });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     await user.update({ emailVerified: true, isActive: true });
@@ -150,7 +234,9 @@ const approveUser = async (req, res, next) => {
 
 const toggleBlock = async (req, res, next) => {
   try {
-    const client = await User.findOne({ where: { id: req.params.id, role: { [Op.ne]: 'admin' } } });
+    // Staff accounts are off-limits here — they are managed at /admin/staff by a
+    // Super Admin. Otherwise `manage_users` would reach every colleague's account.
+    const client = await User.findOne({ where: { id: req.params.id, role: { [Op.notIn]: STAFF_ROLES } } });
     if (!client) return res.status(404).json({ error: 'Client not found' });
 
     client.isActive = !client.isActive;
@@ -177,7 +263,9 @@ const updatePlan = async (req, res, next) => {
     const allowed = ['free', 'premium', 'suspended'];
     if (!allowed.includes(plan)) return res.status(400).json({ error: 'Invalid plan' });
 
-    const client = await User.findOne({ where: { id: req.params.id, role: { [Op.ne]: 'admin' } } });
+    // Staff accounts are off-limits here — they are managed at /admin/staff by a
+    // Super Admin. Otherwise `manage_users` would reach every colleague's account.
+    const client = await User.findOne({ where: { id: req.params.id, role: { [Op.notIn]: STAFF_ROLES } } });
     if (!client) return res.status(404).json({ error: 'Client not found' });
 
     const previousPlan = client.plan;
@@ -202,7 +290,9 @@ const updatePlan = async (req, res, next) => {
 
 const deleteClient = async (req, res, next) => {
   try {
-    const client = await User.findOne({ where: { id: req.params.id, role: { [Op.ne]: 'admin' } } });
+    // Staff accounts are off-limits here — they are managed at /admin/staff by a
+    // Super Admin. Otherwise `manage_users` would reach every colleague's account.
+    const client = await User.findOne({ where: { id: req.params.id, role: { [Op.notIn]: STAFF_ROLES } } });
     if (!client) return res.status(404).json({ error: 'Client not found' });
 
     auditLog(req, {
@@ -222,6 +312,6 @@ const deleteClient = async (req, res, next) => {
 
 module.exports = {
   listClients, toggleBlock, updatePlan, deleteClient,
-  listUsers, createUser, updateUser, updateRole, approveUser,
+  listUsers, createUser, updateUser, updateRole, approveUser, resetUserPassword,
   PERMISSION_KEYS,
 };

@@ -2,14 +2,20 @@ const { Session, User } = require('../models');
 const { auditLog } = require('../utils/auditLogger');
 const { revokeSession, revokeAllSessions } = require('../utils/session');
 
-// GET /admin/sessions/active — every non-revoked session, joined with its user
+// GET /admin/sessions/active — non-revoked sessions, joined with their user.
+// Paginated: an active fleet can run to thousands of rows.
 const listActiveSessions = async (req, res, next) => {
   try {
-    const sessions = await Session.findAll({
+    const { limit = 50, offset = 0 } = req.query;
+
+    const sessions = await Session.findAndCountAll({
       where: { revoked: false },
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email', 'role'] }],
       order: [['lastActiveAt', 'DESC']],
+      limit: Math.min(parseInt(limit), 200),
+      offset: parseInt(offset),
     });
+
     res.json(sessions);
   } catch (err) {
     next(err);

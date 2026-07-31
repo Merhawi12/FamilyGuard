@@ -7,5 +7,6 @@ export { SocketProvider, useSocket } from './realtime/SocketContext.jsx';
 export { default as ErrorBoundary } from './components/ErrorBoundary.jsx';
 export { default as StatsCard } from './components/StatsCard.jsx';
 export { default as Spinner } from './components/Spinner.jsx';
+export { default as Pagination } from './components/Pagination.jsx';
 export { API_ORIGIN, API_BASE_URL, SOCKET_URL } from './config.js';
 export * from './constants.js';
