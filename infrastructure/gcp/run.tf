@@ -81,10 +81,10 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "NODE_ENV"
         value = "production"
       }
-      env {
-        name  = "PORT"
-        value = "5000"
-      }
+      # PORT is deliberately absent. Cloud Run reserves it and injects it from
+      # ports.container_port above, and setting it explicitly is rejected at
+      # create time. src/config/env.js reads process.env.PORT, so the container
+      # picks up 5000 from Cloud Run rather than from here.
       # Exactly one proxy hop in front of Express: the external load balancer.
       env {
         name  = "TRUST_PROXY"
