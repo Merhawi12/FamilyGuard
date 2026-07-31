@@ -205,6 +205,17 @@ the current commit, deploys the revision, and checks `/api/health`. Migrations
 run at container start; a revision that fails to migrate fails its startup probe
 and never receives traffic.
 
+If the push fails with `dial tcp …: connect: connection refused`, that is the
+local network giving out partway through a few hundred megabytes — common in
+Cloud Shell. Re-running resumes from the layers that made it. If it keeps
+failing, build server-side instead, which uploads only the build context:
+
+```bash
+USE_CLOUD_BUILD=1 ENV_NAME=prod ./scripts/deploy-api.sh
+```
+
+That path needs no Docker daemon at all.
+
 **The first apply leaves Cloud Run on a placeholder.** Terraform creates the
 Artifact Registry repository in the same run, so it is empty and there is no API
 image to point at yet — the service boots Google's public hello container
