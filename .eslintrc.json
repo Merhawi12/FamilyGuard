@@ -38,9 +38,35 @@
       "env": { "node": true, "jest": true }
     },
     {
+      "files": ["apps/child-app/**/*.{js,jsx}"],
+      "extends": ["eslint:recommended", "plugin:react/recommended", "plugin:react-hooks/recommended"],
+      "env": { "browser": false, "node": false, "es2022": true },
+      "globals": {
+        "console": "readonly",
+        "setInterval": "readonly",
+        "clearInterval": "readonly",
+        "setTimeout": "readonly",
+        "clearTimeout": "readonly",
+        "process": "readonly",
+        "fetch": "readonly"
+      },
+      "rules": {
+        "react/prop-types": "off",
+        "react/react-in-jsx-scope": "off",
+        "react/no-unescaped-entities": "off"
+      }
+    },
+    {
       "files": ["*.config.js", "apps/*/vite.config.js", "apps/*/tailwind.config.js", "apps/*/postcss.config.js"],
       "env": { "node": true }
     }
   ],
-  "ignorePatterns": ["node_modules/", "dist/", "build/", "cdk.out/", "apps/child-app/android/"]
+  "ignorePatterns": [
+    "node_modules/",
+    "dist/",
+    "build/",
+    ".terraform/",
+    "apps/child-app/android/",
+    "apps/child-app/.expo/"
+  ]
 }

@@ -6,7 +6,7 @@ const { attachRedisAdapter } = require('./realtime/adapter');
 const { startSafetyAnalysisJob } = require('./jobs/safetyAnalysis');
 
 // A rejected promise nobody handled leaves the process in an unknown state.
-// Log it loudly; ECS will replace the task if it then fails its health check.
+// Log it loudly; Cloud Run replaces the instance if it then fails its probe.
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled promise rejection', { error: reason instanceof Error ? reason.message : String(reason) });
 });
@@ -28,7 +28,7 @@ const start = async () => {
   logger.info('Parentix API listening', { port: env.port, env: env.NODE_ENV });
 
   /**
-   * ECS sends SIGTERM and waits before SIGKILL. Stop accepting new work, let
+   * Cloud Run sends SIGTERM and waits before SIGKILL. Stop accepting new work, let
    * in-flight requests finish, then release the socket and database handles.
    */
   let shuttingDown = false;

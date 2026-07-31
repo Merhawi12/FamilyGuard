@@ -5,7 +5,7 @@ const { initializeDatabase } = require('../src/db');
 /**
  * The suite's schema comes from `sync({ force: true })`, so these check that the
  * migration layer is wired correctly and safe to run on top of it — which is
- * exactly what happens when a Fargate task boots against an existing database.
+ * exactly what happens when a Cloud Run instance boots against an existing database.
  */
 describe('database migrations', () => {
   it('applies every migration and leaves none pending', async () => {
@@ -20,6 +20,8 @@ describe('database migrations', () => {
         '0001-user-account-columns.js',
         '0002-hot-path-indexes.js',
         '0003-child-avatar-url.js',
+        '0004-super-admin-role.js',
+        '0005-reset-passwords-permission.js',
       ])
     );
   });

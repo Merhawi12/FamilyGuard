@@ -10,8 +10,17 @@ node_modules/
 dist/
 build/
 .vite/
-cdk.out/
 *.tsbuildinfo
+
+# Terraform — provider binaries, and state/plan files that contain secrets.
+# .terraform.lock.hcl is deliberately NOT ignored: it pins provider versions and
+# their checksums, so CI and every machine resolve the same ones.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+# Real variable values; envs/*.tfvars are committed and hold no secrets.
+*.auto.tfvars
 
 # Local databases
 *.sqlite

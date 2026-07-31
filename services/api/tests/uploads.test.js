@@ -112,7 +112,7 @@ describe('child avatarUrl validation', () => {
   });
 
   it('deletes the replaced object when the photo changes', async () => {
-    const { __reset, __sent } = require('@aws-sdk/client-s3');
+    const { __reset, __sent } = require('@google-cloud/storage');
     __reset();
 
     const parent = await createUser();
@@ -129,9 +129,9 @@ describe('child avatarUrl validation', () => {
     // The delete is fire-and-forget, so let the microtask queue drain.
     await new Promise((resolve) => setImmediate(resolve));
 
-    const deletes = __sent.filter((command) => command.name === 'DeleteObjectCommand');
+    const deletes = __sent.filter((call) => call.op === 'delete');
     expect(deletes).toHaveLength(1);
-    expect(deletes[0].input.Key).toBe(oldKey);
+    expect(deletes[0].key).toBe(oldKey);
   });
 
   it('clears the photo when an empty value is sent', async () => {
@@ -178,7 +178,7 @@ describe('storage when the provider is not configured', () => {
     // Only the storage module is reloaded here — it imports no models, so the
     // suite's in-memory database is untouched.
     process.env.STORAGE_PROVIDER = 'none';
-    process.env.S3_BUCKET = '';
+    process.env.GCS_BUCKET = '';
 
     let error;
     await jest.isolateModulesAsync(async () => {
@@ -189,8 +189,8 @@ describe('storage when the provider is not configured', () => {
         .catch((err) => err);
     });
 
-    process.env.STORAGE_PROVIDER = 's3';
-    process.env.S3_BUCKET = 'parentix-uploads-test';
+    process.env.STORAGE_PROVIDER = 'gcs';
+    process.env.GCS_BUCKET = 'parentix-uploads-test';
 
     expect(error.status).toBe(503);
   });

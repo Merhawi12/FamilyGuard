@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Migration CLI — used by the ECS one-off migration task and locally.
+ * Migration CLI — run locally or through the Cloud SQL Auth Proxy. Deployed
+ * instances migrate themselves at boot; this is for inspecting and reverting.
  *
  *   npm run migrate           apply everything pending
  *   npm run migrate:down      roll back the most recent migration

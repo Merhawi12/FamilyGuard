@@ -4,10 +4,10 @@
  *
  * The Admin Dashboard has no sign-up — the first staff account has to come from
  * somewhere, and hand-editing the database is not it. Run this locally against
- * a .env, or as a one-off ECS task against production.
+ * a .env, or through the Cloud SQL Auth Proxy against production.
  *
  *   node scripts/create-admin.js --email you@example.com --name "Your Name"
- *   node scripts/create-admin.js --email you@example.com --role support
+ *   node scripts/create-admin.js --email you@example.com --role finance
  *   echo 'secret' | node scripts/create-admin.js --email you@example.com --password-stdin
  *   ADMIN_PASSWORD=secret node scripts/create-admin.js --email you@example.com
  *
@@ -19,15 +19,18 @@
  * visible in shell history and in `ps` output to every other user on the host
  * for as long as the process runs.
  */
-const crypto = require('node:crypto');
 const { sequelize } = require('../src/config/db');
 const { env } = require('../src/config/env');
 const { User } = require('../src/models');
+const { STAFF_ROLES, ROLES: STAFF_ROLE_KEYS, defaultPermissionsFor } = require('../src/config/roles');
+const { generatePassword } = require('../src/utils/password');
 
-const ROLES = ['admin', 'support'];
+const ROLES = STAFF_ROLES;
 
 const USAGE = `Usage:
-  node scripts/create-admin.js --email <address> [--name "Full Name"] [--role admin|support]
+  node scripts/create-admin.js --email <address> [--name "Full Name"] [--role <role>]
+
+Roles: ${ROLES.join(', ')}
 
 Password (optional — one is generated and printed if omitted):
   --password-stdin        read it from stdin        (preferred)
@@ -44,10 +47,6 @@ const parseArgs = (argv) => {
   }
   return args;
 };
-
-/** Satisfies the password policy (length + letter + digit) by construction. */
-const generatePassword = () =>
-  `Px${crypto.randomBytes(12).toString('base64url').replace(/[^A-Za-z0-9]/g, '')}${crypto.randomInt(10, 100)}`;
 
 const readStdin = () =>
   new Promise((resolve, reject) => {
@@ -92,7 +91,7 @@ const resolvePassword = async (args) => {
 const run = async () => {
   const args = parseArgs(process.argv.slice(2));
   const email = typeof args.email === 'string' ? args.email.trim().toLowerCase() : '';
-  const role = typeof args.role === 'string' ? args.role : 'admin';
+  const role = typeof args.role === 'string' ? args.role : STAFF_ROLE_KEYS.SUPER_ADMIN;
 
   if (args.help || !email || !email.includes('@')) {
     console.error(USAGE);
@@ -126,7 +125,14 @@ const run = async () => {
     // path, and resetting someone's password only to leave them locked out for
     // another 15 minutes is not a useful outcome.
     const wasLocked = !!existing.lockedUntil && new Date() < new Date(existing.lockedUntil);
-    const updates = { role, isActive: true, emailVerified: true, failedLoginAttempts: 0, lockedUntil: null };
+    const updates = {
+      role,
+      permissions: defaultPermissionsFor(role),
+      isActive: true,
+      emailVerified: true,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+    };
     if (supplied) updates.passwordHash = password;
 
     await existing.update(updates);
@@ -139,6 +145,7 @@ const run = async () => {
       email,
       passwordHash: password, // hashed by the model hook
       role,
+      permissions: defaultPermissionsFor(role),
       plan: 'family',
       isActive: true,
       emailVerified: true,

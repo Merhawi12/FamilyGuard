@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly Parentix Postgres backup
+
+[Timer]
+OnCalendar=*-*-* 03:17:00 UTC
+# Runs on next boot if the instance was down at 03:17 — a stopped instance
+# should not silently skip a night.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

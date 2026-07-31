@@ -1,0 +1,10 @@
+# Installed by bootstrap.sh, which substitutes __DEPLOY_DIR__ for the real path.
+[Unit]
+Description=Parentix Postgres backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__DEPLOY_DIR__
+ExecStart=__DEPLOY_DIR__/backup.sh

@@ -2,39 +2,27 @@ const { env } = require('../config/env');
 const logger = require('../utils/logger');
 
 /**
- * One `send({ to, subject, html, replyTo })` entry point over three transports:
+ * One `send({ to, subject, html, replyTo })` entry point over two transports:
  *
- *   ses   — Amazon SES v2, the production path in AWS (no SMTP credentials to
- *           rotate; IAM on the task role authorises the send).
- *   smtp  — any SMTP relay, for self-hosted or local testing.
+ *   smtp  — any SMTP relay. This is the production path.
  *   none  — logs the message instead of sending, so development and the test
  *           suite never touch the network.
+ *
+ * Why no first-party provider: Google Cloud has no equivalent of Amazon SES.
+ * Sending mail from GCP means an external relay — SendGrid, Mailgun, Postmark,
+ * Resend, or Google Workspace — all of which speak SMTP, so one transport covers
+ * every option and no vendor SDK is needed.
+ *
+ * Two operational notes:
+ *
+ *   - Compute Engine blocks outbound port 25 permanently and silently. Use 587
+ *     (STARTTLS) or 465 (implicit TLS). Cloud Run has no such restriction, but
+ *     use 587/465 there too for consistency.
+ *   - SMTP_PASS is an API key for most of these providers. Keep it in Secret
+ *     Manager and inject it as a secret, never as a plain environment variable.
  */
 
 let transport = null;
-
-const buildSesTransport = () => {
-  // Required lazily so environments without the AWS SDK installed (or without
-  // SES configured) never pay the import cost.
-  const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
-  const client = new SESv2Client({ region: env.aws.region });
-
-  return async ({ to, subject, html, replyTo }) => {
-    await client.send(
-      new SendEmailCommand({
-        FromEmailAddress: env.email.from,
-        Destination: { ToAddresses: [to] },
-        ReplyToAddresses: replyTo ? [replyTo] : undefined,
-        Content: {
-          Simple: {
-            Subject: { Data: subject, Charset: 'UTF-8' },
-            Body: { Html: { Data: html, Charset: 'UTF-8' } },
-          },
-        },
-      })
-    );
-  };
-};
 
 const buildSmtpTransport = () => {
   const nodemailer = require('nodemailer');
@@ -57,15 +45,14 @@ const buildNoopTransport = () => async ({ to, subject }) => {
 const getTransport = () => {
   if (transport) return transport;
 
-  if (env.email.provider === 'ses') transport = buildSesTransport();
-  else if (env.email.provider === 'smtp' && env.email.smtp.host) transport = buildSmtpTransport();
+  if (env.email.provider === 'smtp' && env.email.smtp.host) transport = buildSmtpTransport();
   else transport = buildNoopTransport();
 
   return transport;
 };
 
 /** True when a real provider is wired up — callers use it to skip optional mail. */
-const isEnabled = () => env.email.provider === 'ses' || (env.email.provider === 'smtp' && !!env.email.smtp.host);
+const isEnabled = () => env.email.provider === 'smtp' && !!env.email.smtp.host;
 
 /**
  * Never throws: a failed notification email must not fail the request that

@@ -7,8 +7,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const sharedSrc = path.resolve(here, '../../packages/shared/src');
 
 /**
- * `/` serves the static marketing page. CloudFront does the same rewrite in
- * production (see infrastructure/aws), so dev and prod behave identically.
+ * `/` serves the static marketing page. In production the bucket's
+ * main_page_suffix does the same rewrite (see infrastructure/gcp/storage.tf), so
+ * dev and prod behave identically.
  */
 const landingAtRoot = {
   name: 'landing-at-root',

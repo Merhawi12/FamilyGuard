@@ -1,0 +1,27 @@
+# The web image builds from the repo root, so without this the host's
+# node_modules (hundreds of MB, and full of platform-specific binaries that are
+# wrong for a Linux container) get shipped into the build context.
+node_modules
+**/node_modules
+
+**/dist
+**/.vite
+apps/child-app/android/app/build
+apps/child-app/android/.gradle
+infrastructure/gcp/.terraform
+**/*.tfstate
+**/*.tfstate.backup
+
+.git
+.github
+**/.env
+**/.env.*
+!**/.env.example
+
+**/*.sqlite
+**/*.sqlite-journal
+**/coverage
+**/*.log
+.vscode
+.idea
+.DS_Store

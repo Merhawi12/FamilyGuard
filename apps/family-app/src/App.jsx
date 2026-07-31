@@ -23,7 +23,8 @@ const Terms = lazy(() => import('./pages/Terms'));
 
 /**
  * The marketing site is the static `public/landing.html`, not a React route.
- * CloudFront (and the Vite dev middleware) rewrite `/` to it, so this only runs
+ * The bucket's main_page_suffix (and the Vite dev middleware) rewrite `/` to it,
+ * so this only runs
  * if the SPA is entered at `/` some other way — e.g. the catch-all below.
  */
 function GoToLanding() {

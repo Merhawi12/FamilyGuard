@@ -14,12 +14,45 @@ Send the token as `Authorization: Bearer <token>`.
 Sessions are backed by a `Session` row, so an admin can revoke a live token.
 A password reset revokes every session for that account.
 
-**Roles.** `parent` is the default. `support` and `admin` are staff; individual
-staff endpoints additionally require a named permission (`manage_billing`,
-`send_notifications`, …). Only a full `admin` may grant or revoke the `admin` role.
+**Roles.** `parent` is the default and is a customer. Staff roles are
+departments: `super_admin`, `operations`, `support` (Customer Support),
+`finance`, `marketing`.
+
+Each role carries a default permission set, stored on the user's `permissions`
+column and adjustable per account by a Super Admin — an exception does not need
+a new role. Staff endpoints require a named permission on top of being staff.
+
+| Role | Default permissions |
+| ---- | ------------------- |
+| Super Admin | all of them, implicitly — the only role that can manage staff accounts |
+| Operations | `manage_users`, `manage_sessions`, `manage_settings`, `view_audit_logs`, `reset_passwords` |
+| Customer Support | `manage_users`, `manage_sessions`, `reset_passwords` |
+| Finance | `manage_billing` |
+| Marketing | `send_notifications` |
+
+`reset_passwords` is deliberately separate from `manage_users`: setting someone
+else's password is a takeover of their account, so a Super Admin can grant the
+ability to edit customer records without also granting the ability to seize one.
+
+Finance and Marketing deliberately get no `manage_users`, so neither can open
+the user directory or reach family data. `GET /admin/analytics` is aggregate
+only and is open to every staff role.
+
+Managing staff is reserved to `super_admin` rather than being a grantable
+permission, so a department account can never award itself privileges. A Super
+Admin cannot change their own role, deactivate themselves, or delete
+themselves — which is what guarantees one always remains.
 
 **Errors.** `{ "error": "message", "requestId": "…" }`. In production a 5xx
 carries a generic message — the detail is in CloudWatch under that request id.
+
+**Pagination.** Every list the console renders takes `limit` and `offset` and
+answers `{ rows, count }`, where `count` is the unpaginated total. `limit`
+defaults to 50 and is capped at 200 (500 for location history), so an oversized
+value narrows rather than dumping the table. This covers `/admin/users`,
+`/admin/sessions/active`, `/admin/transactions`, `/notifications/sent`,
+`/audit`, `/activity/:childId`, `/chats/:childId/messages` and
+`/locations/:childId/history`.
 
 **Rate limits.** 300 requests/minute per IP across `/api`, with tighter limits on
 login (10 / 15 min), registration (5 / hour), code resend and password reset
@@ -46,6 +79,14 @@ login (10 / 15 min), registration (5 / hour), code resend and password reset
 
 Passwords must be at least 10 characters (`MIN_PASSWORD_LENGTH`) and contain a
 letter and a digit. Five failed logins lock the account for 15 minutes.
+
+A deactivated account (a blocked customer, or staff switched off by a Super
+Admin) is refused at login with 403 rather than being handed a token that every
+later request would reject.
+
+`GET /me` includes `permissions` for a staff account, which the Admin Dashboard
+uses to hide screens the role cannot use. It is a convenience only — every
+endpoint checks server-side.
 
 ### MFA — `/auth/mfa`
 
@@ -97,6 +138,12 @@ previous object.
 `GET|POST /:childId/apps`, `DELETE /:childId/apps/:ruleId`, and the same three
 for `/websites`.
 
+A website rule's `url` is normalised to a bare hostname on create — scheme,
+path, port, credentials and a leading `www.` are stripped — because the device
+enforces these by matching DNS queries. Anything that could never match one
+(`this is not a website`, `localhost`) is rejected with 400 rather than stored
+as a rule that silently blocks nothing. A category-only rule needs no `url`.
+
 ### Activity — `/activity`
 
 `GET /:childId` (`from`, `to`, `limit`, `offset`), `POST /`
@@ -110,11 +157,20 @@ for `/websites`.
 | Method | Path                | Auth   |
 | ------ | ------------------- | ------ |
 | POST   | `/`                 | device |
+| POST   | `/:childId/manual`  | parent |
 | GET    | `/:childId/current` | parent |
 | GET    | `/:childId/history` | parent |
 
-The device token identifies the child and device — neither may be supplied in
-the body.
+`POST /` is the device reporting itself. The device token identifies the child
+and device — neither may be supplied in the body.
+
+`POST /:childId/manual` is the parent setting a position from the dashboard
+(`{ latitude, longitude, accuracy?, address? }`). A parent holds no device
+token, so this authorises on ownership of the child instead. The fix is
+attributed to the child's first linked device — with no device linked it
+returns 400 — and it deliberately does not refresh that device's `lastSeen`,
+since a position the parent typed says nothing about whether the phone is
+alive. Requires the `gps_tracking` entitlement.
 
 ### Safe zones — `/safe-zones`
 
@@ -126,11 +182,12 @@ the body.
 
 ### Chat — `/chats`
 
-| Method | Path                        | Auth   |
-| ------ | --------------------------- | ------ |
-| GET    | `/:childId/messages`        | parent |
-| POST   | `/:childId/messages`        | parent |
-| POST   | `/:childId/messages/from-child` | device |
+| Method | Path                            | Auth   | Notes                                              |
+| ------ | ------------------------------- | ------ | -------------------------------------------------- |
+| GET    | `/:childId/messages`            | parent | Paginated. Marks the child's messages read          |
+| POST   | `/:childId/messages`            | parent | `{text, messageType?}`                              |
+| GET    | `/me/messages`                  | device | The child reads its own thread; child from the token. Paginated, marks the parent's messages read |
+| POST   | `/:childId/messages/from-child` | device | `{text, messageType?}`                              |
 
 `from-child` derives the child from the device token, not the URL. A message of
 type `emergency` raises an `emergency_button` alert; message text is screened
@@ -179,7 +236,27 @@ Stripe key these routes degrade to 503 while the rest of the API stays up.
 
 ## Staff — `/admin`, `/audit`
 
-Requires `admin` or `support`; several endpoints require a named permission.
+Requires a staff role; most endpoints require a named permission on top.
+
+The `/clients`, `/users/:id` and `/users/:id/approve` routes act on customers
+only — a staff account is never returned or modified through them, so
+`manage_users` cannot reach a colleague's account. Staff are managed at
+`/admin/staff`.
+
+### Staff accounts — Super Admin only
+
+| Method | Path                        | Notes                                                    |
+| ------ | --------------------------- | -------------------------------------------------------- |
+| GET    | `/staff`                    | Staff plus the role catalogue and their default permissions |
+| POST   | `/staff`                    | `{name,email,role,permissions?,password?}`. Without a password one is generated and returned **once** as `generatedPassword` |
+| PUT    | `/staff/:id`                | `{name?,email?,role?,permissions?}`. A role change re-seeds the defaults unless `permissions` is given; either revokes that account's sessions |
+| PATCH  | `/staff/:id/status`         | `{isActive}`. Deactivating revokes sessions and blocks sign-in |
+| POST   | `/staff/:id/reset-password` | `{password?}` — otherwise generated. Revokes sessions and clears any lockout |
+| DELETE | `/staff/:id`                | Permanent                                                 |
+
+Refuses acting on your own account for role changes, deactivation and deletion.
+
+### Customers
 
 | Method | Path                       | Notes                                    |
 | ------ | -------------------------- | ---------------------------------------- |
@@ -188,11 +265,12 @@ Requires `admin` or `support`; several endpoints require a named permission.
 | PATCH  | `/clients/:id/plan`        |                                          |
 | DELETE | `/clients/:id`             |                                          |
 | GET    | `/users`                   | `role`, `plan`, `status`, `limit`, `offset` |
-| POST   | `/users`                   |                                          |
+| POST   | `/users`                   | Creates a parent; staff must go through `/admin/staff` |
 | PUT    | `/users/:id`               |                                          |
-| PATCH  | `/users/:id/role`          | Only a full admin may grant `admin`       |
+| PATCH  | `/users/:id/role`          | Super Admin only — moves an account across the staff boundary. Revokes sessions |
 | PATCH  | `/users/:id/approve`       |                                          |
-| GET    | `/sessions/active`         |                                          |
+| POST   | `/users/:id/reset-password` | Permission `reset_passwords`. `{password?}` — omit to generate one, returned once as `generatedPassword`. Revokes sessions, clears any lockout, audited as `admin.user_password_reset` |
+| GET    | `/sessions/active`         | Paginated → `{rows,count}`                |
 | GET    | `/users/:id/sessions`      |                                          |
 | DELETE | `/sessions/:sessionId`     | Force logout of one session               |
 | DELETE | `/users/:id/sessions`      | Force logout everywhere                   |

@@ -2,7 +2,7 @@
   "name": "parentix",
   "version": "1.0.0",
   "private": true,
-  "description": "Parentix — parental control & digital safety platform (Admin Dashboard, Family App, Child App, AWS backend)",
+  "description": "Parentix — parental control & digital safety platform (Admin Dashboard, Family App, Child App, Google Cloud backend)",
   "license": "UNLICENSED",
   "workspaces": [
     "packages/shared",
@@ -20,13 +20,16 @@
     "build": "npm run build --workspace apps/family-app && npm run build --workspace apps/admin-dashboard",
     "build:family": "npm run build --workspace apps/family-app",
     "build:admin": "npm run build --workspace apps/admin-dashboard",
-    "lint": "eslint apps/admin-dashboard/src apps/family-app/src packages/shared/src services/api/src",
+    "lint": "eslint apps/admin-dashboard/src apps/family-app/src apps/child-app/src apps/child-app/App.js packages/shared/src services/api/src",
     "test": "npm --prefix services/api test",
     "test:api": "npm --prefix services/api test",
-    "install:all": "npm install && npm --prefix services/api ci && npm --prefix apps/child-app ci && npm --prefix infrastructure/aws ci",
-    "infra:synth": "npm --prefix infrastructure/aws run synth",
-    "infra:deploy": "npm --prefix infrastructure/aws run deploy",
-    "test:e2e": "npm --prefix services/api run test:e2e"
+    "install:all": "npm install && npm --prefix services/api ci && npm --prefix apps/child-app ci",
+    "infra:deploy": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} apply",
+    "test:e2e": "npm --prefix services/api run test:e2e && npm --prefix apps/child-app run test:e2e",
+    "test:e2e:api": "npm --prefix services/api run test:e2e",
+    "test:e2e:child": "npm --prefix apps/child-app run test:e2e",
+    "infra:plan": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} plan",
+    "infra:output": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} output"
   },
   "devDependencies": {
     "eslint": "^8.57.1",

@@ -1,5 +1,5 @@
 # Local backing services only — Postgres and Redis, matching what the API gets
-# from RDS and ElastiCache in AWS.
+# from Cloud SQL and Memorystore in Google Cloud.
 #
 #   docker compose up -d
 #   cp services/api/.env.example services/api/.env   # then fill in the secrets

@@ -3,11 +3,19 @@ const { env } = require('../config/env');
 const logger = require('../utils/logger');
 
 /**
- * Object storage for user-uploaded files (currently child profile photos).
+ * Object storage for user-uploaded files (currently child profile photos),
+ * backed by Google Cloud Storage.
  *
- * Uploads never pass through the API: the client asks for a short-lived
- * pre-signed PUT URL and sends the bytes straight to S3. That keeps large
- * request bodies off the Fargate tasks and out of the ALB.
+ * Uploads never pass through the API: the client asks for a short-lived signed
+ * PUT URL and sends the bytes straight to the bucket. That keeps large request
+ * bodies off the Cloud Run instances and out of the load balancer.
+ *
+ * Signing note — this is the part that bites on Cloud Run. V4 signing needs a
+ * private key. Application Default Credentials on Cloud Run do not include one,
+ * so the client falls back to the IAM `signBlob` API, which requires the service
+ * account to hold `roles/iam.serviceAccountTokenCreator` *on itself*. Without
+ * that grant every signing call fails with a 403 that does not mention signing.
+ * infrastructure/gcp/iam.tf makes the grant.
  */
 
 const ALLOWED_IMAGE_TYPES = {
@@ -16,28 +24,25 @@ const ALLOWED_IMAGE_TYPES = {
   'image/webp': 'webp',
 };
 
-let clients = null;
+let bucketHandle = null;
 
-const getClients = () => {
-  if (clients) return clients;
-  const { S3Client, DeleteObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
-  const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-  clients = {
-    s3: new S3Client({ region: env.aws.region }),
-    DeleteObjectCommand,
-    PutObjectCommand,
-    getSignedUrl,
-  };
-  return clients;
+const getBucket = () => {
+  if (bucketHandle) return bucketHandle;
+  // Required lazily so environments without storage configured never pay the
+  // import cost of the SDK.
+  const { Storage } = require('@google-cloud/storage');
+  const client = new Storage(env.gcp.projectId ? { projectId: env.gcp.projectId } : {});
+  bucketHandle = client.bucket(env.storage.bucket);
+  return bucketHandle;
 };
 
-const isEnabled = () => env.storage.provider === 's3' && !!env.storage.bucket;
+const isEnabled = () => env.storage.provider === 'gcs' && !!env.storage.bucket;
 
-/** Public URL for a stored object — CloudFront if configured, otherwise S3. */
+/** Public URL for a stored object — Cloud CDN if configured, otherwise GCS. */
 const publicUrl = (key) =>
   env.storage.publicBaseUrl
     ? `${env.storage.publicBaseUrl}/${key}`
-    : `https://${env.storage.bucket}.s3.${env.aws.region}.amazonaws.com/${key}`;
+    : `https://storage.googleapis.com/${env.storage.bucket}/${key}`;
 
 /**
  * Keys are server-generated so a caller can never write outside its own prefix
@@ -70,24 +75,30 @@ const createImageUploadUrl = async ({ prefix, ownerId, contentType, contentLengt
     throw err;
   }
 
-  const { s3, PutObjectCommand, getSignedUrl } = getClients();
   const key = buildKey(prefix, ownerId, extension);
+  const ttlSeconds = env.storage.uploadUrlTtlSeconds;
 
-  const uploadUrl = await getSignedUrl(
-    s3,
-    new PutObjectCommand({ Bucket: env.storage.bucket, Key: key, ContentType: contentType }),
-    { expiresIn: env.storage.uploadUrlTtlSeconds }
-  );
+  // contentType is bound into the signature: the browser must send exactly this
+  // header, so a signed URL for a PNG cannot be reused to upload something else.
+  const [uploadUrl] = await getBucket()
+    .file(key)
+    .getSignedUrl({
+      version: 'v4',
+      action: 'write',
+      expires: Date.now() + ttlSeconds * 1000,
+      contentType,
+    });
 
-  return { uploadUrl, key, url: publicUrl(key), expiresIn: env.storage.uploadUrlTtlSeconds };
+  return { uploadUrl, key, url: publicUrl(key), expiresIn: ttlSeconds };
 };
 
 /** Best-effort cleanup; a failed delete must not fail the request that caused it. */
 const deleteObject = async (key) => {
   if (!isEnabled() || !key) return false;
   try {
-    const { s3, DeleteObjectCommand } = getClients();
-    await s3.send(new DeleteObjectCommand({ Bucket: env.storage.bucket, Key: key }));
+    // ignoreNotFound: deleting an object that is already gone is a success as
+    // far as the caller is concerned.
+    await getBucket().file(key).delete({ ignoreNotFound: true });
     return true;
   } catch (err) {
     logger.error('Failed to delete stored object', { key, error: err.message });
@@ -98,7 +109,7 @@ const deleteObject = async (key) => {
 /** Extracts the object key from a URL this service produced; null if foreign. */
 const keyFromUrl = (url) => {
   if (!url) return null;
-  const base = env.storage.publicBaseUrl || `https://${env.storage.bucket}.s3.${env.aws.region}.amazonaws.com`;
+  const base = env.storage.publicBaseUrl || `https://storage.googleapis.com/${env.storage.bucket}`;
   return url.startsWith(`${base}/`) ? url.slice(base.length + 1) : null;
 };
 

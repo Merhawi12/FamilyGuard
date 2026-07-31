@@ -1,0 +1,103 @@
+# Parentix on a single host.
+#
+# Replaces the Cloud Run / Cloud SQL / Memorystore / Cloud CDN stack in
+# infrastructure/gcp with four containers on one Compute Engine VM:
+#
+#   caddy     TLS, static files, reverse proxy   (the only published ports)
+#   api       services/api                        (Express + Socket.IO)
+#   postgres  stands in for Cloud SQL
+#   redis     stands in for Memorystore
+#
+#   ./bootstrap.sh    once, on a fresh Debian 12 host
+#   ./deploy.sh       every release
+#
+# Postgres and Redis publish no host ports on purpose: they are reachable only
+# over the compose network, so no firewall rule ever needs 5432 or 6379 open.
+
+name: parentix
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-parentix}
+      POSTGRES_USER: ${POSTGRES_USER:-parentix}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-parentix} -d ${POSTGRES_DB:-parentix}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Append-only so a restart does not silently drop everything Redis holds.
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ../../services/api
+    image: parentix/api:local
+    restart: unless-stopped
+    env_file: .env
+    # These override anything in .env — the container must reach the sidecars by
+    # their compose hostnames, whatever the file happens to say.
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      # Exactly one proxy hop in front of Express: Caddy. Getting this wrong
+      # makes rate limiting and audit-log IPs see the proxy instead of the client.
+      TRUST_PROXY: 1
+      DATABASE_URL: postgresql://${POSTGRES_USER:-parentix}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-parentix}
+      DB_SSL: 'false'
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - '5000'
+
+  caddy:
+    build:
+      context: ../..
+      dockerfile: deploy/single-host/web.Dockerfile
+      args:
+        VITE_GOOGLE_MAPS_KEY: ${VITE_GOOGLE_MAPS_KEY:-}
+        VITE_ADMIN_URL: https://${ADMIN_DOMAIN:?set ADMIN_DOMAIN in .env}
+    image: parentix/web:local
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in .env}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
+      TLS_EMAIL: ${TLS_EMAIL:?set TLS_EMAIL in .env}
+    volumes:
+      # Certificates and their private keys. Losing this volume forces
+      # re-issuance, and Let's Encrypt rate-limits that — back it up.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  pg_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

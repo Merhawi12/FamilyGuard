@@ -7,30 +7,31 @@ Parental control and digital safety platform. Three applications share one API:
 | **Admin Dashboard** | `apps/admin-dashboard`   | Staff console — users, billing, sessions, settings, audit logs         |
 | **Family App**      | `apps/family-app`        | Parent-facing dashboard plus the public marketing site                 |
 | **Child App**       | `apps/child-app`         | The monitored Android device agent (Expo + native modules)             |
-| API                 | `services/api`           | Express + Sequelize + Socket.IO backend, runs on ECS Fargate           |
+| API                 | `services/api`           | Express + Sequelize + Socket.IO backend, runs on Cloud Run             |
 
 ## Repository layout
 
 ```
 apps/
-  admin-dashboard/     React + Vite  → S3 + CloudFront
-  family-app/          React + Vite  → S3 + CloudFront
+  admin-dashboard/     React + Vite  → Cloud Storage + Cloud CDN
+  family-app/          React + Vite  → Cloud Storage + Cloud CDN
   child-app/           Expo (React Native) + Kotlin native modules
 services/
-  api/                 Express, Sequelize, Socket.IO  → ECR → ECS Fargate
+  api/                 Express, Sequelize, Socket.IO  → Artifact Registry → Cloud Run
 packages/
   shared/              API client, auth/realtime contexts, UI primitives, Tailwind preset
 infrastructure/
-  aws/                 AWS CDK — VPC, RDS, ElastiCache, ECS, ALB, S3, CloudFront, SES
+  gcp/                 Terraform — Cloud Run, Cloud SQL, Memorystore, GCS, load balancer, Secret Manager
+deploy/
+  single-host/         Cheaper alternative: the whole stack in Docker on one Compute Engine VM
 scripts/               Deployment scripts
 docs/                  Architecture, deployment, operations
 ```
 
 The two web apps and `packages/shared` form an npm workspace, so one `npm install`
-at the root covers all three. `services/api`, `apps/child-app` and
-`infrastructure/aws` keep their own lockfiles — the API so its container image
-builds from a single directory, the child app because Metro does not cope well
-with hoisted dependencies, and the infrastructure so CDK upgrades stay isolated.
+at the root covers all three. `services/api` and `apps/child-app` keep their own
+lockfiles — the API so its container image builds from a single directory, and
+the child app because Metro does not cope well with hoisted dependencies.
 
 ## Getting started
 
@@ -81,28 +82,30 @@ password-reset links are written to the API log instead.
 | `npm run lint`              | ESLint over both web apps, shared, and the API    |
 | `npm test`                  | API test suite (Jest + supertest)                 |
 | `npm run test:e2e`          | Boots a real server and walks the full workflow   |
-| `npm run infra:synth`       | Synthesize the CloudFormation templates           |
-| `npm run infra:deploy`      | Deploy all infrastructure stacks                  |
+| `npm run infra:plan`        | Terraform plan for `$ENV_NAME` (default `dev`)     |
+| `npm run infra:deploy`      | Terraform apply for `$ENV_NAME`                   |
+| `npm run infra:output`      | Show the Terraform outputs                        |
 | `npm --prefix services/api run migrate` | Apply pending database migrations     |
 
 ## Deployment
 
-The backend runs on ECS Fargate behind an Application Load Balancer; the web
-apps are static bundles on S3 served through CloudFront, which also proxies
-`/api/*` and `/socket.io/*` to the load balancer so the browser sees one origin.
+The backend runs on Cloud Run; the web apps are static bundles in Cloud Storage
+served through Cloud CDN. One global load balancer fronts all three hostnames and
+routes `/api/*` and `/socket.io/*` to Cloud Run, so the browser sees one origin.
 
 ```bash
-ENV_NAME=prod npm run infra:deploy    # first time, and whenever infra changes
+./infrastructure/gcp/deploy.sh prod apply
 ENV_NAME=prod ./scripts/deploy-api.sh # build, push, roll the service
-ENV_NAME=prod ./scripts/deploy-web.sh # build, sync to S3, invalidate CloudFront
+ENV_NAME=prod ./scripts/deploy-web.sh # build, sync to GCS, invalidate the CDN
 ```
 
-Full instructions, including the one-time AWS setup, are in
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Full instructions, including the one-time Google Cloud setup, are in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). For a cheaper single-VM deployment see
+[deploy/single-host](deploy/single-host/README.md).
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — how the pieces fit together, on AWS and in the code
-- [Deployment](docs/DEPLOYMENT.md) — first-time AWS setup and the release process
+- [Architecture](docs/ARCHITECTURE.md) — how the pieces fit together, on Google Cloud and in the code
+- [Deployment](docs/DEPLOYMENT.md) — first-time Google Cloud setup and the release process
 - [Operations](docs/OPERATIONS.md) — secrets, migrations, rollback, monitoring, incident response
 - [API reference](docs/API.md) — endpoints, auth model, realtime events

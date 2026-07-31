@@ -1,6 +1,6 @@
 const { DataTypes } = require('sequelize');
 
-/** Adds the S3/CloudFront URL of an uploaded child profile photo. */
+/** Adds the Cloud Storage URL of an uploaded child profile photo. */
 module.exports = {
   async up(queryInterface) {
     const columns = await queryInterface.describeTable('children');

@@ -12,9 +12,10 @@ process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'; // makes the (mocked) Stripe cl
 process.env.CLIENT_URL = 'http://localhost:3000';
 process.env.ADMIN_URL = 'http://localhost:3001';
 
-// Object storage is exercised against the manual AWS SDK mocks in __mocks__/,
-// so nothing here reaches the network.
-process.env.STORAGE_PROVIDER = 's3';
-process.env.S3_BUCKET = 'parentix-uploads-test';
-process.env.S3_PUBLIC_BASE_URL = 'https://app.parentix.test/media';
-process.env.AWS_REGION = 'us-east-2';
+// Object storage is exercised against the manual Cloud Storage mock in
+// __mocks__/@google-cloud/, so nothing here reaches the network.
+process.env.STORAGE_PROVIDER = 'gcs';
+process.env.GCS_BUCKET = 'parentix-uploads-test';
+process.env.GCS_PUBLIC_BASE_URL = 'https://app.parentix.test/media';
+process.env.GCP_PROJECT_ID = 'parentix-test';
+process.env.GCP_REGION = 'us-central1';

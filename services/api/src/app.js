@@ -15,8 +15,8 @@ const initSocketHandlers = require('./sockets/deviceEvents');
 const app = express();
 const httpServer = createServer(app);
 
-// Behind the ALB (and CloudFront) — trust the forwarded client address so rate
-// limiting and audit logs key off the real caller, not the proxy.
+// Behind the Google Cloud load balancer — trust the forwarded client address so
+// rate limiting and audit logs key off the real caller, not the proxy.
 app.set('trust proxy', env.trustProxy);
 app.disable('x-powered-by');
 
@@ -25,12 +25,11 @@ app.disable('x-powered-by');
  * An origin is allowed when it is on the configured allowlist, or when it is
  * simply the host the request already arrived on.
  *
- * The second case is what makes the CloudFront deployment work: the web apps
- * and `/api/*` are served from the same distribution, so a browser POST carries
- * `Origin: https://<distribution>` even though nothing is cross-origin. Treating
- * that as allowed means the API does not need to be redeployed with each new
- * CloudFront domain, and it grants nothing a same-origin request did not
- * already have.
+ * The second case is what makes the load-balanced deployment work: the web apps
+ * and `/api/*` are served from the same hostname, so a browser POST carries
+ * `Origin: https://app.parentix.ca` even though nothing is cross-origin. Treating
+ * that as allowed means the API does not need to be redeployed for each new
+ * hostname, and it grants nothing a same-origin request did not already have.
  */
 const isAllowedOrigin = (origin, req) => {
   if (!origin) return true; // non-browser client, or a same-origin GET

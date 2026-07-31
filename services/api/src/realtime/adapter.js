@@ -2,10 +2,11 @@ const { env } = require('../config/env');
 const logger = require('../utils/logger');
 
 /**
- * Fans Socket.IO events out across every API task via ElastiCache Redis.
+ * Fans Socket.IO events out across every API instance via Memorystore Redis.
  *
- * Without this a parent connected to task A never receives an event emitted by
- * task B, so the service could only ever run a single task. With REDIS_URL unset
+ * Without this a parent connected to instance A never receives an event emitted
+ * by instance B, so the service could only ever run a single instance. With
+ * REDIS_URL unset
  * (local development, tests) the in-memory adapter is used and nothing breaks.
  *
  * @returns {Promise<null|() => Promise<void>>} a disconnect function, or null.

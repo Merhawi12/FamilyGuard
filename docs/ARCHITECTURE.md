@@ -3,92 +3,103 @@
 ## System shape
 
 ```
-                        ┌──────────────────────────────┐
-   Parent (browser) ───▶│ CloudFront: Family App       │
-                        │  /            → S3 (static)  │
-                        │  /media/*     → S3 (uploads) │
-                        │  /api/*       → ALB          │
-                        │  /socket.io/* → ALB          │
-                        └──────────────┬───────────────┘
+                        ┌──────────────────────────────────────┐
+   Parent (browser) ───▶│ app.parentix.ca                      │
+                        │  /            → GCS bucket + CDN     │
+                        │  /api/*       → Cloud Run            │
+                        │  /socket.io/* → Cloud Run            │
+                        └──────────────┬───────────────────────┘
                                        │
-   Staff (browser) ────▶┌──────────────┴───────────────┐
-                        │ CloudFront: Admin Dashboard  │
-                        │  /            → S3 (static)  │
-                        │  /api/*       → ALB          │
-                        └──────────────┬───────────────┘
-                                       │
-   Child device ───────────────────────┼──────▶ ALB (api.parentix.ca)
+   Staff (browser) ────▶┌──────────────┴───────────────────────┐
+                        │ admin.parentix.ca                    │
+                        │  /            → GCS bucket + CDN     │
+                        │  /api/*       → Cloud Run            │
+                        └──────────────┬───────────────────────┘
+                                       │   (one global external
+                                       │    Application LB, one
+   Child device ───────────────────────┼───▶ anycast IP, three hosts)
                                        │         │
-                                       └─────────┤
+                                       └─────────┤ api.parentix.ca
                                                  ▼
                                    ┌──────────────────────────┐
-                                   │ ECS Fargate: Parentix API│
-                                   │ private subnets, 2+ tasks│
+                                   │ Cloud Run: Parentix API  │
+                                   │ 1-6 instances, autoscaled│
                                    └───┬──────┬──────┬────────┘
                                        │      │      │
-                          RDS Postgres ┘      │      └ SES (transactional mail)
-                          (isolated)          │
-                                   ElastiCache Redis
-                                   (Socket.IO fan-out)
+                    Cloud SQL Postgres ┘      │      └ SMTP relay (transactional mail)
+                    (Unix socket, Auth Proxy) │
+                                     Memorystore Redis
+                                     (Socket.IO fan-out, via VPC connector)
 ```
 
-### Why CloudFront fronts the API
+### Why the load balancer fronts the API
 
-Both web apps are served from the same distribution that proxies `/api/*` and
-`/socket.io/*`. The browser therefore sees a single origin, which means:
+Both web apps are served from the same load balancer that routes `/api/*` and
+`/socket.io/*` to Cloud Run. The browser therefore sees a single origin, which
+means:
 
 - no CORS preflight on the hot path;
-- the apps never have to be rebuilt when the load balancer's DNS name changes —
-  `VITE_API_URL` stays empty in production;
+- the apps never have to be rebuilt when the backend URL changes — `VITE_API_URL`
+  stays empty in production;
 - the static marketing pages can call `/api/contact` with a relative URL.
 
-The child app is not a browser and has no such constraint, so it talks to the
-load balancer directly.
+The child app is not a browser and has no such constraint, so it talks to
+`api.parentix.ca` directly.
 
-The API still validates `Origin`: a request is accepted when the origin is on
-the configured allowlist **or** matches the host the request arrived on. The
-second rule is what makes a same-origin request through a freshly created
-distribution work without a redeploy — and it grants nothing that a same-origin
-request did not already have.
+The API still validates `Origin`: a request is accepted when the origin is on the
+configured allowlist **or** matches the host the request arrived on. The second
+rule is what makes a same-origin request work through a freshly created load
+balancer without a redeploy — and it grants nothing that a same-origin request
+did not already have.
 
-## Network
+## How things connect
 
-| Subnet tier            | Contents                  | Internet route      |
-| ---------------------- | ------------------------- | ------------------- |
-| public                 | Application Load Balancer | Internet gateway    |
-| private (with egress)  | Fargate tasks             | Outbound via NAT    |
-| isolated               | RDS, ElastiCache          | None                |
+| From | To | Path |
+| --- | --- | --- |
+| Internet | Cloud Run | Load balancer → serverless NEG |
+| Cloud Run | Cloud SQL | Unix socket at `/cloudsql/<connection-name>`, via the Auth Proxy |
+| Cloud Run | Memorystore | Serverless VPC Access connector → peered VPC |
+| Cloud Run | Cloud Storage | Google APIs, authenticated by the service account |
+| Cloud Run | SMTP relay | Public internet, port 587 |
 
-The database and cache accept traffic only from the application subnets' CIDR
-ranges. Those subnets contain nothing but the API tasks and have no inbound
-route from the internet.
+Cloud SQL has **no authorized networks**. Its public endpoint exists, but with an
+empty allow-list nothing on the internet can open a session — access is
+exclusively through the Auth Proxy, which authenticates with IAM. That is why
+the database needs no VPC and no firewall rule.
 
-> Access is granted by CIDR rather than by referencing the API's security group
-> because the API stack already depends on the data stack for the database
-> endpoint. Pointing back the other way would make the two stacks mutually
-> dependent, which CloudFormation cannot deploy.
+The VPC exists *only* to reach Memorystore, which has no public endpoint. With
+`redis_enabled = false` no network resources are created at all.
 
-## Stacks
+## Terraform layout
 
-`infrastructure/aws` synthesises five stacks, deployed in this order:
+`infrastructure/gcp` is one configuration with a workspace per environment.
+Files are split by concern rather than by deployment order — Terraform resolves
+ordering from the dependency graph:
 
-1. **Network** — VPC, subnets, NAT, S3 gateway endpoint.
-2. **Data** — RDS Postgres, ElastiCache Redis, and the application secret.
-3. **Storage** — three S3 buckets (family app, admin app, user uploads) plus the
-   CloudFront read policy.
-4. **Api** — ECR repository, ECS cluster, Fargate service, ALB, autoscaling, IAM.
-5. **Web** — the two CloudFront distributions and their URL-rewrite functions.
+| File | Contents |
+| --- | --- |
+| `main.tf` | locals, API enablement |
+| `network.tf` | VPC, subnet, VPC connector, private service access *(only with Redis)* |
+| `database.tf` | Cloud SQL instance, database, user |
+| `redis.tf` | Memorystore *(optional)* |
+| `storage.tf` | uploads bucket + two web buckets |
+| `registry.tf` | Artifact Registry |
+| `secrets.tf` | Secret Manager: generated and supplied |
+| `iam.tf` | the API service account and its grants |
+| `run.tf` | the Cloud Run service |
+| `loadbalancer.tf` | NEG, backends, URL map, certificate, forwarding rules |
+| `dns.tf` | Cloud DNS *(optional)* |
 
-Environment sizing lives in `infrastructure/aws/lib/config.ts`; select with
-`cdk deploy -c env=dev|prod`.
+Sizing lives in `envs/dev.tfvars` and `envs/prod.tfvars`.
 
 ## Request lifecycle
 
-1. CloudFront matches the path against its behaviours. Static paths are served
-   from S3; `/api/*` and `/socket.io/*` are forwarded to the ALB uncached, with
-   all headers, cookies and query strings preserved.
-2. The ALB routes to a healthy Fargate task (`GET /api/health`). Cookie
-   stickiness keeps a Socket.IO client on one task across its polling handshake.
+1. The load balancer matches host and path against the URL map. Static paths go
+   to a backend bucket through Cloud CDN; `/api/*` and `/socket.io/*` go to the
+   serverless NEG uncached.
+2. Cloud Run routes to an instance, starting one if none is warm. Session
+   affinity keeps a Socket.IO client on one instance across its polling
+   handshake.
 3. Express assigns a request id, applies Helmet, CORS, compression and rate
    limits, then dispatches to a router.
 4. Handlers `next(err)` on failure. The central error handler logs 5xx with the
@@ -96,6 +107,10 @@ Environment sizing lives in `infrastructure/aws/lib/config.ts`; select with
    stack frames never reach a client.
 
 ## Authentication
+
+Authentication is entirely the application's own — there is no Identity Platform,
+no Firebase Auth, and nothing was migrated from a cloud provider, because nothing
+ever lived in one.
 
 Three token shapes, all signed with the same secret:
 
@@ -118,18 +133,23 @@ rejected outright.
 
 Sequelize models are the source of truth for table shape. On boot the API:
 
-1. takes a Postgres advisory lock, so simultaneously starting tasks serialise;
+1. takes a Postgres advisory lock, so simultaneously starting instances serialise;
 2. runs `sequelize.sync()`, which only ever creates missing tables;
 3. applies pending Umzug migrations, tracked in the `migrations` table.
 
-Migrations handle what `sync()` cannot do safely: adding a column to a table
-that already exists, creating indexes, and backfilling data. They live in
+Migrations handle what `sync()` cannot do safely: adding a column to a table that
+already exists, creating indexes, and backfilling data. They live in
 `services/api/src/db/migrations` and are written to be idempotent.
+
+Because migrations run at container start, a Cloud Run revision that fails to
+migrate fails its startup probe and never receives traffic — the previous
+revision keeps serving.
 
 ## File storage
 
-Uploads never pass through the API. The client asks for a pre-signed S3 `PUT`
-URL, sends the bytes straight to S3, then saves the returned URL on the record.
+Uploads never pass through the API. The client asks for a signed Cloud Storage
+`PUT` URL, sends the bytes straight to the bucket, then saves the returned URL on
+the record.
 
 Two rules keep that safe:
 
@@ -139,13 +159,34 @@ Two rules keep that safe:
   the caller's own prefix. Without that check a caller could name another
   tenant's object and have the replace-cleanup delete it.
 
+The signing itself has one non-obvious requirement. V4 signed URLs need a private
+key; Application Default Credentials on Cloud Run do not include one, so the
+client falls back to the IAM `signBlob` API. That requires the service account to
+hold `roles/iam.serviceAccountTokenCreator` **on itself**. Without the grant every
+upload fails with a 403 that never mentions signing.
+
 ## Realtime
 
-Socket.IO events (alerts, chat, location, activity) fan out across tasks through
-the Redis adapter. Without it a parent connected to one task would never receive
-an event emitted by another, capping the service at a single task. With
-`REDIS_URL` unset — local development and tests — the in-memory adapter is used
-and everything else behaves identically.
+Socket.IO events (alerts, chat, location, activity) fan out across instances
+through the Redis adapter. Without it a parent connected to one instance would
+never receive an event emitted by another, capping the service at a single
+instance. With `REDIS_URL` unset — local development, tests, and the `dev`
+environment — the in-memory adapter is used and everything else behaves
+identically.
+
+Cloud Run's request timeout is raised to its 60-minute maximum, and the load
+balancer backend matches it, because the default 5 minutes would sever every
+websocket.
+
+## Email
+
+Google Cloud has no equivalent of SES. Mail goes through an external SMTP relay —
+SendGrid, Mailgun, Postmark, Resend or Google Workspace. The API speaks plain
+SMTP via nodemailer, so switching providers is a credential change, not a code
+change.
+
+`EMAIL_PROVIDER=none` logs messages instead of sending them, which is what
+development and the test suite use.
 
 ## Shared web code
 

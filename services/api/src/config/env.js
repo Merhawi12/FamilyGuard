@@ -32,15 +32,23 @@ const corsOrigins = [
 ];
 
 /**
- * Postgres can be configured two ways:
+ * Postgres can be configured three ways:
  *
- *   DATABASE_URL          a single connection string (local, Docker Compose)
- *   DB_HOST/DB_USER/…     discrete fields, which is all an AWS Secrets Manager
- *                         RDS secret can inject into an ECS task
+ *   DB_SOCKET_PATH        Cloud SQL Unix socket, e.g.
+ *                         /cloudsql/<project>:<region>:<instance>. This is how
+ *                         Cloud Run reaches Cloud SQL when the instance is
+ *                         attached to the service — the connection never leaves
+ *                         the sandbox, so it needs no VPC connector and no TLS
+ *                         configuration of its own.
+ *   DB_HOST/DB_USER/…     discrete fields — Cloud SQL over private IP through
+ *                         the Serverless VPC Access connector, and what a Secret
+ *                         Manager secret injects most naturally.
+ *   DATABASE_URL          a single connection string (local, Docker Compose).
  *
- * Discrete fields win when present so a task definition never has to compose
- * the URL itself.
+ * More specific wins, so a deployment never has to compose the URL itself.
  */
+const dbSocketPath = process.env.DB_SOCKET_PATH || '';
+
 const buildDatabaseUrl = () => {
   const { DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD } = process.env;
   if (!DB_HOST || !DB_USER) return process.env.DATABASE_URL || '';
@@ -50,7 +58,7 @@ const buildDatabaseUrl = () => {
 };
 
 const databaseUrl = buildDatabaseUrl();
-const usePostgres = /^postgres(ql)?:\/\//.test(databaseUrl);
+const usePostgres = !!dbSocketPath || /^postgres(ql)?:\/\//.test(databaseUrl);
 
 const env = Object.freeze({
   NODE_ENV,
@@ -61,15 +69,23 @@ const env = Object.freeze({
   port: int(process.env.PORT, 5000),
   logLevel: process.env.LOG_LEVEL || (isTest ? 'silent' : 'info'),
 
-  // Behind the ALB/CloudFront there is exactly one proxy hop in front of Express.
+  // Behind the external HTTPS load balancer there is exactly one proxy hop in
+  // front of Express.
   trustProxy: int(process.env.TRUST_PROXY, 1),
 
   db: {
     url: databaseUrl,
     usePostgres,
-    // RDS presents an AWS-issued certificate; verification needs the RDS CA
-    // bundle in the image, so it is opt-in via DB_SSL_REJECT_UNAUTHORIZED.
-    ssl: bool(process.env.DB_SSL, usePostgres && isProduction),
+    /** Cloud SQL Unix socket. When set, host/port are not used at all. */
+    socketPath: dbSocketPath,
+    name: process.env.DB_NAME || 'parentix',
+    user: process.env.DB_USER || '',
+    password: process.env.DB_PASSWORD || '',
+    // A Unix socket connection to Cloud SQL is already confined to the instance
+    // sandbox, so TLS on top of it buys nothing and only adds a handshake.
+    // Over private IP, Cloud SQL presents a Google-issued certificate whose CA
+    // is not in the image, so strict verification stays opt-in.
+    ssl: bool(process.env.DB_SSL, usePostgres && isProduction && !dbSocketPath),
     sslRejectUnauthorized: bool(process.env.DB_SSL_REJECT_UNAUTHORIZED, false),
     sqlitePath: process.env.DB_PATH || './parentix.sqlite',
     poolMax: int(process.env.DB_POOL_MAX, 10),
@@ -92,12 +108,16 @@ const env = Object.freeze({
   // when more than one API task is running.
   redisUrl: process.env.REDIS_URL || '',
 
-  aws: {
-    region: process.env.AWS_REGION || 'us-east-2',
+  gcp: {
+    // Usually inferred from the metadata server on Cloud Run; set explicitly for
+    // local runs and for anything that signs URLs.
+    projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || '',
+    location: process.env.GCP_REGION || 'us-central1',
   },
 
   email: {
-    // 'ses' in AWS, 'smtp' for a self-hosted relay, 'none' logs instead of sending.
+    // 'smtp' for any relay (SendGrid, Mailgun, Postmark, Workspace), 'none'
+    // logs instead of sending. Google Cloud has no first-party email service.
     provider: (process.env.EMAIL_PROVIDER || (process.env.SMTP_HOST ? 'smtp' : 'none')).toLowerCase(),
     from: process.env.EMAIL_FROM || process.env.SMTP_FROM || 'Parentix <no-reply@parentix.ca>',
     adminAddress: process.env.ADMIN_EMAIL || '',
@@ -111,12 +131,12 @@ const env = Object.freeze({
   },
 
   storage: {
-    // 's3' in AWS, 'none' rejects upload requests with 503.
-    provider: (process.env.STORAGE_PROVIDER || (process.env.S3_BUCKET ? 's3' : 'none')).toLowerCase(),
-    bucket: process.env.S3_BUCKET || '',
-    // CloudFront domain in front of the bucket; falls back to the S3 URL.
-    publicBaseUrl: (process.env.S3_PUBLIC_BASE_URL || '').replace(/\/$/, ''),
-    uploadUrlTtlSeconds: int(process.env.S3_UPLOAD_URL_TTL, 300),
+    // 'gcs' for Cloud Storage, 'none' rejects upload requests with 503.
+    provider: (process.env.STORAGE_PROVIDER || (process.env.GCS_BUCKET ? 'gcs' : 'none')).toLowerCase(),
+    bucket: process.env.GCS_BUCKET || '',
+    // Cloud CDN domain in front of the bucket; falls back to the direct GCS URL.
+    publicBaseUrl: (process.env.GCS_PUBLIC_BASE_URL || '').replace(/\/$/, ''),
+    uploadUrlTtlSeconds: int(process.env.GCS_UPLOAD_URL_TTL, 300),
     maxUploadBytes: int(process.env.MAX_UPLOAD_BYTES, 5 * 1024 * 1024),
   },
 
@@ -139,7 +159,8 @@ const assertProductionConfig = () => {
   const missing = [];
   if (!env.auth.jwtSecret || env.auth.jwtSecret.length < 32) missing.push('JWT_SECRET (min 32 chars)');
   if (!/^[0-9a-f]{64}$/i.test(env.auth.fieldEncryptionKey)) missing.push('FIELD_ENCRYPTION_KEY (64 hex chars)');
-  if (!env.db.usePostgres) missing.push('DATABASE_URL (postgres:// connection string)');
+  if (!env.db.usePostgres) missing.push('DB_SOCKET_PATH, DB_HOST, or DATABASE_URL (Postgres connection)');
+  if (env.db.socketPath && !env.db.user) missing.push('DB_USER (required with DB_SOCKET_PATH)');
   if (!env.corsOrigins.length) missing.push('CLIENT_URL');
 
   if (missing.length) {

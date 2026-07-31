@@ -1,0 +1,16 @@
+# The repo is developed on Windows but deployed on Linux. A shell script that
+# reaches the server with CRLF endings fails as
+# `/usr/bin/env: 'bash\r': No such file or directory`, which is an obscure way to
+# discover a line-ending problem. Force LF on everything that Linux executes or
+# parses, regardless of core.autocrlf.
+*.sh            text eol=lf
+*.mjs           text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+Caddyfile       text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.service       text eol=lf
+*.service.in    text eol=lf
+*.timer         text eol=lf
+.env.example    text eol=lf

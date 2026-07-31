@@ -2,7 +2,7 @@
   "name": "@parentix/api",
   "version": "1.0.0",
   "private": true,
-  "description": "Parentix API — Express + Sequelize + Socket.IO backend running on ECS Fargate.",
+  "description": "Parentix API — Express + Sequelize + Socket.IO backend running on Cloud Run.",
   "main": "src/server.js",
   "engines": {
     "node": ">=20"
@@ -35,9 +35,7 @@
     ]
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.583.0",
-    "@aws-sdk/client-sesv2": "^3.583.0",
-    "@aws-sdk/s3-request-presigner": "^3.583.0",
+    "@google-cloud/storage": "^7.14.0",
     "@socket.io/redis-adapter": "^8.3.0",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",

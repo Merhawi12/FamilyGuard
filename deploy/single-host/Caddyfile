@@ -1,0 +1,83 @@
+# Parentix single-host reverse proxy.
+#
+# Caddy terminates TLS (issuing and renewing Let's Encrypt certificates on its
+# own) and is the only container that binds a host port. The API, Postgres and
+# Redis are reachable only over the compose network.
+#
+# A real, publicly-trusted certificate is not optional here: the child app runs
+# on Android, which refuses self-signed certificates outright, so a bad cert
+# means monitored devices silently stop reporting.
+
+{
+	email {$TLS_EMAIL}
+}
+
+# Shared by both SPA sites. Serving the API on the same origin as the app is
+# what lets VITE_API_URL stay empty — no CORS preflight, no third-party cookie
+# concerns, and the Socket.IO upgrade rides the same host.
+(api_passthrough) {
+	handle /api/* {
+		reverse_proxy api:5000
+	}
+	handle /socket.io/* {
+		reverse_proxy api:5000
+	}
+}
+
+(static_headers) {
+	encode zstd gzip
+
+	# Hashed filenames — safe to cache forever.
+	header /assets/* Cache-Control "public, max-age=31536000, immutable"
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		# HSTS. Remove this line if you might need to serve plain HTTP on this
+		# hostname later; browsers honour it for two years and it is sticky.
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		-Server
+	}
+}
+
+# ── Family app ───────────────────────────────────────────────────────────────
+{$APP_DOMAIN} {
+	import api_passthrough
+	import static_headers
+
+	handle {
+		root * /srv/family
+
+		# The marketing page is the root, not the React app. This mirrors the
+		# CloudFront rewrite in infrastructure/aws and the dev-server plugin in
+		# apps/family-app/vite.config.js, so all three environments agree.
+		@root path /
+		rewrite @root /landing.html
+		@contact path /contact
+		rewrite @contact /contact.html
+
+		# Anything else that is not a real file is a client-side route.
+		try_files {path} {path}/ /index.html
+		file_server
+	}
+}
+
+# ── Admin dashboard ──────────────────────────────────────────────────────────
+{$ADMIN_DOMAIN} {
+	import api_passthrough
+	import static_headers
+
+	handle {
+		root * /srv/admin
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# ── API ──────────────────────────────────────────────────────────────────────
+# The child app talks to this hostname directly — see EXPO_PUBLIC_API_URL in
+# apps/child-app/src/services/api.js. Security headers come from helmet in the
+# API itself, so nothing is added here.
+{$API_DOMAIN} {
+	reverse_proxy api:5000
+}

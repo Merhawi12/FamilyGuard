@@ -10,12 +10,12 @@ require('../models'); // define every model + association before syncing
 const MIGRATION_LOCK_ID = 87213401;
 
 /**
- * Serialises schema work across API tasks.
+ * Serialises schema work across API instances.
  *
- * ECS starts every task in a deployment at once, so without this they would all
- * run `sync()` and the pending migrations simultaneously. The advisory lock is
- * session-scoped and released explicitly; if a task dies holding it, Postgres
- * drops it when the connection closes.
+ * Cloud Run can start several instances of a revision at once, so without this
+ * they would all run `sync()` and the pending migrations simultaneously. The
+ * advisory lock is session-scoped and released explicitly; if an instance dies
+ * holding it, Postgres drops it when the connection closes.
  */
 const withMigrationLock = async (work) => {
   if (!env.db.usePostgres) return work(); // SQLite runs single-process

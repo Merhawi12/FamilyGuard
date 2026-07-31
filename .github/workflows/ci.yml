@@ -46,23 +46,21 @@ jobs:
       - run: npm run build
 
   infrastructure:
-    name: Infrastructure synth
+    name: Terraform validate
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: infrastructure/aws
+        working-directory: infrastructure/gcp
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: hashicorp/setup-terraform@v3
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: infrastructure/aws/package-lock.json
-      - run: npm ci
-      - run: npx tsc --noEmit
-      # Synthesising both environments catches template errors before a deploy.
-      - run: npx cdk synth -c env=dev --quiet
-      - run: npx cdk synth -c env=prod --quiet
+          terraform_version: 1.9.8
+      - run: terraform fmt -check -recursive
+      # -backend=false: validation needs the provider schemas, not the remote
+      # state, so this runs without any Google Cloud credentials.
+      - run: terraform init -backend=false
+      - run: terraform validate
 
   image:
     name: API image builds
