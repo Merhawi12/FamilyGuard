@@ -62,14 +62,41 @@ if [ -n "$ACTIVE_PROJECT" ] && [ "$ACTIVE_PROJECT" != "(unset)" ] && [ "$ACTIVE_
   fi
 fi
 
+# Nothing here can be created without a billing account, and the failure without
+# this check is a bare "AccessDeniedException: 403" from whichever resource
+# happens to be attempted first — which says nothing about billing.
+#
+# Only a definite "False" stops the run: the describe call needs billing.viewer,
+# and someone entitled to deploy but not to read billing should not be blocked.
+BILLING="$(gcloud beta billing projects describe "$PROJECT_ID" \
+  --format='value(billingEnabled)' 2>/dev/null || true)"
+if [ "$BILLING" = "False" ]; then
+  die "Billing is disabled on '${PROJECT_ID}'.
+
+       Cloud Run, Cloud SQL, Artifact Registry and Cloud Storage all refuse to be
+       created without a billing account, so nothing can be deployed until this
+       is fixed.
+
+       Firebase project? Upgrade Spark -> Blaze:
+         https://console.firebase.google.com/project/${PROJECT_ID}/usage/details
+       Otherwise attach a billing account:
+         https://console.cloud.google.com/billing/linkedaccount?project=${PROJECT_ID}
+
+       Blaze is pay-as-you-go, not a flat fee. Set a budget alert afterwards —
+       nothing in this configuration caps its own spend."
+fi
+
 STATE_BUCKET="${PROJECT_ID}-parentix-tfstate"
 
-if ! gsutil ls -b "gs://${STATE_BUCKET}" >/dev/null 2>&1; then
+# `gcloud storage` rather than gsutil: gsutil is deprecated and prints a
+# migration notice on every call.
+if ! gcloud storage buckets describe "gs://${STATE_BUCKET}" >/dev/null 2>&1; then
   log "Creating state bucket gs://${STATE_BUCKET}"
-  gsutil mb -p "$PROJECT_ID" -l us "gs://${STATE_BUCKET}"
+  gcloud storage buckets create "gs://${STATE_BUCKET}" \
+    --project="$PROJECT_ID" --location=us --uniform-bucket-level-access
   # Versioning turns a corrupted or truncated state write into an inconvenience
   # rather than a rebuild-from-scratch.
-  gsutil versioning set on "gs://${STATE_BUCKET}"
+  gcloud storage buckets update "gs://${STATE_BUCKET}" --versioning
 fi
 
 log "Initialising Terraform"
