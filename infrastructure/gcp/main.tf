@@ -16,7 +16,19 @@ locals {
   admin_host = local.use_domain ? "${var.admin_subdomain}.${var.domain}" : ""
   api_host   = local.use_domain ? "${var.api_subdomain}.${var.domain}" : ""
 
-  api_image = var.api_image != "" ? var.api_image : "${var.region}-docker.pkg.dev/${var.project_id}/${local.prefix}/api:latest"
+  # Bootstrap image, deliberately not the real one.
+  #
+  # On a first apply the Artifact Registry repository is created by this same
+  # run and is therefore empty, so pointing Cloud Run at <repo>/api:latest would
+  # fail: the image does not exist yet. It cannot be pushed first either, since
+  # scripts/deploy-api.sh reads the repository and service names from these
+  # outputs. That is a deadlock, and it is broken with Google's public hello
+  # container, which always exists.
+  #
+  # scripts/deploy-api.sh replaces it on the first release, and the
+  # ignore_changes on the service's image means Terraform never drags it back.
+  # Set var.api_image to pin a specific image instead.
+  api_image = var.api_image != "" ? var.api_image : "us-docker.pkg.dev/cloudrun/container/hello"
 
   # A VPC connector is only needed to reach Memorystore: Cloud SQL is attached
   # through the Cloud Run socket integration, which does not use the VPC. No

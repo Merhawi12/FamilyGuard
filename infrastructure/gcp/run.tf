@@ -181,9 +181,14 @@ resource "google_cloud_run_v2_service" "api" {
         }
       }
 
+      # TCP rather than HTTP, so the probe does not assume the container serves
+      # /api/health — the bootstrap image on a first apply does not. It gives
+      # the same guarantee either way: src/server.js only calls listen() after
+      # initializeDatabase() has finished, so an open port means migrations are
+      # done.
       startup_probe {
-        http_get {
-          path = "/api/health"
+        tcp_socket {
+          port = 5000
         }
         initial_delay_seconds = 5
         period_seconds        = 5

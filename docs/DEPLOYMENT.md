@@ -205,6 +205,13 @@ the current commit, deploys the revision, and checks `/api/health`. Migrations
 run at container start; a revision that fails to migrate fails its startup probe
 and never receives traffic.
 
+**The first apply leaves Cloud Run on a placeholder.** Terraform creates the
+Artifact Registry repository in the same run, so it is empty and there is no API
+image to point at yet — the service boots Google's public hello container
+instead. This first `deploy-api.sh` is what replaces it, and Terraform ignores
+the image afterwards. Until then `/api/health` will not answer, which is
+expected rather than a fault.
+
 ### 2.2 Web apps
 
 ```bash

@@ -139,6 +139,11 @@ ENV_NAME=dev ./scripts/deploy-api.sh     # build → Artifact Registry → Cloud
 ENV_NAME=dev ./scripts/deploy-web.sh     # build → GCS → CDN invalidation
 ```
 
+`deploy-api.sh` is not optional after the first apply. The registry is created
+by that apply and is therefore empty, so Cloud Run starts on Google's public
+hello container — there is no API image to run yet. The first `deploy-api.sh`
+replaces it; `ignore_changes` on the image keeps Terraform from reverting it.
+
 ## After the first apply
 
 **1. Supply the external credentials.** Terraform creates the secret containers
