@@ -20,6 +20,7 @@ ENV_NAME="${1:-}"
 ACTION="${2:-plan}"
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m warn\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31merror\033[0m %s\n' "$*" >&2; exit 1; }
 
 case "$ENV_NAME" in
@@ -29,24 +30,57 @@ esac
 
 command -v gcloud >/dev/null 2>&1 || die "gcloud is required but not installed."
 
+TERRAFORM_VERSION=1.9.8
+
+# Installs into ~/bin, not /usr/local/bin: on Cloud Shell only $HOME survives
+# the session, so an apt install would have to be repeated every time.
+install_terraform() {
+  local url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+  local tmp
+  tmp="$(mktemp -d)"
+
+  command -v curl  >/dev/null 2>&1 || die "curl is needed to install terraform."
+  command -v unzip >/dev/null 2>&1 || die "unzip is needed to install terraform."
+
+  log "Downloading Terraform ${TERRAFORM_VERSION}"
+  curl -fsSL "$url" -o "${tmp}/terraform.zip" || die "Download failed: ${url}"
+
+  mkdir -p "${HOME}/bin"
+  unzip -oq "${tmp}/terraform.zip" -d "${HOME}/bin" || die "Could not unpack the archive."
+  chmod +x "${HOME}/bin/terraform"
+  rm -rf "$tmp"
+
+  # For this run, and for every future shell.
+  export PATH="${HOME}/bin:${PATH}"
+  if ! grep -q 'HOME/bin' "${HOME}/.bashrc" 2>/dev/null; then
+    echo 'export PATH="$HOME/bin:$PATH"' >> "${HOME}/.bashrc"
+  fi
+
+  terraform version 2>/dev/null | grep -q '^Terraform v' \
+    || die "Installed to ${HOME}/bin but it is still not on PATH ahead of the placeholder."
+  log "Terraform installed: $(terraform version | head -1)"
+}
+
 # Not `command -v terraform`: Cloud Shell ships a shim of that name whose only
 # job is to print installation instructions, and it satisfies `command -v`
 # perfectly well. Ask for a version banner instead, which only the real binary
 # produces — otherwise the run continues and silently does nothing.
 if ! terraform version 2>/dev/null | grep -q '^Terraform v'; then
-  die "terraform is not installed, or is the Cloud Shell placeholder.
+  # ~/bin may already hold it from a previous run without being on PATH yet.
+  export PATH="${HOME}/bin:${PATH}"
+fi
 
-       Cloud Shell does not ship Terraform, and an apt install does not survive
-       the session. Install it under \$HOME, which does:
-
-         TF=1.9.8
-         mkdir -p ~/bin
-         curl -fsSL \"https://releases.hashicorp.com/terraform/\${TF}/terraform_\${TF}_linux_amd64.zip\" -o /tmp/tf.zip
-         unzip -oq /tmp/tf.zip -d ~/bin && chmod +x ~/bin/terraform
-         grep -q 'HOME/bin' ~/.bashrc || echo 'export PATH=\"\$HOME/bin:\$PATH\"' >> ~/.bashrc
-         export PATH=\"\$HOME/bin:\$PATH\"
-
-       Then re-run this script."
+if ! terraform version 2>/dev/null | grep -q '^Terraform v'; then
+  warn "Terraform is not installed (Cloud Shell ships only a placeholder)."
+  if [ -t 0 ]; then
+    read -r -p "       Install Terraform ${TERRAFORM_VERSION} into ~/bin now? [Y/n] " reply
+    case "$reply" in
+      ''|y|Y) install_terraform ;;
+      *) die "Terraform is required. Install it and re-run." ;;
+    esac
+  else
+    die "Terraform is required, and this is not an interactive shell so it cannot be installed here."
+  fi
 fi
 
 VAR_FILE="envs/${ENV_NAME}.tfvars"
@@ -73,7 +107,7 @@ fi
 # active gcloud project is not the one this environment targets.
 ACTIVE_PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
 if [ -n "$ACTIVE_PROJECT" ] && [ "$ACTIVE_PROJECT" != "(unset)" ] && [ "$ACTIVE_PROJECT" != "$PROJECT_ID" ]; then
-  printf '\033[1;33m warn\033[0m %s\n' "gcloud is on '${ACTIVE_PROJECT}' but ${VAR_FILE} targets '${PROJECT_ID}'." >&2
+  warn "gcloud is on '${ACTIVE_PROJECT}' but ${VAR_FILE} targets '${PROJECT_ID}'."
   printf '       %s\n' "Terraform will use '${PROJECT_ID}'. Fix the tfvars, or set PROJECT_ID=... to override." >&2
   if [ "$ACTION" = "apply" ] || [ "$ACTION" = "destroy" ]; then
     read -r -p "       Continue with '${PROJECT_ID}'? [y/N] " reply
