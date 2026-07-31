@@ -40,8 +40,27 @@ PROJECT_ID="${PROJECT_ID:-$(sed -n 's/^project_id[[:space:]]*=[[:space:]]*"\([^"
 [ -n "$PROJECT_ID" ] \
   || die "No project_id in ${VAR_FILE}, and PROJECT_ID is unset."
 
-gcloud auth application-default print-access-token >/dev/null 2>&1 \
-  || die "Terraform needs Application Default Credentials. Run: gcloud auth application-default login"
+if ! gcloud auth application-default print-access-token >/dev/null 2>&1; then
+  # Cloud Shell has no ADC file — it serves credentials from the metadata
+  # server, which the Terraform provider uses happily. Refusing to run there
+  # would be a false alarm.
+  if [ -z "${CLOUD_SHELL:-}" ] && [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+    die "Terraform needs Application Default Credentials. Run: gcloud auth application-default login"
+  fi
+fi
+
+# Deploying into the wrong project is tedious to undo — a Cloud SQL instance
+# name cannot be reused for about a week after deletion. Say something when the
+# active gcloud project is not the one this environment targets.
+ACTIVE_PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
+if [ -n "$ACTIVE_PROJECT" ] && [ "$ACTIVE_PROJECT" != "(unset)" ] && [ "$ACTIVE_PROJECT" != "$PROJECT_ID" ]; then
+  printf '\033[1;33m warn\033[0m %s\n' "gcloud is on '${ACTIVE_PROJECT}' but ${VAR_FILE} targets '${PROJECT_ID}'." >&2
+  printf '       %s\n' "Terraform will use '${PROJECT_ID}'. Fix the tfvars, or set PROJECT_ID=... to override." >&2
+  if [ "$ACTION" = "apply" ] || [ "$ACTION" = "destroy" ]; then
+    read -r -p "       Continue with '${PROJECT_ID}'? [y/N] " reply
+    [ "$reply" = "y" ] || [ "$reply" = "Y" ] || die "Aborted."
+  fi
+fi
 
 STATE_BUCKET="${PROJECT_ID}-parentix-tfstate"
 

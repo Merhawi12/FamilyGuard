@@ -47,6 +47,24 @@ gcloud config set project parentix-504103
 Terraform ≥ 1.6, the gcloud CLI, and Docker for image builds. Billing must be
 enabled on the project — `terraform apply` enables the ~16 APIs it needs itself.
 
+### Or use Cloud Shell
+
+[Cloud Shell](https://shell.cloud.google.com) already has gcloud, Terraform,
+Docker, git and Node, and is already authenticated — no local install, and no
+`gcloud auth application-default login`, because credentials come from the
+metadata server.
+
+```bash
+git clone https://github.com/Merhawi12/FamilyGuard.git
+cd FamilyGuard && git checkout restructure/three-apps-aws
+./infrastructure/gcp/deploy.sh dev plan
+```
+
+Two things to know: the home directory persists but anything outside it is wiped
+between sessions, and a session times out after about an hour idle. A long
+`apply` is fine; walking away mid-apply is not, because an interrupted run can
+leave state and reality out of step. Re-running `apply` reconciles it.
+
 ## Deploying
 
 ```bash
