@@ -3,7 +3,7 @@
 #
 #   PROJECT_ID=<project> ./deploy.sh dev plan
 
-project_id = "parentix-504103"
+project_id = "parentix-4be0d"
 env_name   = "dev"
 region     = "us-central1"
 

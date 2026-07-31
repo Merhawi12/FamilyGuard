@@ -19,7 +19,7 @@ trades resilience for about a fifth of the cost.
 ```bash
 gcloud auth login
 gcloud auth application-default login     # Terraform reads these separately
-gcloud config set project parentix-504103
+gcloud config set project parentix-4be0d
 ```
 
 Billing must be enabled on the project. Terraform enables the APIs it needs
@@ -65,11 +65,11 @@ a window where the old hostnames stop resolving. Cheap to get right up front.
 ./infrastructure/gcp/deploy.sh dev apply
 ```
 
-The project (`parentix-504103`) comes from `envs/<env>.tfvars`, so it cannot
+The project (`parentix-4be0d`) comes from `envs/<env>.tfvars`, so it cannot
 drift with whatever `gcloud config` happens to be set to. Override with
 `PROJECT_ID=...` to target a scratch project.
 
-State goes to `gs://parentix-504103-parentix-tfstate`, created on first run with
+State goes to `gs://parentix-4be0d-parentix-tfstate`, created on first run with
 versioning enabled. Each environment is a Terraform workspace, so `dev` and
 `prod` never share state.
 

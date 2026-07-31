@@ -41,7 +41,7 @@ billing is unchanged apart from the webhook URL.
 ```bash
 gcloud auth login
 gcloud auth application-default login     # Terraform reads these
-gcloud config set project parentix-504103
+gcloud config set project parentix-4be0d
 ```
 
 Terraform ≥ 1.6, the gcloud CLI, and Docker for image builds. Billing must be
@@ -72,9 +72,9 @@ leave state and reality out of step. Re-running `apply` reconciles it.
 ./deploy.sh dev apply
 ```
 
-The project (`parentix-504103`) is recorded in `envs/<env>.tfvars`; set
+The project (`parentix-4be0d`) is recorded in `envs/<env>.tfvars`; set
 `PROJECT_ID=...` only to override it. State goes to
-`gs://parentix-504103-parentix-tfstate`, created on first run with versioning
+`gs://parentix-4be0d-parentix-tfstate`, created on first run with versioning
 on. Environments are Terraform workspaces, so `dev` and `prod` never
 share state.
 

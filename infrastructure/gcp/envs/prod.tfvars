@@ -6,7 +6,7 @@
 # certificate and the URL map, which means a window where the old hostnames stop
 # resolving — cheap to get right up front, disruptive to change afterwards.
 
-project_id = "parentix-504103"
+project_id = "parentix-4be0d"
 env_name   = "prod"
 region     = "us-central1"
 
