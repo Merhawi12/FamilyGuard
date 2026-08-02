@@ -91,22 +91,23 @@ resource "google_monitoring_alert_policy" "api_down" {
         "metric.label.check_id=\"${google_monitoring_uptime_check_config.api[0].uptime_check_id}\"",
       ])
 
-      comparison = "COMPARISON_LT"
-      # Checks run from several geographic probes. Requiring the fraction of
-      # passing probes to drop below one keeps a single unhealthy region from
-      # paging, while a genuine outage takes all of them down together.
+      # check_passed is one BOOL stream per probe location, and the aggregation
+      # has to keep it boolean: ALIGN_FRACTION_TRUE yields a DOUBLE, which the
+      # count reducers reject outright ("The reducer cannot be applied to
+      # metrics with value type DOUBLE"). ALIGN_NEXT_OLDER preserves the type,
+      # and REDUCE_COUNT_FALSE then counts the locations reporting a failure.
+      #
+      # Firing above one failing location keeps a single unhealthy region quiet,
+      # while a real outage fails every probe at once and trips it.
+      comparison      = "COMPARISON_GT"
       threshold_value = 1
       duration        = "300s"
 
       aggregations {
         alignment_period     = "300s"
-        per_series_aligner   = "ALIGN_FRACTION_TRUE"
-        cross_series_reducer = "REDUCE_COUNT_TRUE"
+        per_series_aligner   = "ALIGN_NEXT_OLDER"
+        cross_series_reducer = "REDUCE_COUNT_FALSE"
         group_by_fields      = ["resource.label.host"]
-      }
-
-      trigger {
-        count = 1
       }
     }
   }
@@ -160,9 +161,15 @@ resource "google_monitoring_alert_policy" "api_error_rate" {
       threshold_value = 0.5
       duration        = "300s"
 
+      # Summed across revisions. Without the reducer each revision is judged on
+      # its own, so a rollout splitting traffic in half could hide a fault that
+      # the service as a whole is plainly showing. ALIGN_RATE yields a DOUBLE,
+      # which REDUCE_SUM accepts.
       aggregations {
-        alignment_period   = "60s"
-        per_series_aligner = "ALIGN_RATE"
+        alignment_period     = "60s"
+        per_series_aligner   = "ALIGN_RATE"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["resource.label.service_name"]
       }
     }
   }

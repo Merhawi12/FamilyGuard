@@ -33,10 +33,12 @@ resource "google_compute_backend_service" "api" {
   protocol              = "HTTPS"
   load_balancing_scheme = "EXTERNAL_MANAGED"
 
-  # Long enough for a Socket.IO connection to live. This is the load balancer's
-  # own limit and is separate from the Cloud Run request timeout — the shorter
-  # of the two wins, so both are set to an hour.
-  timeout_sec = 3600
+  # No timeout_sec here on purpose. A backend service fronting a serverless NEG
+  # rejects the field outright — "Timeout sec is not supported for a backend
+  # service with Serverless network endpoint groups" — because the load balancer
+  # does not impose its own limit on this path. What a Socket.IO connection
+  # actually lives under is the Cloud Run request timeout, set to 3600s in
+  # run.tf; that is the only timeout in play.
 
   backend {
     group = google_compute_region_network_endpoint_group.api[0].id
