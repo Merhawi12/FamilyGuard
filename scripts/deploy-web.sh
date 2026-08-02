@@ -21,6 +21,29 @@ select_workspace
 TARGET="${1:-all}"
 URL_MAP="$(terraform -chdir="$TF_DIR" output -raw url_map 2>/dev/null || true)"
 
+# The Google Maps browser key is baked into the bundle at build time, so it has
+# to be present here or the Location page ships with its map permanently
+# disabled — a silent downgrade, since the page still renders and only shows a
+# "Map unavailable" placeholder.
+#
+# It is read from Secret Manager when it exists there, so a release does not
+# depend on whoever runs it having the right variable exported. This is a
+# browser key: it is public the moment the bundle ships, and is secured by
+# HTTP-referrer restrictions in the Cloud console, not by being hidden.
+MAPS_SECRET="parentix-${ENV_NAME}-google-maps-key"
+if [ -z "${VITE_GOOGLE_MAPS_KEY:-}" ]; then
+  VITE_GOOGLE_MAPS_KEY="$(gcloud secrets versions access latest \
+    --secret="$MAPS_SECRET" --project "$PROJECT_ID" 2>/dev/null || true)"
+fi
+# A blank placeholder version reads as a single space.
+VITE_GOOGLE_MAPS_KEY="$(printf '%s' "${VITE_GOOGLE_MAPS_KEY:-}" | tr -d '[:space:]')"
+export VITE_GOOGLE_MAPS_KEY
+
+if [ -z "$VITE_GOOGLE_MAPS_KEY" ]; then
+  warn "No Google Maps key — the Location page will show 'Map unavailable'."
+  warn "Set one with: printf 'AIza…' | gcloud secrets versions add ${MAPS_SECRET} --data-file=-"
+fi
+
 publish() {
   local build_script="$1" app_dir="$2" bucket="$3" label="$4"
 
@@ -29,6 +52,7 @@ publish() {
   # empty. VITE_ADMIN_URL is a link the family app shows to staff.
   VITE_API_URL="" \
   VITE_ADMIN_URL="$(tf_output admin_url)" \
+  VITE_GOOGLE_MAPS_KEY="${VITE_GOOGLE_MAPS_KEY}" \
     npm --prefix "${REPO_ROOT}" run "build:${build_script}"
 
   local dist="${REPO_ROOT}/apps/${app_dir}/dist"

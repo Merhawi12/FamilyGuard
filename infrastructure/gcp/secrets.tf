@@ -25,6 +25,12 @@ locals {
     "smtp-host",
     "smtp-user",
     "smtp-pass",
+    # Read by scripts/deploy-web.sh and compiled into the Family App bundle.
+    # Unlike the rest of this list it is not confidential — a Maps browser key
+    # ships in public JavaScript by design and is protected by HTTP-referrer
+    # restrictions, not secrecy. It lives here so a release picks it up
+    # automatically instead of depending on whoever runs the deploy.
+    "google-maps-key",
   ]
 }
 
