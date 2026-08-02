@@ -30,6 +30,52 @@ jobs:
       # and Socket.IO, which the in-process suite cannot cover.
       - run: npm run test:e2e
 
+  # The suite above runs on in-memory SQLite, which is fast and needs no
+  # services but is not the engine production uses. The two disagree silently:
+  # a `json` column has no equality operator in Postgres and is plain text in
+  # SQLite, and Postgres resolves operators when it parses a statement, so an
+  # incompatibility fails even against an empty table. Since the API migrates
+  # itself at boot, that class of bug does not surface as a failing test — it
+  # surfaces as a Cloud Run revision that never becomes healthy.
+  api-postgres:
+    name: API tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: parentix_test
+          POSTGRES_USER: parentix
+          POSTGRES_PASSWORD: parentix_ci
+        ports:
+          - 5432:5432
+        # Without this the job races the container: the port is published before
+        # Postgres is ready to accept connections.
+        options: >-
+          --health-cmd "pg_isready -U parentix"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_DATABASE_URL: postgresql://parentix:parentix_ci@127.0.0.1:5432/parentix_test
+      E2E_DATABASE_URL: postgresql://parentix:parentix_ci@127.0.0.1:5432/parentix_test
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: services/api/package-lock.json
+      - run: npm ci
+      - run: npm run test:pg
+      - run: npm run test:e2e
+
   web:
     name: Web builds
     runs-on: ubuntu-latest

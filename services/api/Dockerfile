@@ -12,8 +12,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 # ── Runtime stage ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS runtime
 
-# Signal forwarding: without an init, SIGTERM from ECS never reaches node and
-# the task is SIGKILLed after the stop timeout instead of shutting down cleanly.
+# Signal forwarding: without an init, the SIGTERM Cloud Run sends never reaches
+# node as PID 1's child, and the instance is SIGKILLed after the grace period
+# instead of draining its connections and closing the database pool.
 RUN apk add --no-cache tini wget
 
 ENV NODE_ENV=production \

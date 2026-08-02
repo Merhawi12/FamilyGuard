@@ -27,6 +27,22 @@ itself, which takes a few minutes on the first apply.
 
 All commands take `ENV_NAME` (`dev` or `prod`) and default to `prod`.
 
+### Before you deploy
+
+Run the test suite against PostgreSQL, not just the default SQLite:
+
+```bash
+docker compose up -d postgres
+npm --prefix services/api run test:pg   # TEST_DATABASE_URL=postgresql://…
+```
+
+The API migrates itself at boot, so a statement Postgres rejects does not
+produce a failed test — it produces a Cloud Run revision that never becomes
+healthy, while the previous one keeps serving and the deploy looks merely slow.
+SQLite accepts several things Cloud SQL will not, and Postgres rejects them when
+it parses the statement, so an empty table is no protection. This run is what
+separates the two.
+
 ---
 
 ## 1. One-time setup

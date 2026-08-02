@@ -80,12 +80,36 @@ password-reset links are written to the API log instead.
 | --------------------------- | ------------------------------------------------- |
 | `npm run build`             | Production build of both web apps                 |
 | `npm run lint`              | ESLint over both web apps, shared, and the API    |
-| `npm test`                  | API test suite (Jest + supertest)                 |
+| `npm test`                  | API test suite (Jest + supertest), on in-memory SQLite |
+| `npm run test:pg`           | The same suite against PostgreSQL — see below     |
 | `npm run test:e2e`          | Boots a real server and walks the full workflow   |
 | `npm run infra:plan`        | Terraform plan for `$ENV_NAME` (default `dev`)     |
 | `npm run infra:deploy`      | Terraform apply for `$ENV_NAME`                   |
 | `npm run infra:output`      | Show the Terraform outputs                        |
 | `npm --prefix services/api run migrate` | Apply pending database migrations     |
+
+### Testing against PostgreSQL
+
+The default suite runs on in-memory SQLite so it needs no services, but SQLite
+and PostgreSQL are not interchangeable and the differences are silent — a `json`
+column has no equality operator in Postgres and is plain text in SQLite, and
+Postgres resolves operators when it parses a statement, so an incompatibility
+fails even against an empty table. A green SQLite run is therefore not evidence
+that Cloud SQL will accept the same SQL.
+
+Run both before anything reaches production:
+
+```bash
+docker compose up -d postgres     # or any throwaway Postgres
+
+npm --prefix services/api run test:pg \
+  # TEST_DATABASE_URL=postgresql://parentix:parentix_secret@127.0.0.1:5432/parentix
+
+E2E_DATABASE_URL=postgresql://parentix:parentix_secret@127.0.0.1:5432/parentix \
+  npm run test:e2e
+```
+
+Both wipe and recreate the schema, so point them at a throwaway database.
 
 ## Deployment
 
