@@ -96,9 +96,32 @@ gcloud run deploy "$SERVICE" \
   --quiet
 
 API_URL="$(tf_output api_url)"
+RUN_URL="$(tf_output cloud_run_url)"
+
+# Health is judged on the service's own URL, never on the custom domain.
+#
+# api_url is the custom hostname whenever one is configured, and that hostname
+# cannot answer until the DNS records exist and the managed certificate has
+# issued — which is minutes to an hour after the first apply, and always after
+# this first deploy. Checking it here reported a perfectly good rollout as a
+# failure ("Could not resolve host"), which is both wrong and alarming.
+#
+# The .run.app URL is live the moment the revision is serving, so it is the
+# honest test of whether this deploy worked.
 log "Verifying health"
-if curl -fsS --max-time 30 "${API_URL}/api/health" >/dev/null; then
-  log "API deployed: ${API_URL}"
+if curl -fsS --max-time 30 "${RUN_URL}/api/health" >/dev/null; then
+  log "API deployed and healthy: ${RUN_URL}"
 else
-  die "Deployed, but ${API_URL}/api/health did not answer. Check: gcloud run services logs read ${SERVICE} --region ${REGION}"
+  die "Deployed, but ${RUN_URL}/api/health did not answer. The revision is not serving — migrations run at container start, so check: gcloud run services logs read ${SERVICE} --region ${REGION}"
+fi
+
+# The custom domain is reported separately, and never fatally: it is a DNS and
+# certificate question, not a statement about the code that was just deployed.
+if [ "$API_URL" != "$RUN_URL" ]; then
+  if curl -fsS --max-time 30 "${API_URL}/api/health" >/dev/null 2>&1; then
+    log "Also answering on ${API_URL}"
+  else
+    warn "${API_URL} does not answer yet — DNS or the managed certificate is still pending."
+    warn "The revision itself is healthy. Check: gcloud compute ssl-certificates describe ${ENV_NAME:+parentix-${ENV_NAME}-cert} --global"
+  fi
 fi
