@@ -127,13 +127,18 @@ resource "google_cloud_run_v2_service" "api" {
         value = var.redis_enabled ? "redis://:${google_redis_instance.main[0].auth_string}@${google_redis_instance.main[0].host}:${google_redis_instance.main[0].port}" : ""
       }
 
+      # Without a domain the two web apps are served straight from their buckets,
+      # so the browser origin is storage.googleapis.com for both. Naming it
+      # explicitly matters: the API withholds its localhost CORS defaults in
+      # production, so an empty value here would leave a deployed service with no
+      # allowed origins and it would refuse to start.
       env {
         name  = "CLIENT_URL"
-        value = local.use_domain ? "https://${local.app_host}" : ""
+        value = local.use_domain ? "https://${local.app_host}" : "https://storage.googleapis.com"
       }
       env {
         name  = "ADMIN_URL"
-        value = local.use_domain ? "https://${local.admin_host}" : ""
+        value = local.use_domain ? "https://${local.admin_host}" : "https://storage.googleapis.com"
       }
 
       env {

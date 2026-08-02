@@ -24,11 +24,25 @@ const list = (value) =>
  * Every browser origin allowed to call the API. The Family App and Admin
  * Dashboard are separate deployments, so both must be listed; CORS_ORIGINS can
  * add more (staging previews, custom domains) without a code change.
+ *
+ * The localhost defaults are for `npm run dev` only and are withheld in
+ * production for two reasons: a deployed service should never accept
+ * credentialed requests from a page on somebody's laptop, and — less obviously —
+ * a default here would make the CLIENT_URL check in assertProductionConfig
+ * unreachable, since the list could never come out empty. A production boot
+ * that forgot CLIENT_URL would then quietly serve with localhost origins
+ * instead of failing, which is the exact outcome that check exists to prevent.
  */
+const devOrigin = (fallback) => (isProduction ? '' : fallback);
+
+// Deduplicated: without a custom domain both apps are served from the same
+// bucket host, so the same origin arrives twice.
 const corsOrigins = [
-  ...list(process.env.CLIENT_URL || 'http://localhost:3000'),
-  ...list(process.env.ADMIN_URL || 'http://localhost:3001'),
-  ...list(process.env.CORS_ORIGINS),
+  ...new Set([
+    ...list(process.env.CLIENT_URL || devOrigin('http://localhost:3000')),
+    ...list(process.env.ADMIN_URL || devOrigin('http://localhost:3001')),
+    ...list(process.env.CORS_ORIGINS),
+  ]),
 ];
 
 /**
