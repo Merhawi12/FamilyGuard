@@ -26,6 +26,15 @@ require_gcloud_auth() {
     || die "No usable Google Cloud credentials. Run 'gcloud auth login' (and 'gcloud auth application-default login' for Terraform)."
 }
 
+# The web builds run vite out of the workspace root's node_modules. On a fresh
+# clone that directory does not exist, and the failure surfaces several npm
+# frames deep as `sh: line 1: vite: command not found` — which reads like a
+# broken toolchain rather than a missing install.
+require_web_dependencies() {
+  [ -x "${REPO_ROOT}/node_modules/.bin/vite" ] && return 0
+  die "Web dependencies are not installed. Run 'npm ci' in ${REPO_ROOT} first."
+}
+
 # Reads a Terraform output. Outputs are the single source of truth for resource
 # names, so nothing here has to guess at or duplicate a naming convention.
 #

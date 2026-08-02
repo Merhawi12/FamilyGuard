@@ -13,6 +13,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 require_tool npm
 require_tool gsutil
+require_web_dependencies
 require_gcloud_auth
 require_project
 select_workspace
