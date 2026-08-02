@@ -1,19 +1,10 @@
 import { useEffect, useState } from 'react';
-import { alerts as alertsApi, useSocket } from '@parentix/shared';
+import { alerts as alertsApi, alertLabel, useSocket } from '@parentix/shared';
 
 const SEVERITY_CONFIG = {
   high:   { dot: 'bg-red-500',    badge: 'bg-red-100 text-red-700',    icon: '🔴', label: 'High' },
   medium: { dot: 'bg-yellow-500', badge: 'bg-yellow-100 text-yellow-700', icon: '🟡', label: 'Medium' },
   low:    { dot: 'bg-green-500',  badge: 'bg-green-100 text-green-700', icon: '🟢', label: 'Low' },
-};
-
-const TYPE_LABELS = {
-  entered_safe_zone: 'Entered Safe Zone',
-  left_safe_zone:    'Left Safe Zone',
-  screen_time_limit: 'Screen Time Limit',
-  blocked_app:       'Blocked App',
-  blocked_website:   'Blocked Website',
-  location_update:   'Location Update',
 };
 
 export default function Alerts() {
@@ -128,7 +119,7 @@ export default function Alerts() {
                     </span>
                     {alert.type && (
                       <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
-                        {TYPE_LABELS[alert.type] || alert.type}
+                        {alertLabel(alert.type)}
                       </span>
                     )}
                   </div>
