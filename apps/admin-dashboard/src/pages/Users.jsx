@@ -27,7 +27,11 @@ function Modal({ title, onClose, children }) {
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-semibold text-lg">{title}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">×</button>
+          {/* The glyph is decorative, so the button needs a name of its own —
+              otherwise it is announced only as "button". */}
+          <button type="button" onClick={onClose} aria-label="Close dialog" className="text-gray-400 hover:text-gray-600">
+            <span aria-hidden="true">×</span>
+          </button>
         </div>
         {children}
       </div>

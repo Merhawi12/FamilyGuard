@@ -222,6 +222,10 @@ export default function Login() {
                     id={`code-${idx}`}
                     type="text"
                     inputMode="numeric"
+                    // An id alone gives no accessible name — without this a
+                    // screen reader announces six unlabelled edit fields.
+                    aria-label={`Verification code, digit ${idx + 1} of ${code.length}`}
+                    autoComplete={idx === 0 ? 'one-time-code' : 'off'}
                     maxLength={1}
                     value={digit}
                     onChange={(e) => handleCodeInput(e.target.value, idx)}
@@ -270,9 +274,13 @@ export default function Login() {
               </p>
             ) : (
               <form onSubmit={handleForgotPassword} className="space-y-4">
+                {/* aria-label, not placeholder alone: a placeholder disappears as
+                    soon as someone types, so it cannot serve as the field's name. */}
                 <input
                   className="input"
                   type="email"
+                  aria-label="Email address"
+                  autoComplete="email"
                   placeholder="Email address"
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
@@ -312,6 +320,8 @@ export default function Login() {
               {tab === 'register' && (
                 <input
                   className="input"
+                  aria-label="Full name"
+                  autoComplete="name"
                   placeholder="Full name"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -321,14 +331,20 @@ export default function Login() {
               <input
                 className="input"
                 type="email"
+                aria-label="Email address"
+                autoComplete="email"
                 placeholder="Email address"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
                 required
               />
+              {/* autoComplete tells a password manager which field it is looking
+                  at, and differs between signing in and creating an account. */}
               <input
                 className="input"
                 type="password"
+                aria-label="Password"
+                autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
                 placeholder="Password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}

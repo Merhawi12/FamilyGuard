@@ -51,6 +51,8 @@ export default function ResetPassword() {
             <input
               className="input"
               type="password"
+              aria-label="New password"
+              autoComplete="new-password"
               placeholder="New password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -59,6 +61,8 @@ export default function ResetPassword() {
             <input
               className="input"
               type="password"
+              aria-label="Confirm new password"
+              autoComplete="new-password"
               placeholder="Confirm new password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
