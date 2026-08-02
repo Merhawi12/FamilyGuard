@@ -35,7 +35,12 @@ const withMigrationLock = async (work) => {
  * missing tables from the models, then applies pending migrations.
  */
 const initializeDatabase = async ({ migrate = true } = {}) => {
+  // Bracketing authenticate() with logs is what makes a stalled connection
+  // distinguishable from a crash: "Connecting" with no "connected" after it
+  // says the database is unreachable, not that the process failed to boot.
+  if (!env.isTest) logger.info('Connecting to the database');
   await sequelize.authenticate();
+  if (!env.isTest) logger.info('Database connection established');
 
   await withMigrationLock(async () => {
     await sequelize.sync();

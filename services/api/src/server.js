@@ -17,6 +17,20 @@ process.on('uncaughtException', (err) => {
 });
 
 const start = async () => {
+  // First line out of the process, before anything that can block.
+  //
+  // Everything up to listen() used to be silent, so a stalled database
+  // connection looked identical to a container that never ran: no logs, no
+  // port, and a platform timeout with nothing to go on. This line proves Node
+  // started and shows what it is about to connect to.
+  logger.info('Starting Parentix API', {
+    env: env.NODE_ENV,
+    node: process.version,
+    port: env.port,
+    db: env.db.socketPath ? `socket ${env.db.socketPath}` : env.db.usePostgres ? 'postgres (tcp)' : 'sqlite',
+    redis: env.redisUrl ? 'enabled' : 'disabled',
+  });
+
   assertProductionConfig();
 
   await initializeDatabase();

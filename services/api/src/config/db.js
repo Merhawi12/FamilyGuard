@@ -14,6 +14,17 @@ const common = {
 };
 
 /**
+ * Fail rather than hang when the server does not answer.
+ *
+ * Without a bound, a socket that exists but never completes a handshake — a
+ * Cloud SQL instance still starting, say — leaves the boot blocked with nothing
+ * logged, and the platform eventually kills the container for not opening its
+ * port. An error after ten seconds is far easier to act on than an indefinite
+ * stall, and Sequelize still retries three times on top of this.
+ */
+const CONNECT_TIMEOUT_MS = 10000;
+
+/**
  * Cloud SQL over the Unix socket Cloud Run mounts at /cloudsql/<connection-name>.
  * pg selects socket mode when `host` is a filesystem path, so the socket goes in
  * `host` and `port` is left unset — passing a port here makes pg attempt TCP to
@@ -25,7 +36,10 @@ const socketConfig = () => ({
   database: env.db.name,
   username: env.db.user,
   password: env.db.password,
-  dialectOptions: { host: env.db.socketPath },
+  dialectOptions: {
+    host: env.db.socketPath,
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+  },
 });
 
 /**
@@ -37,9 +51,12 @@ const socketConfig = () => ({
  */
 const urlConfig = () => ({
   ...common,
-  dialectOptions: env.db.ssl
-    ? { ssl: { require: true, rejectUnauthorized: env.db.sslRejectUnauthorized } }
-    : {},
+  dialectOptions: {
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    ...(env.db.ssl
+      ? { ssl: { require: true, rejectUnauthorized: env.db.sslRejectUnauthorized } }
+      : {}),
+  },
 });
 
 let sequelize;
