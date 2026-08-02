@@ -6,7 +6,14 @@ process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-jwt-secret';
 process.env.FIELD_ENCRYPTION_KEY = 'a'.repeat(64); // 32 bytes as 64 hex chars
 process.env.DB_PATH = ':memory:';
-process.env.DATABASE_URL = '';        // force the SQLite branch in config/db
+
+// SQLite by default so the suite needs no external service. Point
+// TEST_DATABASE_URL at a throwaway Postgres to run the very same tests against
+// the engine production actually uses — SQLite accepts things Postgres rejects
+// (json has no `=` operator there, for one), so a green SQLite run is not by
+// itself evidence that Cloud SQL will accept the same SQL. See `npm run test:pg`.
+process.env.DATABASE_URL = process.env.TEST_DATABASE_URL || '';
+if (process.env.TEST_DATABASE_URL) process.env.DB_SSL = 'false';
 process.env.SMTP_HOST = '';           // email utils no-op without a host
 process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'; // makes the (mocked) Stripe client non-null
 process.env.CLIENT_URL = 'http://localhost:3000';

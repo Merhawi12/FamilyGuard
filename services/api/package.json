@@ -14,6 +14,7 @@
     "migrate:down": "node scripts/migrate.js down",
     "migrate:status": "node scripts/migrate.js status",
     "test": "jest --runInBand",
+    "test:pg": "node scripts/test-postgres.js",
     "test:watch": "jest --runInBand --watch",
     "test:coverage": "jest --runInBand --coverage",
     "test:e2e": "node scripts/e2e.mjs"

@@ -85,6 +85,26 @@ const connectSocket = (token) =>
 // ── Boot ─────────────────────────────────────────────────────────────────────
 const dataDir = mkdtempSync(path.join(tmpdir(), 'parentix-e2e-'));
 
+/**
+ * SQLite by default, so this runs anywhere with no setup. Set E2E_DATABASE_URL
+ * to a throwaway Postgres to walk the same workflows over the engine Cloud SQL
+ * actually runs — the two disagree on enough (json comparison, type coercion,
+ * identifier folding) that passing on one is not evidence about the other.
+ *
+ *   E2E_DATABASE_URL=postgresql://user:pass@127.0.0.1:5432/parentix_e2e \
+ *     npm run test:e2e
+ */
+const DATABASE_URL = process.env.E2E_DATABASE_URL || '';
+const dbEnv = {
+  DATABASE_URL,
+  DB_PATH: path.join(dataDir, 'e2e.sqlite'),
+  ...(DATABASE_URL ? { DB_SSL: 'false' } : {}),
+};
+
+if (DATABASE_URL) {
+  console.log(`Running against Postgres at ${DATABASE_URL.replace(/\/\/[^@]*@/, '//***@')}\n`);
+}
+
 const server = spawn(process.execPath, ['src/server.js'], {
   cwd: API_ROOT,
   env: {
@@ -92,8 +112,7 @@ const server = spawn(process.execPath, ['src/server.js'], {
     NODE_ENV: 'development',
     PORT: String(PORT),
     LOG_LEVEL: 'info',
-    DATABASE_URL: '',
-    DB_PATH: path.join(dataDir, 'e2e.sqlite'),
+    ...dbEnv,
     JWT_SECRET: 'e2e-secret-that-is-long-enough-for-tests',
     FIELD_ENCRYPTION_KEY: 'a'.repeat(64),
     CLIENT_URL: 'http://localhost:3000',
@@ -390,7 +409,7 @@ const updateUser = (email, updates) =>
       ],
       {
         cwd: API_ROOT,
-        env: { ...process.env, DATABASE_URL: '', DB_PATH: path.join(dataDir, 'e2e.sqlite'), NODE_ENV: 'development' },
+        env: { ...process.env, ...dbEnv, NODE_ENV: 'development' },
         stdio: 'inherit',
       }
     );
