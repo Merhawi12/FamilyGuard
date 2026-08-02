@@ -38,6 +38,32 @@ revision keeps serving. `/api/ready` returning 503 while `/api/health` is fine
 points at Cloud SQL or the service account's `roles/cloudsql.client` grant, not
 the application.
 
+## Alerting
+
+Logs and metrics flow to Cloud Logging and Cloud Monitoring with no
+configuration. What has to be asked for is somebody being *told* — that is
+`infrastructure/gcp/monitoring.tf`, and it is created only when `alert_email` is
+set in the environment's tfvars. Leave it empty and there is no notification
+channel and no policies, deliberately: a policy wired to no channel looks like
+coverage in the console and reaches nobody.
+
+| Policy                     | Fires when                                        | Severity |
+| -------------------------- | ------------------------------------------------- | -------- |
+| API unreachable            | The uptime check on `/api/health` fails from multiple probes for 5 min | CRITICAL |
+| API 5xx responses          | Server errors sustained above ~0.5/s for 5 min     | ERROR    |
+| Cloud SQL disk nearly full  | Disk above 85% for 5 min                          | WARNING  |
+| Cloud SQL CPU saturated    | CPU above 90% for 15 min                          | WARNING  |
+
+Each policy carries its own first-response notes in the alert body, so the mail
+says what to look at rather than only what broke.
+
+The uptime check needs a public hostname and so exists only when `domain` is
+set. In an environment without one, the other three policies still apply.
+
+The CPU threshold is fifteen minutes on purpose: a backup or a long migration
+can legitimately peg the instance, and paging for those is how people learn to
+ignore the alert.
+
 ## Secrets
 
 | Secret                 | Rotatable | Consequence of rotating                                |

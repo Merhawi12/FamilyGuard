@@ -48,6 +48,11 @@ redis_memory_size_gb = 1
 
 email_from = "Parentix <no-reply@parentix.ca>"
 
+# Where monitoring alerts go. Set this before the first production apply — an
+# unmonitored production service is one where the first report of an outage
+# comes from a customer. A role mailbox beats a personal one.
+alert_email = "merhawigu@gmail.com"
+
 labels = {
   cost-center = "production"
 }

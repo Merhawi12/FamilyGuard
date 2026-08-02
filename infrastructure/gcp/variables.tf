@@ -208,6 +208,22 @@ variable "admin_email" {
   default     = "merhawigu@gmail.com"
 }
 
+# ── Monitoring ───────────────────────────────────────────────────────────────
+
+variable "alert_email" {
+  description = <<-EOT
+    Receives monitoring alerts: API unreachable, sustained 5xx responses, and
+    Cloud SQL disk or CPU pressure. Empty disables alerting entirely.
+
+    Nothing is created without this, deliberately — an alert policy with no
+    notification channel shows up as coverage in the console and reaches
+    nobody. The uptime check additionally needs `domain` to be set, since it
+    probes a public hostname.
+  EOT
+  type        = string
+  default     = ""
+}
+
 # ── Labels ───────────────────────────────────────────────────────────────────
 
 variable "labels" {
