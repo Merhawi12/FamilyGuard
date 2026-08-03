@@ -10,20 +10,48 @@ export default function LinkScreen({ navigation }) {
   const handleLink = async () => {
     if (code.length !== 8) return Alert.alert('Invalid code', 'Enter the 8-character code from the parent app.');
     setLoading(true);
-    try {
-      const res = await deviceApi.confirmLink(code.toUpperCase());
-      const { device, deviceToken } = res.data;
 
+    // The request and the storage that follows it fail in different ways and
+    // must not share a catch. Confirming the code marks the device linked on
+    // the server, so once that call returns there is no such thing as "linking
+    // failed" — only "linked, but this device could not keep its credentials".
+    // Reporting both as one error hid a successful link behind a generic
+    // message, and the code cannot be reused to try again.
+    let res;
+    try {
+      res = await deviceApi.confirmLink(code.toUpperCase());
+    } catch (err) {
+      setLoading(false);
+      // No response at all means the request never completed — no internet, no
+      // DNS, or a TLS failure. Saying so beats a message about linking, which
+      // sends people looking at the code they just typed.
+      return Alert.alert(
+        'Error',
+        err.response?.data?.error ||
+          'Could not reach Parentix. Check this device\'s internet connection and try again.'
+      );
+    }
+
+    const { device, deviceToken } = res.data;
+
+    try {
       await SecureStore.setItemAsync('fg_device_token', deviceToken);
       await SecureStore.setItemAsync('fg_device_id', String(device.id));
       await SecureStore.setItemAsync('fg_child_id', String(device.childId));
-
-      navigation.replace('Permissions');
     } catch (err) {
-      Alert.alert('Error', err.response?.data?.error || 'Failed to link device');
-    } finally {
       setLoading(false);
+      // SecureStore is backed by the Android keystore, which is unavailable on
+      // some emulator images. The device is already linked at this point, so
+      // the only way forward is a fresh code.
+      return Alert.alert(
+        'Could not save credentials',
+        'This device linked successfully but could not store its credentials securely ' +
+          `(${err.message}). Remove the device in the parent app and link again.`
+      );
     }
+
+    setLoading(false);
+    navigation.replace('Permissions');
   };
 
   return (
