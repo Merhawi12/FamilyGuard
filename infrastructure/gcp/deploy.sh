@@ -93,12 +93,34 @@ PROJECT_ID="${PROJECT_ID:-$(sed -n 's/^project_id[[:space:]]*=[[:space:]]*"\([^"
 [ -n "$PROJECT_ID" ] \
   || die "No project_id in ${VAR_FILE}, and PROJECT_ID is unset."
 
+ADC_FIX="Terraform needs Application Default Credentials.
+       Run: gcloud auth application-default login
+       In Cloud Shell, reopening the tab often restores them on its own."
+
 if ! gcloud auth application-default print-access-token >/dev/null 2>&1; then
   # Cloud Shell has no ADC file — it serves credentials from the metadata
   # server, which the Terraform provider uses happily. Refusing to run there
   # would be a false alarm.
-  if [ -z "${CLOUD_SHELL:-}" ] && [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
-    die "Terraform needs Application Default Credentials. Run: gcloud auth application-default login"
+  #
+  # But those credentials expire when a session is idled or recycled, and the
+  # old check treated "in Cloud Shell" as proof they were fine. They are not
+  # always fine, and the failure then landed several steps later as
+  #
+  #   Error: Failed to get existing workspaces: querying Cloud Storage failed:
+  #   googleapi: Error 401: Invalid Credentials, authError
+  #
+  # which names neither the cause nor the fix. So ask the metadata server for a
+  # token — the same source the provider reads — and only continue if it
+  # answers.
+  if [ -n "${CLOUD_SHELL:-}" ]; then
+    if command -v curl >/dev/null 2>&1 &&
+      ! curl -sf -m 5 -H 'Metadata-Flavor: Google' \
+        'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+        >/dev/null 2>&1; then
+      die "$ADC_FIX"
+    fi
+  elif [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+    die "$ADC_FIX"
   fi
 fi
 
