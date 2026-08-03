@@ -18,13 +18,12 @@ api_subdomain   = "api"
 # Set true only if you delegate the domain's nameservers to Cloud DNS. Leave
 # false to keep DNS at your registrar and create three A records by hand.
 #
-# True since 2026-08-02: parentix.ca is delegated to Cloud DNS, so the zone and
-# the app/admin/api A records are created here rather than by hand at GoDaddy.
-# Checked first that the domain carried no MX and no TXT records — delegation
-# hands Google the whole domain, and anything not restated in dns.tf stops
-# resolving. If email or a verification record is ever added, it has to be added
-# to the zone, not to GoDaddy.
-manage_dns = true
+# Stays false: the A records were created at GoDaddy and app/admin/api all
+# resolve to the load balancer already. Delegating now would create a Cloud DNS
+# zone that answers nothing, because the domain's nameservers would still be
+# GoDaddy's — and switching them means up to 48 hours of propagation to reach
+# exactly the state that already works.
+manage_dns = false
 
 # At least one warm instance: a cold start on a real user's login is a bad first
 # impression, and a scaled-to-zero service drops every open websocket.
