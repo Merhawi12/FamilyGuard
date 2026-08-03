@@ -164,8 +164,17 @@ resource "google_compute_managed_ssl_certificate" "main" {
 
   name = "${local.prefix}-cert"
 
+  # The bare domain is included because it is what people type. The URL map's
+  # default_service is already the family bucket, so parentix.ca serves the
+  # marketing site without a host rule of its own — it only ever needed a
+  # certificate that covers it.
+  #
+  # Every name here must resolve to the load balancer before Google will issue:
+  # one unvalidated domain holds up the whole certificate, not just itself. So
+  # the apex A record has to exist first. Adding a name here also REPLACES the
+  # certificate and restarts provisioning for all of them.
   managed {
-    domains = [local.app_host, local.admin_host, local.api_host]
+    domains = [var.domain, local.app_host, local.admin_host, local.api_host]
   }
 
   # Google will not issue until each name resolves to the address below, so the
