@@ -91,6 +91,42 @@ jobs:
       - run: npm run lint
       - run: npm run build
 
+      # Firebase Hosting resolves a static file before any rewrite, so an
+      # index.html in the Family App's output would be served at `/` and the
+      # rewrite to the marketing page would never run. The bug is invisible in a
+      # build log and lands on the most visible URL on the site, so it is checked
+      # rather than trusted. apps/family-app/vite.config.js does the rename.
+      - name: Family App output is laid out for Firebase Hosting
+        run: |
+          dist=apps/family-app/dist
+          test -f "$dist/app.html"      || { echo "::error::$dist/app.html missing — SPA shell was not renamed"; exit 1; }
+          test ! -f "$dist/index.html"  || { echo "::error::$dist/index.html exists — it would win over the / rewrite"; exit 1; }
+          test -f "$dist/landing.html"  || { echo "::error::$dist/landing.html missing — / would fall through to the SPA"; exit 1; }
+          test -f apps/admin-dashboard/dist/index.html || { echo "::error::admin dist has no index.html"; exit 1; }
+
+  # A green build says the bundles compiled, not that a page renders. This is
+  # the only job that runs the front ends: it serves both `dist/` folders behind
+  # a proxy reproducing Firebase Hosting's static-then-rewrite resolution, then
+  # drives Chromium through sign-in, every dashboard and console route, and the
+  # console's own RBAC, failing on any console error, page exception or 4xx
+  # along the way.
+  browser:
+    name: Web runtime (Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      # The harness boots the real API, so its dependencies are needed too.
+      - run: npm ci --prefix services/api
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm run test:browser
+
   infrastructure:
     name: Terraform validate
     runs-on: ubuntu-latest

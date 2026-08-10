@@ -35,11 +35,29 @@ const buildSmtpTransport = () => {
 
   return async ({ to, subject, html, replyTo }) => {
     await smtp.sendMail({ from: env.email.from, to, subject, html, replyTo });
+    return true;
   };
 };
 
+/**
+ * Reports `false`, so that "not sent" is reported as "not sent".
+ *
+ * This used to resolve with no value, and `send` read any resolved call as
+ * delivered — so with no provider configured every caller that trusts the
+ * boolean was told its mail had gone out. `sendVerificationEmail` and
+ * `sendPasswordResetEmail` escaped it by checking `isEnabled()` first, but
+ * `sendWelcomeEmail`, `sendAlertEmail` and the admin notification all reported
+ * success for a message that was only ever written to a log. That is the same
+ * "a failed request rendered as good news" shape this codebase has hit
+ * repeatedly, and the fix is the same: make the unhappy path say so.
+ *
+ * A transport now returns whether it delivered, rather than signalling failure
+ * only by throwing — the log line below stays as the sole copy of the message,
+ * and the return value agrees with it instead of contradicting it.
+ */
 const buildNoopTransport = () => async ({ to, subject }) => {
   logger.info('Email suppressed (no provider configured)', { to, subject });
+  return false;
 };
 
 const getTransport = () => {
@@ -61,8 +79,8 @@ const isEnabled = () => env.email.provider === 'smtp' && !!env.email.smtp.host;
 const send = async ({ to, subject, html, replyTo }) => {
   if (!to) return false;
   try {
-    await getTransport()({ to, subject, html, replyTo });
-    return true;
+    // The transport's own answer, not merely "it did not throw".
+    return (await getTransport()({ to, subject, html, replyTo })) !== false;
   } catch (err) {
     logger.error('Email send failed', { to, subject, error: err.message });
     return false;

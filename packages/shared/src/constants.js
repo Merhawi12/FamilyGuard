@@ -97,9 +97,110 @@ export const hasPermission = (user, permission) => {
   return Array.isArray(user.permissions) && user.permissions.includes(permission);
 };
 
-export const PLANS = { FREE: 'free', PREMIUM: 'premium', FAMILY: 'family' };
+/**
+ * The pricing catalogue as the web apps see it.
+ *
+ * Mirrors `services/api/src/config/plans.js` — same keys, same order, same
+ * amounts — and `tests/sharedConstants.test.js` fails when they diverge. The
+ * price and the entitlements a customer is shown must be the ones the API
+ * charges and enforces; they lived in four places before and disagreed.
+ *
+ * `amountCents` is the billed amount. `features` is marketing copy for the
+ * pricing cards; what the API actually gates on is `featureKeys`.
+ */
+export const PLANS = { FREE: 'free', PREMIUM: 'premium' };
+
+export const PLAN_CATALOGUE = [
+  {
+    key: PLANS.FREE,
+    label: 'Free Plan',
+    amountCents: 0,
+    price: '$0',
+    period: '/ 7 days',
+    badge: '7 days only',
+    featureKeys: [],
+    maxDevices: 1,
+    features: [
+      'Basic screen time monitoring',
+      'Daily activity reports',
+      '1 child device',
+      'Basic parental controls',
+      'Email support',
+    ],
+    warning: 'Trial expires after 7 days',
+  },
+  {
+    key: PLANS.PREMIUM,
+    label: 'Premium Plan',
+    amountCents: 999,
+    price: '$9.99',
+    period: '/mo',
+    popular: true,
+    featureKeys: ['gps_tracking', 'geofencing', 'website_filtering', 'ai_safety'],
+    maxDevices: null,
+    features: [
+      'Everything in Free',
+      'Real-time GPS tracking',
+      'Geofencing alerts',
+      'App usage monitoring',
+      'Website filtering & blocking',
+      'Screen time scheduling',
+      'Unlimited child devices',
+      'AI-powered safety alerts',
+      'Social media monitoring',
+      'Cyberbullying detection',
+      'Advanced family reports',
+      'Instant emergency notifications',
+      'Priority support',
+    ],
+  },
+];
+
+export const PLAN_KEYS = PLAN_CATALOGUE.map((p) => p.key);
+
+/** Plans a customer can check out. Free is not one of them. */
+export const PAID_PLAN_KEYS = PLAN_CATALOGUE.filter((p) => p.amountCents > 0).map((p) => p.key);
+
+/** An account parked here is switched off; it is not a tier anyone buys. */
+export const SUSPENDED_PLAN = 'suspended';
+
+const PLAN_BY_KEY = Object.fromEntries(PLAN_CATALOGUE.map((p) => [p.key, p]));
+
+export const planLabel = (key) =>
+  (key === SUSPENDED_PLAN ? 'Suspended' : PLAN_BY_KEY[key]?.label) || key || 'Unknown';
+
+/** True for any tier that is billed — the test for "this account pays us". */
+export const isPaidPlan = (key) => PAID_PLAN_KEYS.includes(key);
 
 /** Human labels for the alert types the backend emits. */
+/**
+ * The content categories a filter rule can name.
+ *
+ * Mirrors `services/api/src/config/contentCategories.js` — labels and
+ * descriptions only; the domain lists behind them stay on the server, which is
+ * where a category is expanded into the names a device can block. Change both
+ * together; `sharedConstants.test.js` fails the build when they drift.
+ */
+export const CONTENT_CATEGORIES = [
+  { key: 'adult', label: 'Adult Content', description: 'Pornography, explicit imagery' },
+  { key: 'gambling', label: 'Gambling', description: 'Betting, casinos, lotteries' },
+  { key: 'social_media', label: 'Social Media', description: 'Facebook, Instagram, TikTok' },
+  { key: 'gaming', label: 'Gaming', description: 'Online games, gaming portals' },
+  { key: 'streaming', label: 'Streaming Media', description: 'Netflix, YouTube, Hulu' },
+  { key: 'file_sharing', label: 'File Sharing', description: 'Torrents, P2P networks' },
+];
+
+export const CONTENT_CATEGORY_KEYS = CONTENT_CATEGORIES.map((c) => c.key);
+
+/** Keys no longer offered, so a rule stored under one still reads. */
+export const LEGACY_CATEGORY_LABELS = {
+  violence: 'Violence',
+  custom: 'Custom',
+};
+
+export const categoryLabel = (key) =>
+  CONTENT_CATEGORIES.find((c) => c.key === key)?.label || LEGACY_CATEGORY_LABELS[key] || key;
+
 export const ALERT_LABELS = {
   left_safe_zone: 'Left Safe Zone',
   entered_safe_zone: 'Arrived at Safe Zone',

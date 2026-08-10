@@ -22,36 +22,35 @@ app.disable('x-powered-by');
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 /**
- * An origin is allowed when it is on the configured allowlist, or when it is
- * simply the host the request already arrived on.
+ * The allowlist is the whole of the policy.
  *
- * The second case is what makes the load-balanced deployment work: the web apps
- * and `/api/*` are served from the same hostname, so a browser POST carries
- * `Origin: https://app.parentix.ca` even though nothing is cross-origin. Treating
- * that as allowed means the API does not need to be redeployed for each new
- * hostname, and it grants nothing a same-origin request did not already have.
+ * The web apps and the API are separate origins in every deployed environment:
+ * Firebase Hosting serves parentix.ca, app.parentix.ca and admin.parentix.ca,
+ * Cloud Run serves api.parentix.ca. Every browser call is therefore genuinely
+ * cross-origin — there is no same-origin case left to fall back on — and a
+ * hostname the API has not been told about must fail loudly at the browser
+ * rather than work by accident. `env.corsOrigins` is built from CLIENT_URL,
+ * ADMIN_URL and CORS_ORIGINS; Terraform sets all three.
+ *
+ * A request with no Origin at all is a non-browser caller — the child app,
+ * Stripe's webhook, an uptime probe — which carries no ambient credentials for
+ * CORS to protect. Those are allowed and authenticated the usual way. Express
+ * and Socket.IO answer from this one function so a handshake and a REST call
+ * can never disagree about who is allowed in.
  */
-const isAllowedOrigin = (origin, req) => {
-  if (!origin) return true; // non-browser client, or a same-origin GET
-  const normalized = origin.replace(/\/$/, '');
-  if (env.corsOrigins.includes(normalized)) return true;
-
-  const host = req?.headers?.host;
-  return !!host && (normalized === `https://${host}` || normalized === `http://${host}`);
-};
+const isAllowedOrigin = (origin) =>
+  !origin || env.corsOrigins.includes(origin.replace(/\/$/, ''));
 
 const corsDelegate = (req, callback) => {
   const origin = req.headers?.origin;
-  if (isAllowedOrigin(origin, req)) return callback(null, { origin: origin || true, credentials: true });
+  if (isAllowedOrigin(origin)) return callback(null, { origin: origin || true, credentials: true });
   callback(null, { origin: false });
 };
 
 const io = new Server(httpServer, {
   cors: {
     origin(origin, callback) {
-      // Socket.IO's handshake carries no Express request, so only the
-      // configured allowlist applies here.
-      if (!origin || env.corsOrigins.includes(origin.replace(/\/$/, ''))) return callback(null, true);
+      if (isAllowedOrigin(origin)) return callback(null, true);
       callback(new Error(`Origin ${origin} is not allowed by CORS`));
     },
     credentials: true,
@@ -126,6 +125,8 @@ app.use('/api/contacts', require('./routes/contacts'));
 app.use('/api/contact', require('./routes/contactForm'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/uploads', require('./routes/uploads'));
+// Cloud Scheduler, not a browser — see routes/tasks.js.
+app.use('/api/tasks', require('./routes/tasks'));
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 

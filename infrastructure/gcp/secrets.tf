@@ -25,6 +25,26 @@ locals {
     "smtp-host",
     "smtp-user",
     "smtp-pass",
+    # Outbound SMS for phone sign-in codes. Without these the API reports phone
+    # sign-in as unavailable and the Family App hides the Phone tab, so the
+    # whole identifier is inert until real values are added — which is what it
+    # was, because these secrets did not exist and Cloud Run was never given
+    # TWILIO_* at all.
+    #
+    # Supply the account SID and auth token, then *either* a sending number or a
+    # Messaging Service SID; `isEnabled()` needs one of the two, not both.
+    "twilio-account-sid",
+    "twilio-auth-token",
+    "twilio-from-number",
+    "twilio-messaging-service-sid",
+    # Web Push signing keys for parent browser notifications. Supplied rather
+    # than generated because VAPID needs a P-256 keypair in raw base64url form,
+    # which Terraform cannot produce; generate the pair once with
+    # `node services/api/scripts/generate-vapid-keys.js` and add both as
+    # versions. Replacing them invalidates every existing browser subscription,
+    # so generate once and keep them.
+    "vapid-public-key",
+    "vapid-private-key",
     # Read by scripts/deploy-web.sh and compiled into the Family App bundle.
     # Unlike the rest of this list it is not confidential — a Maps browser key
     # ships in public JavaScript by design and is protected by HTTP-referrer

@@ -1,38 +1,159 @@
 /* Component classes shared by the Parentix web apps. Imported after Tailwind's
-   own layers by each app's entry stylesheet. */
+   own layers by each app's entry stylesheet.
+
+   These are the primitives every screen is built from. Keeping buttons, inputs,
+   cards, chips and switches here — rather than re-describing them with utility
+   strings on each page — is what stops six pages drifting into six slightly
+   different button heights, and it is why a phone-sized fix applied here lands
+   everywhere at once.
+
+   Sizing rule of thumb: anything a finger has to hit is at least 44px tall, and
+   text inside a form control is at least 16px on small screens (below that,
+   Safari zooms the page in when the field takes focus and never zooms back). */
 
 @layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    /* Anchors and in-page jumps should not slide under the sticky header. */
+    scroll-padding-top: 4.5rem;
+  }
+
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    @apply bg-gray-50 text-gray-900 antialiased font-sans;
+    /* No grey flash on tap, and no rubber-band overscroll dragging the whole
+       page around when a list inside it is already at its end. */
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+
+  /* Visible keyboard focus everywhere, without the permanent outline a mouse
+     user would otherwise see on every click. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary-500 ring-offset-2 ring-offset-white rounded-lg;
+  }
+
+  /* Native controls follow the brand rather than the platform default blue. */
+  input[type='checkbox'],
+  input[type='radio'],
+  input[type='range'] {
+    @apply accent-primary-600;
   }
 }
 
 @layer components {
+  /* ── Buttons ─────────────────────────────────────────────────────────────
+     One shape, one height, four intents. `btn-sm` is the only size variant;
+     anything smaller stops being reliably tappable. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5
+           rounded-xl text-sm font-semibold transition select-none
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
   .btn-primary {
-    @apply bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply btn bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800;
+  }
+  .btn-secondary {
+    @apply btn bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 active:bg-gray-100;
   }
   .btn-danger {
-    @apply bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition font-medium disabled:opacity-50;
+    @apply btn bg-danger text-white hover:bg-red-600 active:bg-red-700;
   }
   .btn-ghost {
-    @apply text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition font-medium;
+    @apply btn text-gray-600 hover:bg-gray-100 active:bg-gray-200;
   }
+  .btn-sm {
+    @apply min-h-[36px] px-3 py-1.5 text-xs rounded-lg;
+  }
+  .btn-block {
+    @apply w-full;
+  }
+
+  /* A square target for an icon on its own — the header bells, the hamburger,
+     the close buttons. */
+  .icon-btn {
+    @apply inline-flex items-center justify-center w-11 h-11 rounded-xl text-gray-500
+           hover:bg-gray-100 hover:text-gray-700 active:bg-gray-200 transition shrink-0;
+  }
+
+  /* ── Surfaces ────────────────────────────────────────────────────────────
+     Tighter padding on a phone: 24px of card padding either side leaves very
+     little room for the content on a 360px screen. */
   .card {
-    @apply bg-white rounded-2xl shadow-sm border border-gray-100 p-6;
+    @apply bg-white rounded-2xl shadow-card border border-gray-100 p-4 sm:p-6;
   }
+  .card-flush {
+    @apply bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden;
+  }
+
+  /* A tappable row inside a card or list. */
+  .list-row {
+    @apply flex items-center gap-3 min-h-[56px] px-3 py-2.5 rounded-xl transition;
+  }
+
+  /* ── Forms ───────────────────────────────────────────────────────────────*/
   .input {
-    @apply w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500;
+    @apply w-full min-h-[44px] border border-gray-200 rounded-xl px-3.5 py-2.5
+           text-base sm:text-sm text-gray-900 bg-white placeholder:text-gray-400
+           focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100
+           disabled:bg-gray-50 disabled:text-gray-400 transition;
   }
-  .badge-green {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800;
+  .field {
+    @apply block space-y-1.5;
   }
-  .badge-red {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800;
+  .field-label {
+    @apply block text-sm font-medium text-gray-700;
   }
-  .badge-blue {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800;
+  .field-hint {
+    @apply block text-xs text-gray-400;
   }
-  .badge-gray {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700;
+
+  /* ── Selection chips ─────────────────────────────────────────────────────
+     The "which child am I looking at" control, and every filter row. */
+  .chip {
+    @apply inline-flex items-center gap-2 min-h-[40px] px-4 py-2 rounded-xl
+           text-sm font-medium whitespace-nowrap transition
+           bg-white border border-gray-200 text-gray-600
+           hover:bg-gray-50 active:bg-gray-100;
   }
+  .chip-active {
+    @apply bg-primary-600 border-primary-600 text-white hover:bg-primary-700 active:bg-primary-800;
+  }
+
+  /* ── Badges ──────────────────────────────────────────────────────────────*/
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap;
+  }
+  .badge-green { @apply badge bg-green-100 text-green-800; }
+  .badge-red   { @apply badge bg-red-100 text-red-800; }
+  .badge-blue  { @apply badge bg-blue-100 text-blue-800; }
+  .badge-amber { @apply badge bg-amber-100 text-amber-800; }
+  .badge-gray  { @apply badge bg-gray-100 text-gray-700; }
+
+  /* ── Inline messages ─────────────────────────────────────────────────────*/
+  .notice {
+    @apply flex items-start gap-2 rounded-xl px-3.5 py-3 text-sm;
+  }
+  .notice-success { @apply notice bg-green-50 text-green-800 border border-green-100; }
+  .notice-error   { @apply notice bg-red-50 text-red-700 border border-red-100; }
+  .notice-warning { @apply notice bg-amber-50 text-amber-800 border border-amber-100; }
+  .notice-info    { @apply notice bg-blue-50 text-blue-800 border border-blue-100; }
+
+  /* ── Page headings ───────────────────────────────────────────────────────*/
+  .page-title    { @apply text-xl sm:text-2xl font-bold text-gray-900 tracking-tight; }
+  .page-subtitle { @apply text-sm text-gray-500 mt-1; }
+  .section-title { @apply text-base font-semibold text-gray-900; }
+}
+
+@layer utilities {
+  /* Horizontal scrollers (chip rows, tab strips) should not show a scrollbar
+     on the platforms that draw one permanently. */
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+
+  /* Padding that clears the iOS home indicator / Android gesture bar. */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+
+  /* Momentum scrolling inside panes rather than the document. */
+  .scroll-touch { -webkit-overflow-scrolling: touch; }
 }

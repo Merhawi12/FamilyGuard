@@ -1,0 +1,87 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace "ca.parentix.family"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "ca.parentix.family"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        // Kept in step with apps/family-app/package.json by hand. versionCode is
+        // what Play orders releases by and must increase on every upload;
+        // versionName is what a parent sees under Settings → About.
+        versionCode 1
+        versionName "1.0.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    // A release keystore, when one has been provided. Mirrors the arrangement in
+    // apps/child-app/android/app/build.gradle so both apps are signed the same
+    // way — see docs/DEPLOYMENT.md.
+    //
+    // Capacitor generates no signing config at all, which means a stock
+    // `assembleRelease` produces an UNSIGNED apk: it builds, it is the right
+    // size, and it cannot be installed on anything. Falling back to the debug
+    // key keeps a test build installable, and the warning is what stops that
+    // build being mistaken for a publishable one.
+    def keystorePropsFile = rootProject.file("keystore.properties")
+    def hasReleaseKeystore = keystorePropsFile.exists()
+    def keystoreProps = new Properties()
+    if (hasReleaseKeystore) {
+        keystoreProps.load(new FileInputStream(keystorePropsFile))
+    } else {
+        logger.warn("⚠️  keystore.properties not found — release builds will be signed with the DEBUG key. Do NOT publish this build.")
+    }
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

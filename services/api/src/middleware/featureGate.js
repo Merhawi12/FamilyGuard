@@ -1,5 +1,5 @@
 const { getSetting } = require('../utils/settings');
-const { DEFAULT_PLAN_FEATURES, FEATURE_LABELS, TRIAL_PLAN } = require('../config/planFeatures');
+const { DEFAULT_PLAN_FEATURES, FEATURE_LABELS, TRIAL_PLAN, PLAN_LIMITS } = require('../config/plans');
 const { isStaffRole } = require('../config/roles');
 
 const trialIsActive = (user) => !!user.trialEndsAt && new Date() < new Date(user.trialEndsAt);
@@ -33,4 +33,19 @@ const requireFeature = (featureKey) => async (req, res, next) => {
   }
 };
 
-module.exports = { requireFeature, effectivePlan, trialIsActive };
+/**
+ * How many devices this account may link in total, or null for unlimited.
+ *
+ * Reads through `effectivePlan`, so a trial gets the Premium allowance for the
+ * seven days it lasts and drops to the Free one when it lapses — the same rule
+ * that governs features, rather than a second one that could disagree.
+ */
+const deviceAllowance = (user) => {
+  if (isStaffRole(user.role)) return null;
+  const limits = PLAN_LIMITS[effectivePlan(user)];
+  // An unknown plan (a suspended account, say) gets the most restrictive answer
+  // rather than an accidental free pass.
+  return limits ? limits.maxDevices : 0;
+};
+
+module.exports = { requireFeature, effectivePlan, trialIsActive, deviceAllowance };

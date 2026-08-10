@@ -40,4 +40,24 @@ const decrypt = (value) => {
   return decipher.update(data, undefined, 'utf8') + decipher.final('utf8');
 };
 
-module.exports = { generateLinkingCode, generateInviteToken, encrypt, decrypt };
+/**
+ * A deterministic index for a value that is stored encrypted.
+ *
+ * `encrypt` uses a fresh IV each time, so the same domain never produces the
+ * same ciphertext twice — which is what makes the stored history unreadable
+ * without the key, and also what makes `WHERE url = ?` impossible. This gives
+ * one stable, non-reversible token per value so equality lookups still work:
+ * folding repeat visits onto one row, and filtering a history to one site.
+ *
+ * The HMAC key is derived from the field-encryption key with a domain-separation
+ * label rather than being the key itself, so a leaked index cannot be replayed
+ * against anything else that key protects. Values are lower-cased first so a
+ * lookup does not depend on how the domain happened to be capitalised.
+ */
+const blindIndex = (value) => {
+  if (value == null) return null;
+  const key = crypto.createHmac('sha256', getKey()).update('blind-index-v1').digest();
+  return crypto.createHmac('sha256', key).update(String(value).trim().toLowerCase()).digest('hex');
+};
+
+module.exports = { generateLinkingCode, generateInviteToken, encrypt, decrypt, blindIndex };

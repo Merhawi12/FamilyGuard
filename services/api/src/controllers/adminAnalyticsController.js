@@ -19,7 +19,11 @@ const getAnalytics = async (req, res, next) => {
     });
     const signupsByDay = {};
     recentUsers.forEach((u) => {
-      const day = u.createdAt.toISOString().slice(0, 10);
+      // Re-wrapped and checked: a row whose timestamp will not parse belongs in
+      // no day bucket, and must not cost the whole Overview a 500.
+      const created = new Date(u.createdAt);
+      if (Number.isNaN(created.getTime())) return;
+      const day = created.toISOString().slice(0, 10);
       signupsByDay[day] = (signupsByDay[day] || 0) + 1;
     });
 

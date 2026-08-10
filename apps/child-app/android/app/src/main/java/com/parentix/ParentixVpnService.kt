@@ -121,6 +121,7 @@ class ParentixVpnService : VpnService() {
         val realDns  = InetAddress.getByName("8.8.8.8")
 
         while (running.get()) {
+            WebHistoryReporter.flushIfDue()
             buf.clear()
             val len = try { inStream.channel.read(buf) } catch (_: Exception) { break }
             if (len <= 0) continue
@@ -129,13 +130,23 @@ class ParentixVpnService : VpnService() {
             if (!isUdpDns(raw)) continue
             val dns = extractDnsPayload(raw) ?: continue
             val domain = parseDnsQueryDomain(dns)
-            val responsePayload = if (domain != null && isBlocked(domain))
+            val blocked = domain != null && isBlocked(domain)
+
+            // Every resolved name is history, whether or not it was allowed —
+            // a blocked attempt is exactly the kind of thing a parent opens this
+            // screen to see.
+            if (domain != null) WebHistoryReporter.record(domain, blocked)
+
+            val responsePayload = if (blocked)
                 buildNxDomainResponse(dns)
             else
                 forwardToRealDns(upstream, realDns, dns) ?: continue
             try { outStream.write(buildUdpIpResponse(raw, responsePayload)) } catch (_: Exception) {}
         }
         upstream.close()
+        // A quiet device may hold a partial window for a long time; flush what is
+        // buffered before the worker exits so it is not lost with the thread.
+        WebHistoryReporter.flush()
     }
 
     private fun isUdpDns(p: ByteArray): Boolean {
@@ -221,7 +232,10 @@ class ParentixVpnService : VpnService() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentTitle("Parentix")
-            .setContentText("Website filtering active")
+            // The tunnel now runs for history collection as well as filtering, so
+            // the text says what is actually happening rather than naming only
+            // the case where a block rule exists.
+            .setContentText("Web activity monitoring active")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build()

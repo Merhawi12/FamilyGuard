@@ -39,17 +39,52 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="card w-full max-w-md">
+    <div className="min-h-dvh flex items-center justify-center bg-navy-900 px-4 py-8
+                    bg-[radial-gradient(ellipse_at_top,#163b7d_0%,#0b2451_55%,#071835_100%)]">
+      <div className="w-full max-w-md">
         <div className="text-center mb-6">
-          <img src="/logo.png" alt="" className="w-12 h-12 rounded-xl mx-auto mb-3" />
-          <h1 className="text-xl font-bold text-gray-900">Parentix Admin</h1>
-          <p className="text-sm text-gray-500 mt-1">Staff access only</p>
+          {/*
+            The real Parentix mark, not the generic shield from the icon set.
+            This is the same /logo.png the Family App signs in under, so a parent
+            and a staff member arrive at the same brand.
+
+            It is navy ink on transparency, which is why the rail and this page
+            both used to substitute an icon — at #103C69 on a #0b2451 background
+            it is very nearly invisible. `brightness(0) invert(1)` collapses every
+            opaque pixel to white and leaves the alpha channel alone; the artwork
+            is a single flat colour, so the result is the same lockup in white
+            rather than a washed-out approximation of it.
+
+            The image carries the wordmark, so there is no separate <h1> text
+            beside it — that would set "Parentix" twice. The heading level is kept
+            (it is the page's only h1) and its accessible name comes from the alt.
+          */}
+          <h1>
+            <img
+              src="/logo.png"
+              alt="Parentix"
+              width="500"
+              height="500"
+              className="h-28 w-auto mx-auto [filter:brightness(0)_invert(1)]"
+            />
+          </h1>
+          {/*
+            No margin between the two: the artwork is a 500×500 canvas whose ink
+            only spans y=99..380, so a 112px box already carries ~22px of empty
+            space above the shield and ~27px below the wordmark. Adding a margin
+            on top of that reads as a gap nobody chose. The height is picked for
+            the *ink* rather than the box — 56% of 112px is a ~63px mark, which is
+            what the old 64px icon tile occupied.
+          */}
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-navy-300">
+            Admin console
+          </p>
         </div>
 
-        {error && (
-          <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
-        )}
+        <div className="card">
+        <p className="text-sm text-gray-500 mb-5">Staff access only. Sign in to continue.</p>
+
+        {error && <p className="notice-error mb-4">{error}</p>}
 
         {mfa.required ? (
           <form onSubmit={submitMfa} className="space-y-4">
@@ -72,7 +107,7 @@ export default function Login() {
                 Enter the 6-digit code from your authenticator app, or one of your backup codes.
               </p>
             </div>
-            <button type="submit" className="btn-primary w-full" disabled={busy}>
+            <button type="submit" className="btn-primary btn-block" disabled={busy}>
               {busy ? 'Verifying…' : 'Verify'}
             </button>
           </form>
@@ -107,11 +142,16 @@ export default function Login() {
                 required
               />
             </div>
-            <button type="submit" className="btn-primary w-full" disabled={busy}>
+            <button type="submit" className="btn-primary btn-block" disabled={busy}>
               {busy ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
         )}
+        </div>
+
+        <p className="text-center text-xs text-navy-400 mt-5">
+          Parentix — parental controls platform
+        </p>
       </div>
     </div>
   );

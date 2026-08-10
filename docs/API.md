@@ -50,7 +50,7 @@ carries a generic message — the detail is in CloudWatch under that request id.
 answers `{ rows, count }`, where `count` is the unpaginated total. `limit`
 defaults to 50 and is capped at 200 (500 for location history), so an oversized
 value narrows rather than dumping the table. This covers `/admin/users`,
-`/admin/sessions/active`, `/admin/transactions`, `/notifications/sent`,
+`/admin/devices`, `/admin/sessions/active`, `/admin/transactions`, `/notifications/sent`,
 `/audit`, `/activity/:childId`, `/chats/:childId/messages` and
 `/locations/:childId/history`.
 
@@ -68,14 +68,22 @@ login (10 / 15 min), registration (5 / hour), code resend and password reset
 | POST   | `/verify-email`       | —      | `{email,code}` → `{token,user}`                           |
 | POST   | `/resend-code`        | —      | `{email}`                                                 |
 | POST   | `/login`              | —      | `{email,password}` → `{token,user}`, or `{mfaRequired,preAuthToken}` |
+| GET    | `/providers`          | —      | → `{password,google,phone}`. Which identifiers this deployment can prove. |
+| POST   | `/google`             | —      | `{credential}` (a Google ID token) → `{token,user,created}` |
+| POST   | `/phone/request`      | —      | `{phone,mode,name?}` → `{phone,message,smsDelivered}`. Sends a 6-digit code. |
+| POST   | `/phone/verify`       | —      | `{phone,code}` → `{token,user}`, or `{mfaRequired,preAuthToken}` |
 | POST   | `/forgot-password`    | —      | `{email}`. Always 200, whether or not the account exists. |
 | POST   | `/reset-password`     | —      | `{token,newPassword}`. Revokes all sessions.              |
 | GET    | `/me`                 | user   | The current user                                          |
 | POST   | `/logout`             | user   | Revokes the calling session                               |
 | PUT    | `/profile`            | user   | `{name,email}`                                            |
-| PUT    | `/password`           | user   | `{currentPassword,newPassword}`                           |
+| PUT    | `/password`           | user   | `{currentPassword,newPassword}`. `currentPassword` is not required when the account has none yet — see below |
 | GET    | `/notification-prefs` | user   |                                                           |
 | PUT    | `/notification-prefs` | user   |                                                           |
+| GET    | `/sessions`           | user   | Own live sessions, newest first. Each carries `current`    |
+| DELETE | `/sessions/:id`       | user   | Ends one other session. 400 on the calling one — that is `/logout` |
+| DELETE | `/sessions/others`    | user   | Ends every session but this one → `{revoked}`              |
+| DELETE | `/account`            | user   | `{password}`, or `{confirm:'DELETE'}` for an account with none. Cancels the subscription, then erases the account and every child on it |
 
 Passwords must be at least 10 characters (`MIN_PASSWORD_LENGTH`) and contain a
 letter and a digit. Five failed logins lock the account for 15 minutes.
@@ -86,7 +94,54 @@ later request would reject.
 
 `GET /me` includes `permissions` for a staff account, which the Admin Dashboard
 uses to hide screens the role cannot use. It is a convenience only — every
-endpoint checks server-side.
+endpoint checks server-side. It also carries `hasPassword`, which is how a
+client knows whether to ask for the current one.
+
+An account created through Google or a phone number has no password at all, so
+`PUT /password` accepts a first one without `currentPassword`. Without that the
+endpoint was unreachable for those accounts: the form was shown and every
+submission answered "Current password is incorrect".
+
+`DELETE /account` is the only irreversible endpoint on the service. It cancels
+any Stripe subscription **first** and deletes nothing if that fails — an account
+that still exists can be closed again, one that was deleted while its
+subscription renews goes on charging a card its owner can no longer reach. The
+same erasure runs behind the console's `DELETE /admin/clients/:id`, so both doors
+remove the children, devices, locations, messages, contacts, alerts and activity
+rather than only the `users` row.
+
+### Phone sign-in
+
+Passwordless. `mode: 'register'` creates the account and `mode: 'login'` signs an
+existing one in; both send a code, and `/phone/verify` ends exactly where
+`/login` does — a session, or an MFA challenge if the account has one. An account
+created this way has no email and no password, which is why both columns are
+nullable (migration 0012).
+
+Numbers are stored in E.164 and looked up only through `User.findByPhone`, so
+`+1 415 555 0123` and `(415) 555-0123` are one account rather than two. A number
+without a country code is refused rather than guessed at. The response masks the
+number it was given (`+•••••••0123`) — it was supplied to receive one message,
+not to be echoed into logs and error trackers.
+
+`smsDelivered` reports whether the code actually left the building, and the
+sign-in page says so rather than showing a "check your phone" screen for a
+message that was never sent.
+
+**Whether the flow is offered at all** comes from `GET /auth/providers`, and is
+not the same question as whether an SMS can be sent:
+
+| Environment | SMS credentials | `providers.phone` | Where the code goes |
+| ----------- | --------------- | ----------------- | ------------------- |
+| production  | configured      | `true`            | the handset          |
+| production  | missing         | `false` — tab hidden | nowhere; the flow is not offered |
+| development | any             | `true`            | the API log, and `devCode` in the response |
+
+`devCode` exists because development has no credentials and never will, so
+gating the tab on deliverability alone made the feature unreachable on the only
+machine anyone develops on. It is off in production by construction, and a
+production boot with `SMS_ECHO_CODE` set is refused outright rather than
+silently ignoring it. See `SMS_ECHO_CODE` in `services/api/.env.example`.
 
 ### MFA — `/auth/mfa`
 
@@ -122,12 +177,47 @@ previous object.
 | Method | Path            | Auth   | Notes                                            |
 | ------ | --------------- | ------ | ------------------------------------------------ |
 | GET    | `/`             | parent | Linked devices                                   |
-| POST   | `/link`         | parent | `{childId,deviceName,type}` → `{code,qrCode}`, 30 min TTL |
+| POST   | `/link`         | parent | `{childId,deviceName,type}` → `{code,qrCode}`, 30 min TTL. The child must be active |
+| POST   | `/:id/link`     | parent | A fresh code for a device that never connected; refuses one already linked |
 | DELETE | `/:id`          | parent | Revokes the device                               |
 | POST   | `/confirm`      | —      | `{code}` → `{device,deviceToken}`                |
 | GET    | `/me/rules`     | device | All rules for this device's child                |
 | POST   | `/me/heartbeat` | device |                                                  |
 | POST   | `/me/activity`  | device | App-usage upsert (one row per app per day)       |
+
+**Linking.** A code is eight uppercase hex characters, matched case-insensitively,
+single-use, and cleared from the row the moment it is spent — a second
+presentation is a 404, not a "already linked". `deviceId` may be sent alongside
+it (the QR payload carries both) and is cross-checked when present. The claim
+itself is a conditional `UPDATE`, so two requests racing the same code produce
+one token and one 400.
+
+`/confirm` refuses any link the account could not honour, because each one used
+to answer 200 with a token that then failed on every call the phone made:
+
+| Status | Meaning |
+| ------ | ------- |
+| 404 | no such code — unknown, already spent, or superseded |
+| 400 | expired, already linked, or lost the race |
+| 410 | the device was removed, or its child was |
+| 403 | the parent's account is not active |
+
+On success the parent's realtime room receives `device:linked`
+(`{deviceId, childId, name, type, osVersion, linkedAt}`), which is how the
+Family App's link sheet knows the phone arrived.
+
+**Revocation says which kind it is.** A refused device token — over REST as
+`401 {error, code}`, over Socket.IO as a handshake error carrying `data.code` —
+is one of:
+
+| `code` | Meaning | What the child app does |
+| ------ | ------- | ----------------------- |
+| `device_unlinked` | the device row is gone; permanent | discards its credentials and caches, and returns to the linking screen |
+| `account_suspended` | the parent is blocked or the child deactivated; temporary | keeps its token and retries |
+
+Removing a device also emits `device:unlinked` to `device:<id>` immediately
+before its sockets are cut, so a phone that is online learns why rather than
+seeing an ordinary disconnect.
 
 ### Screen time — `/screen-time`
 
@@ -138,11 +228,29 @@ previous object.
 `GET|POST /:childId/apps`, `DELETE /:childId/apps/:ruleId`, and the same three
 for `/websites`.
 
+`GET /:childId/apps/known` lists the apps this child's devices have reported
+using — `{appName, appPackage, totalMinutes}`, most-used first — so the rule form
+can offer a real package name instead of asking a parent to know one.
+
+**An app rule must carry an `appPackage`.** The accessibility service on the
+phone matches on the package and nothing else, so a rule without one is not a
+weaker rule, it is no rule: it appeared in the parent's "Active app rules" with a
+Block badge and changed nothing on the device. It is now a 400.
+
+`action` is `block` or `limit`. A `limit` rule needs `dailyLimitMinutes`
+(5–1440); the device blocks that app once its own usage for the day reaches it,
+and releases it when usage resets at midnight. `allow` is deliberately not an app
+action — for apps it means blocking every other app on the phone, including the
+dialer, and the device has no way to express the exception.
+
 A website rule's `url` is normalised to a bare hostname on create — scheme,
 path, port, credentials and a leading `www.` are stripped — because the device
 enforces these by matching DNS queries. Anything that could never match one
 (`this is not a website`, `localhost`) is rejected with 400 rather than stored
-as a rule that silently blocks nothing. A category-only rule needs no `url`.
+as a rule that silently blocks nothing. A category-only rule needs no `url`, but
+a rule with neither a `url` nor a real category is rejected. Its `action` is
+`block` or `allow`, and `allow` is real here: `utils/contentPolicy` folds it into
+the domain lists the device is handed, where it overrides a block.
 
 ### Activity — `/activity`
 
@@ -263,13 +371,14 @@ Refuses acting on your own account for role changes, deactivation and deletion.
 | GET    | `/clients`                 |                                          |
 | PATCH  | `/clients/:id/toggle-block`| Blocking revokes the user's sessions      |
 | PATCH  | `/clients/:id/plan`        |                                          |
-| DELETE | `/clients/:id`             |                                          |
-| GET    | `/users`                   | `role`, `plan`, `status`, `limit`, `offset` |
+| DELETE | `/clients/:id`             | Erases the account and every child on it — devices, locations, messages, contacts, alerts, activity. Does **not** cancel their subscription: that is a billing decision, and `hadSubscription` is recorded on the audit row |
+| GET    | `/users`                   | `search`, `role`, `plan`, `status`, `limit`, `offset` → `{rows,count,summary}`. Each row carries `childCount` and `deviceCount` (active only). `summary` describes the whole customer directory — totals, blocked, Premium share, and 30 days of signups zero-filled by day — and ignores the filters, because the tiles on the screen report the platform, not the page |
 | POST   | `/users`                   | Creates a parent; staff must go through `/admin/staff` |
 | PUT    | `/users/:id`               |                                          |
 | PATCH  | `/users/:id/role`          | Super Admin only — moves an account across the staff boundary. Revokes sessions |
 | PATCH  | `/users/:id/approve`       |                                          |
 | POST   | `/users/:id/reset-password` | Permission `reset_passwords`. `{password?}` — omit to generate one, returned once as `generatedPassword`. Revokes sessions, clears any lockout, audited as `admin.user_password_reset` |
+| GET    | `/devices`                 | Permission `manage_users`. The whole fleet: `search` (device, child, account name or email), `platform`, `status` (`online`/`offline`/`pending`), `limit`, `offset` → `{rows,count,summary}`. Read-only; a row carries its child, its owner, its derived status and that child's rule counts, never its push token |
 | GET    | `/sessions/active`         | Paginated → `{rows,count}`                |
 | GET    | `/users/:id/sessions`      |                                          |
 | DELETE | `/sessions/:sessionId`     | Force logout of one session               |

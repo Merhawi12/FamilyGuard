@@ -3,6 +3,8 @@ const { User } = require('../models');
 const { auditLog } = require('../utils/auditLogger');
 const { revokeAllSessions } = require('../utils/session');
 const { passwordProblem, generatePassword } = require('../utils/password');
+const { normalizeEmail } = require('../utils/normalizeEmail');
+const { isUuid } = require('../utils/ids');
 const {
   ROLES, PERMISSION_KEYS, ROLE_LABELS, STAFF_ROLES,
   isStaffRole, defaultPermissionsFor,
@@ -18,7 +20,10 @@ const STAFF_ATTRS = [
  * `/admin/users` — mixing them here would let a Super Admin quietly convert a
  * customer into an employee.
  */
-const findStaff = (id) => User.findOne({ where: { id, role: { [Op.in]: STAFF_ROLES } } });
+// A malformed id is "not found", not a database error — see utils/ids.js for why
+// this has to be checked before the query rather than after it.
+const findStaff = (id) =>
+  (isUuid(id) ? User.findOne({ where: { id, role: { [Op.in]: STAFF_ROLES } } }) : null);
 
 /** Guards the "don't strand the platform" invariant. */
 const otherActiveSuperAdmins = (excludeId) =>
@@ -80,8 +85,7 @@ const createStaff = async (req, res, next) => {
     const resolved = resolvePermissions(role, permissions);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
 
-    const normalisedEmail = email.trim().toLowerCase();
-    const existing = await User.findOne({ where: { email: normalisedEmail } });
+    const existing = await User.findByEmail(email);
     if (existing) return res.status(409).json({ error: 'Email already registered' });
 
     // A supplied password still has to satisfy the policy; otherwise generate
@@ -96,7 +100,7 @@ const createStaff = async (req, res, next) => {
 
     const user = await User.create({
       name: name.trim(),
-      email: normalisedEmail,
+      email,
       passwordHash: password || generated,
       role,
       permissions: resolved.permissions,
@@ -107,7 +111,7 @@ const createStaff = async (req, res, next) => {
 
     auditLog(req, {
       userId: req.user.id, action: 'staff.created', entity: 'User', entityId: user.id,
-      metadata: { email: normalisedEmail, role, permissions: resolved.permissions },
+      metadata: { email: user.email, role, permissions: resolved.permissions },
     });
 
     res.status(201).json({
@@ -135,11 +139,11 @@ const updateStaff = async (req, res, next) => {
 
     if (name?.trim()) updates.name = name.trim();
 
-    if (email?.trim() && email.trim().toLowerCase() !== user.email) {
-      const normalisedEmail = email.trim().toLowerCase();
-      const clash = await User.findOne({ where: { email: normalisedEmail } });
+    if (email?.trim() && normalizeEmail(email) !== user.email) {
+      const clash = await User.findByEmail(email);
       if (clash) return res.status(409).json({ error: 'Email already in use' });
-      updates.email = normalisedEmail;
+      // The model setter normalises on write.
+      updates.email = email;
     }
 
     const roleChanged = role && role !== user.role;
@@ -175,7 +179,7 @@ const updateStaff = async (req, res, next) => {
     await user.update(updates);
 
     // A narrowed role must not keep working on an existing session.
-    if (updates.role || updates.permissions) await revokeAllSessions(user.id);
+    if (updates.role || updates.permissions) await revokeAllSessions(user.id, req.app.get('io'));
 
     auditLog(req, {
       userId: req.user.id, action: 'staff.updated', entity: 'User', entityId: user.id,
@@ -211,7 +215,7 @@ const setStaffStatus = async (req, res, next) => {
     await user.update({ isActive });
     // `authenticate` rejects an inactive user, but drop the sessions anyway so
     // the revocation is visible in the sessions screen.
-    if (!isActive) await revokeAllSessions(user.id);
+    if (!isActive) await revokeAllSessions(user.id, req.app.get('io'));
 
     auditLog(req, {
       userId: req.user.id, action: isActive ? 'staff.activated' : 'staff.deactivated',
@@ -247,7 +251,7 @@ const resetStaffPassword = async (req, res, next) => {
     });
 
     // Whoever held the old password must not keep a live session.
-    await revokeAllSessions(user.id);
+    await revokeAllSessions(user.id, req.app.get('io'));
 
     auditLog(req, {
       userId: req.user.id, action: 'staff.password_reset', entity: 'User', entityId: user.id,
@@ -273,7 +277,7 @@ const deleteStaff = async (req, res, next) => {
     }
 
     const { email, role } = user;
-    await revokeAllSessions(user.id);
+    await revokeAllSessions(user.id, req.app.get('io'));
     await user.destroy();
 
     auditLog(req, {

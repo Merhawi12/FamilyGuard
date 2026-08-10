@@ -3,3 +3,52 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Console chrome.
+
+   The dark rail is the admin console's own idea — the family app has no
+   equivalent — so these live here rather than in the shared primitives both
+   apps load. Everything inside a page (buttons, cards, inputs, badges) still
+   comes from the shared set, which is what keeps the two apps consistent.
+
+   The focus ring is restated on every dark control: the shared rule offsets the
+   ring against white, and a white halo on navy reads as a rendering fault. */
+@layer components {
+  /* Sentence case, not uppercase: the section headers above them already carry
+     the uppercase weight, and a second uppercase level makes the two hard to
+     tell apart — as well as costing "Billing & Subscriptions" more width than
+     a 272px rail has to give it. */
+  .rail-item {
+    @apply relative flex items-center gap-3 min-h-[42px] rounded-lg
+           text-[13.5px] font-semibold tracking-[0.01em]
+           transition-colors duration-150
+           focus-visible:ring-white focus-visible:ring-offset-navy-900;
+  }
+  .rail-item-idle {
+    @apply text-navy-200 hover:bg-white/[0.07] hover:text-white active:bg-white/[0.12];
+  }
+  .rail-item-active {
+    @apply bg-primary-600 text-white shadow-[0_4px_14px_-4px_rgba(37,99,235,0.9)];
+  }
+
+  .rail-section {
+    @apply flex w-full items-center justify-between gap-2 min-h-[40px] px-3 rounded-lg
+           text-[11px] font-semibold uppercase tracking-[0.16em] text-navy-400
+           transition-colors duration-150 hover:text-navy-200 hover:bg-white/[0.04]
+           focus-visible:ring-white focus-visible:ring-offset-navy-900;
+  }
+
+  /* An icon-only control on the rail: the close button, sign out, collapse. */
+  .rail-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg text-navy-300
+           transition-colors duration-150 hover:bg-white/[0.07] hover:text-white
+           active:bg-white/[0.12] shrink-0
+           focus-visible:ring-white focus-visible:ring-offset-navy-900;
+  }
+
+  /* A row in a header popover. */
+  .menu-item {
+    @apply flex w-full items-center gap-3 min-h-[44px] px-2.5 rounded-xl text-sm font-medium
+           text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors;
+  }
+}

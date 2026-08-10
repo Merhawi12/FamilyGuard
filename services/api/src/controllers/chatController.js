@@ -1,23 +1,31 @@
 const { Message, Child } = require('../models');
 const { createAlert } = require('../utils/alertHelper');
 const { detectCyberbullying } = require('../utils/cyberbullyingDetector');
+const { parsePagination } = require('../utils/pagination');
+// Called through the module rather than destructured so the send stays
+// interceptable from the tests.
+const pushService = require('../utils/pushService');
+const { track } = require('../utils/background');
+const { isUuid } = require('../utils/ids');
 
-// Verify the child belongs to the authenticated parent
+// Verify the child belongs to the authenticated parent. A malformed id is "not
+// found", not a database error — see utils/ids.js for why this has to be checked
+// before the query rather than after it.
 const resolveChild = async (childId, parentId) =>
-  Child.findOne({ where: { id: childId, parentId } });
+  (isUuid(childId) ? Child.findOne({ where: { id: childId, parentId } }) : null);
 
 // GET /api/chats/:childId/messages
 const getMessages = async (req, res, next) => {
   try {
+    const { limit, offset } = parsePagination(req.query, { max: 200, defaultLimit: 50 });
     const child = await resolveChild(req.params.childId, req.user.id);
     if (!child) return res.status(404).json({ error: 'Child not found' });
 
-    const { limit = 50, offset = 0 } = req.query;
     const messages = await Message.findAndCountAll({
       where: { parentId: req.user.id, childId: child.id },
       order: [['createdAt', 'ASC']],
-      limit: Math.min(parseInt(limit), 200),
-      offset: parseInt(offset),
+      limit,
+      offset,
     });
 
     // Mark unread messages as read (for the parent side)
@@ -54,6 +62,17 @@ const sendMessage = async (req, res, next) => {
     // Push to child's device via socket
     const io = req.app.get('io');
     io.to(`child:${child.id}`).emit('chat:message', message);
+
+    // And as a notification, which is what reaches the child when the app is in
+    // the background or closed and the socket is not connected. Not awaited: the
+    // message is already saved and delivered to anything listening.
+    track(
+      pushService.sendToChild(child.id, {
+        title: messageType === 'emergency' ? 'Urgent message from your parent' : 'Message from your parent',
+        body: text.trim(),
+        data: { type: 'chat', messageId: message.id, screen: 'Messages' },
+      })
+    );
 
     res.status(201).json(message);
   } catch (err) {
@@ -110,15 +129,15 @@ const receiveFromChild = async (req, res, next) => {
  */
 const getMyMessages = async (req, res, next) => {
   try {
+    const { limit, offset } = parsePagination(req.query, { max: 200, defaultLimit: 50 });
     const child = await Child.findByPk(req.childId, { attributes: ['id', 'parentId'] });
     if (!child) return res.status(404).json({ error: 'Child not found' });
 
-    const { limit = 50, offset = 0 } = req.query;
     const messages = await Message.findAndCountAll({
       where: { parentId: child.parentId, childId: child.id },
       order: [['createdAt', 'ASC']],
-      limit: Math.min(parseInt(limit), 200),
-      offset: parseInt(offset),
+      limit,
+      offset,
     });
 
     // Mirror of the parent side: opening the thread clears the unread flag on

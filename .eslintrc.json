@@ -19,6 +19,8 @@
       "files": ["apps/admin-dashboard/src/**/*.{js,jsx}", "apps/family-app/src/**/*.{js,jsx}", "packages/shared/src/**/*.{js,jsx}"],
       "extends": ["eslint:recommended", "plugin:react/recommended", "plugin:react-hooks/recommended"],
       "env": { "browser": true },
+      // Substituted at build time by Vite's `define`.
+      "globals": { "__APP_VERSION__": "readonly", "__NATIVE__": "readonly" },
       "rules": {
         "react/prop-types": "off",
         "react/react-in-jsx-scope": "off",

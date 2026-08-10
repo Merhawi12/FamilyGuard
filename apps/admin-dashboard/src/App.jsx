@@ -10,6 +10,8 @@ import Login from './pages/Login.jsx';
 // Console screens load on demand so the sign-in page stays lightweight.
 const Overview = lazy(() => import('./pages/Overview.jsx'));
 const Users = lazy(() => import('./pages/Users.jsx'));
+const Devices = lazy(() => import('./pages/Devices.jsx'));
+const ContentFiltering = lazy(() => import('./pages/ContentFiltering.jsx'));
 const Sessions = lazy(() => import('./pages/Sessions.jsx'));
 const Billing = lazy(() => import('./pages/Billing.jsx'));
 const Notifications = lazy(() => import('./pages/Notifications.jsx'));
@@ -58,6 +60,12 @@ export default function App() {
 
                 <Route path="users" element={
                   <RequirePermission permission={PERMISSIONS.MANAGE_USERS}><Users /></RequirePermission>
+                } />
+                <Route path="devices" element={
+                  <RequirePermission permission={PERMISSIONS.MANAGE_USERS}><Devices /></RequirePermission>
+                } />
+                <Route path="content-filtering" element={
+                  <RequirePermission permission={PERMISSIONS.MANAGE_SETTINGS}><ContentFiltering /></RequirePermission>
                 } />
                 <Route path="sessions" element={
                   <RequirePermission permission={PERMISSIONS.MANAGE_SESSIONS}><Sessions /></RequirePermission>

@@ -7,17 +7,33 @@ let _rules = { appRules: [], websiteRules: [], screenTimeRule: null };
 let _pollTimer = null;
 let _onUpdate = null;
 let _unsubscribers = [];
+/**
+ * Whether this phone is actually still talking to the parent's account.
+ *
+ * A failed sync was a `console.warn` and nothing else, so the device went on
+ * showing every monitor as "On" and itself as "Linked" while its calls were
+ * being refused — a suspended account, or simply a long stretch offline, looked
+ * exactly like a healthy one. This is what the Settings screen reads to tell the
+ * child the truth instead.
+ */
+let _sync = { lastSyncAt: null, lastError: null };
 
 export function getRules() {
   return _rules;
+}
+
+export function getSyncStatus() {
+  return _sync;
 }
 
 export async function fetchRules() {
   try {
     const res = await deviceApi.getRules();
     _rules = res.data;
+    _sync = { lastSyncAt: new Date().toISOString(), lastError: null };
     if (_onUpdate) await _onUpdate(_rules);
   } catch (e) {
+    _sync = { ..._sync, lastError: e.message || 'Sync failed' };
     console.warn('[rules] fetch failed:', e.message);
   }
 }

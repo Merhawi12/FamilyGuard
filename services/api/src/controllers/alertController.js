@@ -1,4 +1,5 @@
 const { Alert } = require('../models');
+const { isUuid } = require('../utils/ids');
 
 const getAlerts = async (req, res) => {
   const { unreadOnly } = req.query;
@@ -9,7 +10,10 @@ const getAlerts = async (req, res) => {
 };
 
 const markRead = async (req, res) => {
-  const alert = await Alert.findOne({ where: { id: req.params.id, parentId: req.user.id } });
+  // A malformed id is "not found", not a database error — see utils/ids.js.
+  const alert = isUuid(req.params.id)
+    ? await Alert.findOne({ where: { id: req.params.id, parentId: req.user.id } })
+    : null;
   if (!alert) return res.status(404).json({ error: 'Alert not found' });
   await alert.update({ isRead: true });
   res.json(alert);

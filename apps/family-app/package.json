@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/push-notifications": "^6.0.4",
     "@parentix/shared": "*",
     "@react-google-maps/api": "^2.20.8",
     "axios": "^1.6.2",
@@ -20,6 +23,7 @@
     "socket.io-client": "^4.6.2"
   },
   "devDependencies": {
+    "@capacitor/cli": "^6.2.1",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",

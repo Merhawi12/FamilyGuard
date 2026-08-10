@@ -1,105 +1,195 @@
 import { useEffect, useState } from 'react';
-import { children as childrenApi, screenTime as screenTimeApi } from '@parentix/shared';
+import {
+  children as childrenApi, screenTime as screenTimeApi,
+  errorMessage, EmptyState, Toggle,
+} from '@parentix/shared';
+import ChildTabs from '../components/ChildTabs';
+import PageIntro from '../components/PageIntro';
 
-const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DAYS = [
+  { key: 'monday', label: 'Monday', short: 'Mon' },
+  { key: 'tuesday', label: 'Tuesday', short: 'Tue' },
+  { key: 'wednesday', label: 'Wednesday', short: 'Wed' },
+  { key: 'thursday', label: 'Thursday', short: 'Thu' },
+  { key: 'friday', label: 'Friday', short: 'Fri' },
+  { key: 'saturday', label: 'Saturday', short: 'Sat' },
+  { key: 'sunday', label: 'Sunday', short: 'Sun' },
+];
+
+const formatLimit = (minutes) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h ? `${h}h${m ? ` ${m}m` : ''}` : `${m}m`;
+};
 
 export default function ScreenTime() {
   const [childList, setChildList] = useState([]);
   const [selected, setSelected] = useState(null);
   const [rule, setRule] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState('');
+  const [error, setError] = useState('');
 
-  useEffect(() => { childrenApi.list().then((r) => { setChildList(r.data); if (r.data[0]) setSelected(r.data[0]); }); }, []);
-  useEffect(() => { if (selected) screenTimeApi.get(selected.id).then((r) => setRule(r.data)); }, [selected]);
+  useEffect(() => {
+    childrenApi.list()
+      .then((r) => { setChildList(r.data); if (r.data[0]) setSelected(r.data[0]); })
+      .catch(() => setError('Could not load your children.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    setRule(null);
+    screenTimeApi.get(selected.id)
+      .then((r) => setRule(r.data))
+      .catch(() => setError('Could not load the screen time rules for this child.'));
+  }, [selected]);
 
   const save = async () => {
     setSaving(true);
-    await screenTimeApi.update(selected.id, rule);
-    setSaving(false);
+    setError(''); setSaved('');
+    try {
+      await screenTimeApi.update(selected.id, rule);
+      setSaved('Screen time rules saved.');
+      setTimeout(() => setSaved(''), 3000);
+    } catch (err) {
+      setError(errorMessage(err, 'Could not save the screen time rules.'));
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const updateScheduleDay = (day, field, value) => {
-    setRule((r) => ({ ...r, schedule: { ...r.schedule, [day]: { ...r.schedule[day], [field]: value } } }));
+  const updateDay = (day, field, value) => {
+    setRule((r) => ({
+      ...r,
+      schedule: { ...r.schedule, [day]: { ...r.schedule?.[day], [field]: value } },
+    }));
   };
 
-  if (!rule) return <div className="text-gray-400">Select a child to configure screen time.</div>;
+  if (loading) return <p className="text-sm text-gray-400 py-8">Loading…</p>;
+
+  if (childList.length === 0) {
+    return (
+      <div className="card">
+        <EmptyState
+          icon="children"
+          title="No child profiles yet"
+          description="Add a child under Children before setting daily limits."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold">Screen Time</h1>
-        <p className="text-gray-500 text-sm mt-1">Set daily limits and schedules</p>
-      </div>
+      <PageIntro description="Daily limits, bedtime and the hours devices may be used." />
 
-      <div className="flex gap-2 flex-wrap">
-        {childList.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setSelected(c)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition ${selected?.id === c.id ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'}`}
-          >
-            {c.name}
-          </button>
-        ))}
-      </div>
+      <ChildTabs items={childList} selectedId={selected?.id} onSelect={setSelected} />
 
-      {selected && (
-        <div className="space-y-4">
+      {!rule ? (
+        <p className="text-sm text-gray-400 py-8">Loading rules…</p>
+      ) : (
+        <div className="space-y-4 max-w-2xl">
           <div className="card">
-            <h2 className="font-semibold mb-4">Daily Limit for {selected.name}</h2>
-            <div className="flex items-center gap-4">
-              <input
-                type="range" min={15} max={480} step={15}
-                value={rule.dailyLimitMinutes}
-                onChange={(e) => setRule({ ...rule, dailyLimitMinutes: parseInt(e.target.value) })}
-                className="flex-1"
-              />
-              <span className="text-lg font-bold w-20 text-right">
-                {Math.floor(rule.dailyLimitMinutes / 60)}h {rule.dailyLimitMinutes % 60}m
+            <div className="flex items-baseline justify-between gap-3 mb-4">
+              <h2 className="section-title">Daily limit</h2>
+              <span className="text-xl font-bold text-primary-600 tabular-nums">
+                {formatLimit(rule.dailyLimitMinutes)}
               </span>
+            </div>
+            <input
+              type="range"
+              min={15}
+              max={480}
+              step={15}
+              value={rule.dailyLimitMinutes}
+              onChange={(e) => setRule({ ...rule, dailyLimitMinutes: parseInt(e.target.value, 10) })}
+              className="w-full h-6 cursor-pointer"
+              aria-label={`Daily limit for ${selected?.name}`}
+            />
+            <div className="flex justify-between text-xs text-gray-400 mt-1">
+              <span>15m</span>
+              <span>8h</span>
             </div>
           </div>
 
           <div className="card">
-            <h2 className="font-semibold mb-4">Bedtime Lock</h2>
-            <div className="flex items-center gap-4 mb-3">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={rule.bedtimeEnabled} onChange={(e) => setRule({ ...rule, bedtimeEnabled: e.target.checked })} className="w-4 h-4" />
-                <span className="text-sm">Enable bedtime lock</span>
-              </label>
-            </div>
+            <Toggle
+              label="Bedtime lock"
+              description="Lock the device overnight between these times"
+              checked={!!rule.bedtimeEnabled}
+              onChange={(v) => setRule({ ...rule, bedtimeEnabled: v })}
+            />
             {rule.bedtimeEnabled && (
-              <div className="flex gap-4">
-                <label className="flex-1">
-                  <span className="text-xs text-gray-500">Start (lock at)</span>
-                  <input type="time" className="input mt-1" value={rule.bedtimeStart} onChange={(e) => setRule({ ...rule, bedtimeStart: e.target.value })} />
+              <div className="grid grid-cols-2 gap-3 mt-3 pt-4 border-t border-gray-50">
+                <label className="field">
+                  <span className="field-label text-xs">Locks at</span>
+                  <input
+                    type="time" className="input" value={rule.bedtimeStart || '21:00'}
+                    onChange={(e) => setRule({ ...rule, bedtimeStart: e.target.value })}
+                  />
                 </label>
-                <label className="flex-1">
-                  <span className="text-xs text-gray-500">End (unlock at)</span>
-                  <input type="time" className="input mt-1" value={rule.bedtimeEnd} onChange={(e) => setRule({ ...rule, bedtimeEnd: e.target.value })} />
+                <label className="field">
+                  <span className="field-label text-xs">Unlocks at</span>
+                  <input
+                    type="time" className="input" value={rule.bedtimeEnd || '07:00'}
+                    onChange={(e) => setRule({ ...rule, bedtimeEnd: e.target.value })}
+                  />
                 </label>
               </div>
             )}
           </div>
 
           <div className="card">
-            <h2 className="font-semibold mb-4">Daily Schedule</h2>
-            <div className="space-y-3">
-              {DAYS.map((day) => (
-                <div key={day} className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                  <input type="checkbox" checked={rule.schedule[day]?.enabled} onChange={(e) => updateScheduleDay(day, 'enabled', e.target.checked)} className="shrink-0" />
-                  <span className="w-20 capitalize text-sm font-medium">{day}</span>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <input type="time" value={rule.schedule[day]?.start || '08:00'} onChange={(e) => updateScheduleDay(day, 'start', e.target.value)} className="input w-32" disabled={!rule.schedule[day]?.enabled} />
-                    <span className="text-gray-400 text-sm">to</span>
-                    <input type="time" value={rule.schedule[day]?.end || '20:00'} onChange={(e) => updateScheduleDay(day, 'end', e.target.value)} className="input w-32" disabled={!rule.schedule[day]?.enabled} />
+            <h2 className="section-title mb-1">Allowed hours</h2>
+            <p className="text-sm text-gray-500 mb-3">
+              Turn a day on to restrict device use to a window of that day.
+            </p>
+
+            {/* One day per block, times on their own row. Three controls and a
+                label side by side needed ~420px and overflowed every phone. */}
+            <div className="divide-y divide-gray-50">
+              {DAYS.map(({ key, label }) => {
+                const day = rule.schedule?.[key] || {};
+                return (
+                  <div key={key} className="py-1">
+                    <Toggle
+                      label={label}
+                      checked={!!day.enabled}
+                      size="sm"
+                      onChange={(v) => updateDay(key, 'enabled', v)}
+                    />
+                    {day.enabled && (
+                      <div className="grid grid-cols-2 gap-3 pb-3">
+                        <label className="field">
+                          <span className="field-label text-xs">From</span>
+                          <input
+                            type="time" className="input" value={day.start || '08:00'}
+                            onChange={(e) => updateDay(key, 'start', e.target.value)}
+                          />
+                        </label>
+                        <label className="field">
+                          <span className="field-label text-xs">Until</span>
+                          <input
+                            type="time" className="input" value={day.end || '20:00'}
+                            onChange={(e) => updateDay(key, 'end', e.target.value)}
+                          />
+                        </label>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
-          <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Save Changes'}</button>
+          {error && <p className="notice-error">{error}</p>}
+          {saved && <p className="notice-success">{saved}</p>}
+
+          <button onClick={save} disabled={saving} className="btn-primary btn-block sm:w-auto">
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
         </div>
       )}
     </div>

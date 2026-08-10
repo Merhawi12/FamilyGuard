@@ -1,329 +1,518 @@
-import { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
-import { useAuth, api, payments, auth as authApi } from '@parentix/shared';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import {
+  useAuth, auth as authApi, payments, errorMessage, EmptyState, Icon, Toggle, TwoFactorSetup,
+  PLAN_CATALOGUE, planLabel, isPaidPlan,
+} from '@parentix/shared';
+import PageIntro from '../components/PageIntro';
+import PushSettings from '../components/PushSettings';
+import ActiveSessions from '../components/ActiveSessions';
+import DeleteAccount from '../components/DeleteAccount';
 
-const PLANS = [
-  {
-    plan: 'free',
-    label: 'Free Plan',
-    price: '$0',
-    period: '/ 7 days',
-    badge: '7 days only',
-    features: ['Basic screen time monitoring', 'Daily activity reports', '1 child device', 'Basic parental controls', 'Email support'],
-    warning: 'Trial expires after 7 days',
-  },
-  {
-    plan: 'premium',
-    label: 'Premium Plan',
-    price: '$9.99',
-    period: '/mo',
-    popular: true,
-    features: ['Everything in Free', 'Real-time GPS tracking', 'Geofencing alerts', 'App usage monitoring', 'Website filtering & blocking', 'Screen time scheduling', 'Up to 5 child devices', 'Priority support'],
-  },
-  {
-    plan: 'family',
-    label: 'Family Plus',
-    price: '$14.99',
-    period: '/mo',
-    features: ['Everything in Premium', 'Unlimited child devices', 'AI-powered safety alerts', 'Social media monitoring', 'Cyberbullying detection', 'Advanced family reports', 'Instant emergency notifications', 'Premium support'],
-  },
+const SECTIONS = [
+  { key: 'security', label: 'Security', icon: 'lock' },
+  { key: 'notifications', label: 'Notifications', icon: 'bell' },
+  { key: 'plan', label: 'Plan & billing', icon: 'card' },
+  { key: 'about', label: 'About', icon: 'info' },
 ];
 
+/* The cards come from the shared catalogue rather than a copy kept here. This
+   list said "Up to 5 child devices" for Premium while the API enforced no limit
+   at all and Family Plus claimed the unlimited tier — three descriptions of one
+   product, none of them true. */
+
+/*
+ * Only alerts the platform can actually raise are listed. `dangerous_content`
+ * and `app_installed` still do not appear: nothing produces them, and a switch
+ * that promises an alert which can never arrive is worse than no switch.
+ */
+const ALERT_TYPES = [
+  { key: 'emergency_button', label: 'Emergency button' },
+  { key: 'unknown_contact', label: 'Unapproved contact' },
+  { key: 'cyberbullying', label: 'Cyberbullying detected' },
+  { key: 'left_safe_zone', label: 'Left safe zone' },
+  { key: 'entered_safe_zone', label: 'Arrived at safe zone' },
+  { key: 'safety_pattern', label: 'AI safety patterns' },
+  { key: 'screen_time_exceeded', label: 'Screen time reached' },
+  { key: 'blocked_app_attempt', label: 'Blocked app attempt' },
+];
+
+/**
+ * Everything configurable about the account, in four sections.
+ *
+ * It was one column of eight unrelated cards — identity, password, two-factor,
+ * three subscription tiers, push subscriptions and eleven alert toggles — about
+ * six phone screens tall, with no way to link anyone to a particular part of it.
+ * Identity moved to Profile; what is left is grouped, one group at a time, and
+ * the group is in the URL (`?section=plan`) so Profile and a Stripe return can
+ * both land on the right one.
+ */
 export default function Settings() {
   const { user } = useAuth();
-  const location = useLocation();
-  const [profile, setProfile] = useState({ name: user?.name || '', email: user?.email || '' });
+  const [params, setParams] = useSearchParams();
+
+  const requested = params.get('section');
+  const section = SECTIONS.some((s) => s.key === requested) ? requested : 'security';
+
   const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' });
-  const [saved, setSaved] = useState('');
-  const [error, setError] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+
+  const [subscription, setSubscription] = useState(null);
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [portalLoading, setPortalLoading] = useState(false);
-  const [subscription, setSubscription] = useState(null);
-  const [notifPrefs, setNotifPrefs] = useState(null);
-  const [notifSaved, setNotifSaved] = useState(false);
+  const [planMessage, setPlanMessage] = useState('');
+  const [planError, setPlanError] = useState('');
 
-  useEffect(() => {
-    payments.getSubscription().then(r => setSubscription(r.data)).catch(() => {});
-    authApi.getNotificationPrefs().then(r => setNotifPrefs(r.data)).catch(() => {});
+  const [notifPrefs, setNotifPrefs] = useState(null);
+  const [notifSaving, setNotifSaving] = useState(false);
+  const [notifMessage, setNotifMessage] = useState('');
+  const [notifError, setNotifError] = useState('');
+  // Distinct from `notifError`, which reports a failed *save*.
+  const [notifLoadError, setNotifLoadError] = useState('');
+
+  /**
+   * A failed preferences load used to leave `notifPrefs` null forever, and the
+   * only thing keyed off null is the "Loading your notification preferences…"
+   * placeholder — so the screen that decides whether a parent is told their
+   * child left a safe zone sat on a spinner that would never resolve, with no
+   * error and no way to retry. Same rule as the alert list: an empty result and
+   * a failed request are different answers and must not look alike.
+   *
+   * The subscription is genuinely optional — a free account has none, and the
+   * plan section reads `user.plan` rather than this — so its failure stays quiet.
+   */
+  const loadNotifPrefs = useCallback(() => {
+    setNotifLoadError('');
+    return authApi.getNotificationPrefs()
+      .then((r) => setNotifPrefs(r.data))
+      .catch((err) => setNotifLoadError(errorMessage(err, 'Could not load your notification preferences.')));
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get('payment') === 'success') setSaved('Payment successful! Your plan has been upgraded.');
-    if (params.get('payment') === 'cancelled') setError('Payment was cancelled.');
-  }, [location.search]);
+    payments.getSubscription().then((r) => setSubscription(r.data)).catch(() => {});
+    loadNotifPrefs();
+  }, [loadNotifPrefs]);
 
-  const saveProfile = async (e) => {
-    e.preventDefault();
-    setError(''); setSaved('');
-    try {
-      await api.put('/auth/profile', profile);
-      setSaved('Profile updated');
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to update');
-    }
+  // Stripe sends the parent back here; land them on the billing section with
+  // the outcome rather than at the top of a page that says nothing about it.
+  useEffect(() => {
+    const payment = params.get('payment');
+    if (!payment) return;
+    if (payment === 'success') setPlanMessage('Payment successful — your plan has been upgraded.');
+    if (payment === 'cancelled') setPlanError('Payment was cancelled. Nothing has been charged.');
+  }, [params]);
+
+  const paymentOutcome = params.get('payment');
+  const activeSection = paymentOutcome ? 'plan' : section;
+
+  const selectSection = (key) => {
+    setParams(key === 'security' ? {} : { section: key }, { replace: true });
   };
 
   const changePassword = async (e) => {
     e.preventDefault();
-    setError(''); setSaved('');
-    if (passwords.next !== passwords.confirm) return setError('Passwords do not match');
+    setPasswordError(''); setPasswordMessage('');
+
+    if (passwords.next !== passwords.confirm) return setPasswordError('The new passwords do not match.');
+    if (hasPassword && passwords.next === passwords.current) {
+      return setPasswordError('The new password must be different.');
+    }
+
+    setSavingPassword(true);
     try {
-      await api.put('/auth/password', { currentPassword: passwords.current, newPassword: passwords.next });
-      setSaved('Password changed');
+      const res = await authApi.changePassword({
+        ...(hasPassword ? { currentPassword: passwords.current } : {}),
+        newPassword: passwords.next,
+      });
       setPasswords({ current: '', next: '', confirm: '' });
+      // A password change now signs out every other session, so say which — a
+      // parent who changed it because they suspected someone else was in the
+      // account needs to see that the someone else was actually evicted.
+      setPasswordMessage(res.data?.message || 'Your password has been changed.');
+      setTimeout(() => setPasswordMessage(''), 6000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to change password');
+      setPasswordError(errorMessage(err, 'Could not change your password.'));
+    } finally {
+      setSavingPassword(false);
     }
   };
 
   const handleUpgrade = async (plan) => {
     setLoadingPlan(plan);
-    setError('');
+    setPlanError('');
     try {
       const res = await payments.createCheckoutSession(plan);
       window.location.href = res.data.url;
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to start checkout. Check your Stripe keys.');
+      setPlanError(errorMessage(err, 'Could not start checkout.'));
       setLoadingPlan(null);
     }
   };
 
   const handlePortal = async () => {
     setPortalLoading(true);
-    setError('');
+    setPlanError('');
     try {
       const res = await payments.customerPortal();
       window.location.href = res.data.url;
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to open billing portal.');
+      setPlanError(errorMessage(err, 'Could not open the billing portal.'));
       setPortalLoading(false);
     }
   };
 
-  const isPaid = user?.plan === 'premium' || user?.plan === 'family';
+  const saveNotifPrefs = async () => {
+    setNotifSaving(true);
+    setNotifError('');
+    try {
+      await authApi.updateNotificationPrefs(notifPrefs);
+      setNotifMessage('Preferences saved.');
+      setTimeout(() => setNotifMessage(''), 3000);
+    } catch (err) {
+      setNotifError(errorMessage(err, 'Could not save your preferences.'));
+    } finally {
+      setNotifSaving(false);
+    }
+  };
+
+  // Derived from the catalogue, so retiring or adding a tier does not leave a
+  // hard-coded list here deciding who sees the billing-portal button.
+  const isPaid = isPaidPlan(user?.plan);
+  // Absent on a session issued before this field shipped; treated as "has one",
+  // which is the safe reading — it shows the current-password box rather than
+  // hiding it from an account that needs it.
+  const hasPassword = user?.hasPassword !== false;
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-gray-500 text-sm mt-1">Manage your account preferences</p>
-      </div>
-
-      {saved && <div className="p-3 bg-green-50 text-green-700 rounded-xl text-sm">{saved}</div>}
-      {error && <div className="p-3 bg-red-50 text-red-700 rounded-xl text-sm">{error}</div>}
-
-      <div className="card">
-        <h2 className="font-semibold mb-4">Profile</h2>
-        <form onSubmit={saveProfile} className="space-y-3">
-          <label className="block">
-            <span className="text-sm text-gray-500">Full name</span>
-            <input className="input mt-1" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
-          </label>
-          <label className="block">
-            <span className="text-sm text-gray-500">Email</span>
-            <input className="input mt-1" type="email" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
-          </label>
-          <button type="submit" className="btn-primary">Save Profile</button>
-        </form>
-      </div>
-
-      <div className="card">
-        <h2 className="font-semibold mb-4">Change Password</h2>
-        <form onSubmit={changePassword} className="space-y-3">
-          <label className="block">
-            <span className="text-sm text-gray-500">Current password</span>
-            <input className="input mt-1" type="password" value={passwords.current} onChange={(e) => setPasswords({ ...passwords, current: e.target.value })} />
-          </label>
-          <label className="block">
-            <span className="text-sm text-gray-500">New password</span>
-            <input className="input mt-1" type="password" value={passwords.next} onChange={(e) => setPasswords({ ...passwords, next: e.target.value })} />
-          </label>
-          <label className="block">
-            <span className="text-sm text-gray-500">Confirm new password</span>
-            <input className="input mt-1" type="password" value={passwords.confirm} onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })} />
-          </label>
-          <button type="submit" className="btn-primary">Change Password</button>
-        </form>
-      </div>
-
-      {/* Subscription */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="font-semibold">Subscription</h2>
-          {isPaid && (
-            <button
-              onClick={handlePortal}
-              disabled={portalLoading}
-              className="text-sm text-blue-600 hover:underline disabled:opacity-50"
-            >
-              {portalLoading ? 'Opening...' : 'Manage Billing'}
-            </button>
-          )}
-        </div>
-
-        <p className="text-sm text-gray-500 mb-1">
-          Current plan:{' '}
-          <span className="font-semibold capitalize text-blue-600">
-            {user?.plan === 'free' ? 'Free Plan' : user?.plan === 'premium' ? 'Premium Plan' : 'Family Plus'}
-          </span>
-        </p>
-
-        {subscription?.currentPeriodEnd && (
-          <p className="text-xs text-gray-400 mb-1">
-            Renews: {new Date(subscription.currentPeriodEnd).toLocaleDateString()}
-            {subscription.cancelAtPeriodEnd && ' (cancels at period end)'}
-          </p>
-        )}
-
-        {user?.plan === 'free' && user?.trialEndsAt && (
-          <p className={`text-sm mb-4 font-medium ${user.trialExpired ? 'text-red-600' : 'text-orange-500'}`}>
-            {user.trialExpired
-              ? '⚠️ Your free trial has expired. Upgrade to continue.'
-              : `⏳ Trial ends: ${new Date(user.trialEndsAt).toLocaleDateString()} (${Math.max(0, Math.ceil((new Date(user.trialEndsAt) - Date.now()) / 86400000))} days left)`}
-          </p>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
-          {PLANS.map(({ plan, label, price, period, badge, popular, features, warning }) => {
-            const isCurrent = user?.plan === plan;
-            return (
-              <div
-                key={plan}
-                className={`relative p-4 rounded-xl border-2 flex flex-col ${isCurrent ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'}`}
-              >
-                {popular && !isCurrent && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-bold px-3 py-0.5 rounded-full">
-                    Most Popular
-                  </span>
-                )}
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="font-semibold text-sm">{label}</p>
-                  {badge && <span className="text-xs bg-yellow-100 text-yellow-700 font-medium px-2 py-0.5 rounded-full">{badge}</span>}
-                  {isCurrent && <span className="text-xs bg-blue-100 text-blue-700 font-medium px-2 py-0.5 rounded-full ml-auto">Active</span>}
-                </div>
-                <p className="text-xl font-bold text-blue-600 mb-3">
-                  {price}<span className="text-xs text-gray-400 font-normal">{period}</span>
-                </p>
-                <ul className="text-xs text-gray-500 space-y-1.5 flex-1 mb-4">
-                  {features.map(f => (
-                    <li key={f} className="flex items-start gap-1.5">
-                      <span className="text-blue-500 font-bold mt-0.5">✔</span> {f}
-                    </li>
-                  ))}
-                  {warning && (
-                    <li className="flex items-center gap-1.5 text-orange-500 font-medium">
-                      <span>⚠️</span> {warning}
-                    </li>
-                  )}
-                </ul>
-                {!isCurrent && plan !== 'free' && (
-                  <button
-                    onClick={() => handleUpgrade(plan)}
-                    disabled={loadingPlan === plan}
-                    className="btn-primary w-full text-sm py-2 disabled:opacity-60"
-                  >
-                    {loadingPlan === plan ? 'Redirecting...' : `Upgrade to ${label}`}
-                  </button>
-                )}
-                {isCurrent && isPaid && (
-                  <button
-                    onClick={handlePortal}
-                    disabled={portalLoading}
-                    className="w-full text-sm py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition disabled:opacity-50"
-                  >
-                    {portalLoading ? 'Opening...' : 'Manage / Cancel'}
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Notification Preferences */}
-      {notifPrefs && (
-        <div className="card">
-          <h2 className="font-semibold mb-1">Notification Preferences</h2>
-          <p className="text-sm text-gray-500 mb-4">Choose how and when you want to be notified about alerts.</p>
-
-          <div className="space-y-4">
-            {/* Email toggle */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">Email Alerts</p>
-                <p className="text-xs text-gray-400">Receive alert emails to {user?.email}</p>
-              </div>
-              <button
-                onClick={() => setNotifPrefs(p => ({ ...p, emailAlerts: !p.emailAlerts }))}
-                className={`w-11 h-6 rounded-full transition-colors ${notifPrefs.emailAlerts ? 'bg-blue-600' : 'bg-gray-200'}`}
-              >
-                <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-1 ${notifPrefs.emailAlerts ? 'translate-x-5' : 'translate-x-0'}`} />
-              </button>
-            </div>
-
-            {notifPrefs.emailAlerts && (
-              <div className="flex items-center justify-between pl-4 border-l-2 border-blue-100">
-                <div>
-                  <p className="text-sm font-medium">High severity only</p>
-                  <p className="text-xs text-gray-400">Only email for critical alerts</p>
-                </div>
+    <div className="lg:flex lg:gap-8 lg:items-start">
+      {/* Section picker: a scrolling chip row on a phone, a list beside the
+          content from `lg` up. */}
+      <nav
+        aria-label="Settings sections"
+        className="lg:w-56 lg:shrink-0 lg:sticky lg:top-24 mb-5 lg:mb-0"
+      >
+        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar lg:overflow-visible">
+          <div className="flex lg:flex-col gap-2 w-max lg:w-full">
+            {SECTIONS.map(({ key, label, icon }) => {
+              const active = activeSection === key;
+              return (
                 <button
-                  onClick={() => setNotifPrefs(p => ({ ...p, emailHighOnly: !p.emailHighOnly }))}
-                  className={`w-11 h-6 rounded-full transition-colors ${notifPrefs.emailHighOnly ? 'bg-blue-600' : 'bg-gray-200'}`}
+                  key={key}
+                  onClick={() => selectSection(key)}
+                  aria-current={active ? 'page' : undefined}
+                  className={`chip lg:w-full lg:justify-start ${active ? 'chip-active' : ''}`}
                 >
-                  <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-1 ${notifPrefs.emailHighOnly ? 'translate-x-5' : 'translate-x-0'}`} />
+                  <Icon name={icon} size={18} />
+                  {label}
                 </button>
-              </div>
-            )}
-
-            {/* Per-alert-type toggles */}
-            <div>
-              <p className="text-sm font-medium mb-2">Alert Types</p>
-              <div className="space-y-2">
-                {[
-                  { key: 'left_safe_zone', label: 'Left safe zone' },
-                  { key: 'dangerous_content', label: 'Dangerous content' },
-                  { key: 'emergency_button', label: 'Emergency button' },
-                  { key: 'cyberbullying', label: 'Cyberbullying detected' },
-                  { key: 'safety_pattern', label: 'AI safety patterns' },
-                  { key: 'screen_time_exceeded', label: 'Screen time exceeded' },
-                  { key: 'blocked_app_attempt', label: 'Blocked app attempt' },
-                  { key: 'app_installed', label: 'New app installed' },
-                  { key: 'unknown_contact', label: 'Unknown contact' },
-                ].map(({ key, label }) => (
-                  <div key={key} className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">{label}</span>
-                    <button
-                      onClick={() => setNotifPrefs(p => ({ ...p, alertTypes: { ...p.alertTypes, [key]: !p.alertTypes?.[key] } }))}
-                      className={`w-9 h-5 rounded-full transition-colors ${notifPrefs.alertTypes?.[key] ? 'bg-blue-600' : 'bg-gray-200'}`}
-                    >
-                      <span className={`block w-3 h-3 bg-white rounded-full shadow transition-transform mx-1 ${notifPrefs.alertTypes?.[key] ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {notifSaved && <p className="text-sm text-green-600">Preferences saved!</p>}
-
-            <button
-              className="btn-primary"
-              onClick={async () => {
-                try {
-                  await authApi.updateNotificationPrefs(notifPrefs);
-                  setNotifSaved(true);
-                  setTimeout(() => setNotifSaved(false), 2500);
-                } catch {
-                  setError('Failed to save notification preferences');
-                }
-              }}
-            >
-              Save Preferences
-            </button>
+              );
+            })}
           </div>
         </div>
-      )}
+      </nav>
+
+      <div className="flex-1 min-w-0 space-y-5 max-w-2xl">
+        {activeSection === 'security' && (
+          <>
+            <PageIntro description="Your password and the second factor protecting this account." />
+
+            <div className="card">
+              <h2 className="section-title mb-1">{hasPassword ? 'Change password' : 'Set a password'}</h2>
+              {!hasPassword && (
+                <p className="text-sm text-gray-500 mb-3">
+                  You signed up with {user?.phone && !user?.email ? 'a phone number' : 'Google'}, so this
+                  account has no password yet. Setting one gives you a second way to sign in.
+                </p>
+              )}
+
+              {passwordError && <p className="notice-error mb-3">{passwordError}</p>}
+              {passwordMessage && <p className="notice-success mb-3">{passwordMessage}</p>}
+
+              <form onSubmit={changePassword} className="space-y-4">
+                {/* Hidden rather than disabled for an account with none: the
+                    field had no possible correct value, so every submission
+                    answered "Current password is incorrect". */}
+                {hasPassword && (
+                  <label className="field">
+                    <span className="field-label">Current password</span>
+                    <input
+                      className="input" type="password" autoComplete="current-password" required
+                      value={passwords.current}
+                      onChange={(e) => setPasswords({ ...passwords, current: e.target.value })}
+                    />
+                  </label>
+                )}
+                <label className="field">
+                  <span className="field-label">New password</span>
+                  <input
+                    className="input" type="password" autoComplete="new-password" required
+                    value={passwords.next}
+                    onChange={(e) => setPasswords({ ...passwords, next: e.target.value })}
+                  />
+                  <span className="field-hint">At least 10 characters, including a letter and a number.</span>
+                </label>
+                <label className="field">
+                  <span className="field-label">Confirm new password</span>
+                  <input
+                    className="input" type="password" autoComplete="new-password" required
+                    value={passwords.confirm}
+                    onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })}
+                  />
+                </label>
+                <button type="submit" className="btn-primary btn-block sm:w-auto" disabled={savingPassword}>
+                  {savingPassword
+                    ? 'Saving…'
+                    : hasPassword ? 'Change password' : 'Set password'}
+                </button>
+              </form>
+            </div>
+
+            <TwoFactorSetup />
+
+            {/* The follow-up the "signed in from a new device" email assumes
+                exists, and the way out of the product. Both are account
+                security, so both live under Security. */}
+            <ActiveSessions />
+
+            <DeleteAccount />
+          </>
+        )}
+
+        {activeSection === 'notifications' && (
+          <>
+            <PageIntro description="How and when Parentix should reach you." />
+
+            <PushSettings />
+
+            {notifPrefs ? (
+              <>
+                <div className="card">
+                  <h2 className="section-title mb-1">Delivery</h2>
+                  <p className="text-sm text-gray-500 mb-2">Where alerts are sent.</p>
+
+                  <div className="divide-y divide-gray-50">
+                    <Toggle
+                      label="Email alerts"
+                      description={`Sent to ${user?.email}`}
+                      checked={!!notifPrefs.emailAlerts}
+                      onChange={(v) => setNotifPrefs((p) => ({ ...p, emailAlerts: v }))}
+                    />
+                    {notifPrefs.emailAlerts && (
+                      <div className="pl-4 border-l-2 border-primary-100 ml-1">
+                        <Toggle
+                          label="High severity only"
+                          description="Only email me about critical alerts"
+                          checked={!!notifPrefs.emailHighOnly}
+                          onChange={(v) => setNotifPrefs((p) => ({ ...p, emailHighOnly: v }))}
+                        />
+                      </div>
+                    )}
+                    <Toggle
+                      label="Push alerts"
+                      description="Sent to every browser you have enabled notifications on"
+                      checked={!!notifPrefs.pushAlerts}
+                      onChange={(v) => setNotifPrefs((p) => ({ ...p, pushAlerts: v }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="card">
+                  <h2 className="section-title mb-1">Alert types</h2>
+                  <p className="text-sm text-gray-500 mb-2">Which events are worth interrupting you for.</p>
+
+                  <div className="divide-y divide-gray-50">
+                    {ALERT_TYPES.map(({ key, label }) => (
+                      <Toggle
+                        key={key}
+                        label={label}
+                        size="sm"
+                        checked={!!notifPrefs.alertTypes?.[key]}
+                        onChange={(v) =>
+                          setNotifPrefs((p) => ({ ...p, alertTypes: { ...p.alertTypes, [key]: v } }))
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {notifError && <p className="notice-error">{notifError}</p>}
+                {notifMessage && <p className="notice-success">{notifMessage}</p>}
+
+                <button onClick={saveNotifPrefs} className="btn-primary btn-block sm:w-auto" disabled={notifSaving}>
+                  {notifSaving ? 'Saving…' : 'Save preferences'}
+                </button>
+              </>
+            ) : notifLoadError ? (
+              <div className="card space-y-3">
+                <EmptyState
+                  icon="warning"
+                  title="Could not load your notification preferences"
+                  description={notifLoadError}
+                />
+                <button onClick={loadNotifPrefs} className="btn-secondary btn-block sm:w-auto">
+                  Try again
+                </button>
+              </div>
+            ) : (
+              <div className="card text-sm text-gray-400">Loading your notification preferences…</div>
+            )}
+          </>
+        )}
+
+        {activeSection === 'plan' && (
+          <>
+            <PageIntro description="Your subscription and what it includes." />
+
+            {planMessage && <p className="notice-success">{planMessage}</p>}
+            {planError && <p className="notice-error">{planError}</p>}
+
+            <div className="card">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-500">Current plan</p>
+                  {/* A chained ternary made "Family Plus" the fallback, so a
+                      suspended account read as the most expensive tier. */}
+                  <p className="text-lg font-semibold text-primary-600">{planLabel(user?.plan)}</p>
+                  {subscription?.currentPeriodEnd && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Renews {new Date(subscription.currentPeriodEnd).toLocaleDateString()}
+                      {subscription.cancelAtPeriodEnd && ' — cancels at the end of this period'}
+                    </p>
+                  )}
+                </div>
+                {isPaid && (
+                  <button onClick={handlePortal} disabled={portalLoading} className="btn-secondary btn-sm shrink-0">
+                    {portalLoading ? 'Opening…' : 'Manage billing'}
+                  </button>
+                )}
+              </div>
+
+              {user?.plan === 'free' && user?.trialEndsAt && (
+                <p className={`notice mt-4 ${user.trialExpired ? 'notice-error' : 'notice-warning'}`}>
+                  <Icon name="warning" size={16} className="mt-0.5" />
+                  <span>
+                    {user.trialExpired
+                      ? 'Your free trial has expired. Upgrade to keep monitoring your family.'
+                      : `Your trial ends ${new Date(user.trialEndsAt).toLocaleDateString()} — ${Math.max(
+                        0,
+                        Math.ceil((new Date(user.trialEndsAt) - Date.now()) / 86400000)
+                      )} days left.`}
+                  </span>
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {PLAN_CATALOGUE.map(({ key: plan, label, price, period, badge, popular, features, warning }) => {
+                const isCurrent = user?.plan === plan;
+                return (
+                  <div
+                    key={plan}
+                    className={`relative card flex flex-col ${
+                      isCurrent ? 'border-primary-500 ring-1 ring-primary-500' : ''
+                    } ${popular && !isCurrent ? 'mt-3 md:mt-0' : ''}`}
+                  >
+                    {popular && !isCurrent && (
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary-600 text-white text-[11px] font-bold px-3 py-1 rounded-full whitespace-nowrap">
+                        Most popular
+                      </span>
+                    )}
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold">{label}</p>
+                      {badge && <span className="badge-amber">{badge}</span>}
+                      {isCurrent && <span className="badge-blue ml-auto">Active</span>}
+                    </div>
+
+                    <p className="text-2xl font-bold text-primary-600 mt-2 mb-4">
+                      {price}
+                      <span className="text-xs text-gray-400 font-normal">{period}</span>
+                    </p>
+
+                    <ul className="text-sm text-gray-600 space-y-2 flex-1 mb-5">
+                      {features.map((f) => (
+                        <li key={f} className="flex items-start gap-2">
+                          <Icon name="check" size={15} strokeWidth={2.5} className="text-primary-500 mt-0.5" />
+                          <span>{f}</span>
+                        </li>
+                      ))}
+                      {warning && (
+                        <li className="flex items-start gap-2 text-amber-600 font-medium">
+                          <Icon name="warning" size={15} className="mt-0.5" />
+                          <span>{warning}</span>
+                        </li>
+                      )}
+                    </ul>
+
+                    {!isCurrent && plan !== 'free' && (
+                      <button
+                        onClick={() => handleUpgrade(plan)}
+                        disabled={loadingPlan === plan}
+                        className="btn-primary btn-block"
+                      >
+                        {loadingPlan === plan ? 'Redirecting…' : `Upgrade to ${label}`}
+                      </button>
+                    )}
+                    {isCurrent && isPaid && (
+                      <button onClick={handlePortal} disabled={portalLoading} className="btn-secondary btn-block">
+                        {portalLoading ? 'Opening…' : 'Manage or cancel'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {activeSection === 'about' && (
+          <>
+            <PageIntro description="Legal documents, support, and what this build is." />
+
+            <div className="card-flush divide-y divide-gray-50">
+              {[
+                { to: '/privacy-policy', icon: 'file', label: 'Privacy Policy' },
+                { to: '/terms', icon: 'file', label: 'Terms of Service' },
+              ].map(({ to, icon, label }) => (
+                <Link key={to} to={to} className="list-row rounded-none px-4 hover:bg-gray-50">
+                  <span className="w-9 h-9 rounded-xl bg-gray-50 text-gray-500 flex items-center justify-center shrink-0">
+                    <Icon name={icon} size={18} />
+                  </span>
+                  <span className="flex-1 text-sm font-medium text-gray-900">{label}</span>
+                  <Icon name="chevronRight" size={16} className="text-gray-300" />
+                </Link>
+              ))}
+              <a href="/contact" className="list-row rounded-none px-4 hover:bg-gray-50">
+                <span className="w-9 h-9 rounded-xl bg-gray-50 text-gray-500 flex items-center justify-center shrink-0">
+                  <Icon name="mail" size={18} />
+                </span>
+                <span className="flex-1 text-sm font-medium text-gray-900">Contact support</span>
+                <Icon name="external" size={16} className="text-gray-300" />
+              </a>
+            </div>
+
+            <div className="card">
+              <h2 className="section-title mb-3">About Parentix</h2>
+              <dl className="text-sm space-y-2">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500">Signed in as</dt>
+                  <dd className="text-gray-900 truncate">{user?.email}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500">Plan</dt>
+                  <dd className="text-gray-900">{planLabel(user?.plan)}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500">Version</dt>
+                  <dd className="text-gray-900">{__APP_VERSION__}</dd>
+                </div>
+              </dl>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

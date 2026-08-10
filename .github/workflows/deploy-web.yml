@@ -1,0 +1,139 @@
+# Publishes the two web apps to Firebase Hosting.
+#
+# Manual by default. A push to main runs the same job only when the deployment
+# credential is configured, so a fork or a fresh clone gets a green CI run rather
+# than a red job it has no way to fix.
+#
+# What it needs, once:
+#
+#   1. A service account with `roles/firebasehosting.admin` on parentix-4be0d.
+#   2. Its JSON key in the repository secret FIREBASE_SERVICE_ACCOUNT.
+#   3. Repository variables API_URL and ADMIN_URL, e.g.
+#        API_URL=https://api.parentix.ca
+#        ADMIN_URL=https://admin.parentix.ca
+#      These are inlined into the bundle at build time. The API must list the
+#      Hosting origins in CORS_ORIGINS — Terraform derives that from the same
+#      domain, so the two only disagree if this workflow is pointed somewhere
+#      Terraform does not know about.
+#
+# A release deploys whatever main builds. It does not run migrations and does not
+# touch Cloud Run: scripts/deploy-api.sh does that, and §2.4 of docs/DEPLOYMENT.md
+# says which order they go in.
+
+name: Deploy web
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which app to publish
+        type: choice
+        options: [all, family, admin]
+        default: all
+      channel:
+        description: Preview channel name. Empty publishes to the live site.
+        type: string
+        default: ''
+  push:
+    branches: [main]
+    paths:
+      - 'apps/family-app/**'
+      - 'apps/admin-dashboard/**'
+      - 'packages/shared/**'
+      - 'firebase.json'
+      - '.firebaserc'
+      - '.github/workflows/deploy-web.yml'
+
+concurrency:
+  group: deploy-web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Firebase Hosting
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the deployment credential is configured
+        id: gate
+        env:
+          KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::notice::FIREBASE_SERVICE_ACCOUNT is not set — skipping the deploy."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+        if: steps.gate.outputs.ready == 'true'
+
+      # Never publish something that does not lint or build cleanly, even when
+      # the push that triggered this skipped CI.
+      - run: npm run lint
+        if: steps.gate.outputs.ready == 'true'
+
+      - name: Build
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          VITE_API_URL: ${{ vars.API_URL }}
+          VITE_ADMIN_URL: ${{ vars.ADMIN_URL }}
+          VITE_GOOGLE_MAPS_KEY: ${{ secrets.GOOGLE_MAPS_BROWSER_KEY }}
+        run: |
+          test -n "$VITE_API_URL" || { echo "::error::repository variable API_URL is not set"; exit 1; }
+          npm run build
+
+      # Same guard as CI. Worth repeating here because this is the step after
+      # which a mistake is live.
+      - name: Family App output is laid out for Firebase Hosting
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          dist=apps/family-app/dist
+          test -f "$dist/app.html"     || { echo "::error::$dist/app.html missing"; exit 1; }
+          test ! -f "$dist/index.html" || { echo "::error::$dist/index.html would win over the / rewrite"; exit 1; }
+          test -f "$dist/landing.html" || { echo "::error::$dist/landing.html missing"; exit 1; }
+
+      - name: Authenticate
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: Deploy
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          TARGET: ${{ inputs.target || 'all' }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          case "$TARGET" in
+            all)   only="hosting:family,hosting:admin"; sites="family,admin" ;;
+            family) only="hosting:family";              sites="family" ;;
+            admin)  only="hosting:admin";               sites="admin" ;;
+            *) echo "::error::unknown target $TARGET"; exit 1 ;;
+          esac
+
+          if [ -n "$CHANNEL" ]; then
+            npx --yes firebase-tools hosting:channel:deploy "$CHANNEL" \
+              --project parentix-4be0d --only "$sites" --expires 7d
+          else
+            npx --yes firebase-tools deploy \
+              --project parentix-4be0d --only "$only" \
+              --message "${GITHUB_SHA::7} via ${GITHUB_WORKFLOW}"
+          fi
+
+      - name: Remove the credential
+        if: always() && steps.gate.outputs.ready == 'true'
+        run: rm -f "$RUNNER_TEMP/sa.json"

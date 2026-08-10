@@ -10,6 +10,8 @@
 | Application secrets  | Secret Manager, `parentix-<env>-*`                               |
 | Images               | Artifact Registry `parentix-<env>/api`, tagged with the commit SHA |
 | Terraform state      | `gs://<project>-parentix-tfstate` (versioned)                    |
+| Web releases         | Firebase console → Hosting → `parentix-4be0d` / `parentix-admin`  |
+| Web access logs      | Not available. Firebase Hosting does not export request logs      |
 
 ```bash
 gcloud run services logs read parentix-prod-api --region us-central1 --limit 50
@@ -150,14 +152,63 @@ sitting in `FIELD_ENCRYPTION_KEY` or an unset database secret.
 the serverless NEG is not attached. Check
 `gcloud run services describe parentix-prod-api --region us-central1`.
 
-**HTTPS does not work at all on a new deployment.** The managed certificate is
-still provisioning. It cannot issue until all three hostnames resolve to the load
-balancer IP:
+**HTTPS does not work on `api.<domain>` after a deployment.** The managed
+certificate is still provisioning. It cannot issue until the hostname resolves to
+the load balancer IP:
 
 ```bash
-gcloud compute ssl-certificates describe parentix-prod-cert --global \
-  --format='value(managed.status,managed.domainStatus)'
+gcloud compute ssl-certificates list --global \
+  --format='table(name,managed.status,managed.domainStatus)'
 ```
+
+The web hostnames are Firebase Hosting's and carry their own certificates; they
+are unaffected by anything on this load balancer.
+
+**A web page loads but every request on it fails.** The hostname is not in the
+API's CORS allowlist. This is what adding a domain to DNS and to Firebase without
+the matching Terraform change looks like: the site is perfect and the app is
+dead. The browser console reports a blocked cross-origin request; the API logs
+nothing at all, because the response it sent was fine.
+
+```bash
+terraform -chdir=infrastructure/gcp output cors_origins   # what it should accept
+
+# Or just ask it:
+curl -sS -o /dev/null -D - -H 'Origin: https://the-hostname' \
+  https://api.parentix.ca/api/health | grep -i access-control-allow-origin
+```
+
+Add the origin to `extra_cors_origins` — or let `domain` derive it — and apply.
+
+**Sign-in says "Could not reach the Parentix service."** The app got no response
+at all, as opposed to a rejected one — so before suspecting the API, check that
+`api.<domain>` still resolves. That record is added by hand at GoDaddy
+(`manage_dns = false`), which makes it the one piece of the deployment no apply
+can restore and no alarm watches: the API stays healthy, its logs stay empty,
+and the only evidence is a message that blames the parent's connection. The
+child apps fail the same way and even more quietly, having no screen to say so
+on. `infrastructure/gcp/envs/prod.tfvars` records the address to restore it to.
+
+**`parentix.ca` serves the wrong site, intermittently.** More than one A record
+on the apex, and the browser picks one at random. GoDaddy's domain-forwarding
+addresses are one occupant; the load balancer, left over from when it served the
+web tier, is the other — and it can only fail there, since its certificate
+covers `api.<domain>` alone. Keep exactly what Firebase minted and nothing else.
+
+All three of the above are what `npm run check:dns` looks for — it resolves every
+hostname and makes each address prove which site it serves, rather than comparing
+addresses against a list that has to be kept up to date somewhere.
+
+**A web deploy went out and browsers still show the old build.** Firebase
+releases are atomic, so this is a caching mistake rather than a partial deploy.
+HTML must carry `max-age=0, must-revalidate` and only `/assets/**` may be
+immutable:
+
+```bash
+curl -sS -o /dev/null -D - https://app.parentix.ca/ | grep -i cache-control
+```
+
+Roll back from the Hosting console while you fix `firebase.json`.
 
 **Realtime works for some parents and not others.** Almost always Redis: more
 than one instance with `REDIS_URL` unset. Confirm `redis_enabled = true` and that

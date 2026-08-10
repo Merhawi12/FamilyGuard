@@ -4,21 +4,79 @@ import {
   devices as devicesApi,
   uploadChildAvatar,
   errorMessage,
+  useSocket,
   Avatar,
+  EmptyState,
+  Icon,
+  Modal,
 } from '@parentix/shared';
 import DeviceCard from '../components/DeviceCard';
+import PageIntro from '../components/PageIntro';
 
+/**
+ * The platforms a link code can actually be redeemed on.
+ *
+ * This offered iPhone, Windows and Mac as well. There is no Parentix client for
+ * any of them — the child app is Android-only, down to the Kotlin accessibility
+ * service and VPN service it is built on — so choosing one produced a link code
+ * nothing could consume and a device row that stayed "never connected" forever,
+ * with no indication anywhere that it never could.
+ *
+ * Editing an existing device keeps the wider list, because rows created before
+ * this must still be able to name what they are.
+ */
+const DEVICE_TYPES = [{ value: 'android', label: 'Android phone or tablet' }];
+
+const EDITABLE_DEVICE_TYPES = [
+  ...DEVICE_TYPES,
+  { value: 'ios', label: 'iPhone or iPad' },
+  { value: 'windows', label: 'Windows' },
+  { value: 'mac', label: 'Mac' },
+];
+
+/**
+ * Child profiles and the devices linked to them.
+ *
+ * Master and detail sit side by side from `lg` up. On a phone they stack, and
+ * the two forms — new child, new device link — are sheets rather than cards
+ * pushed inline: a form that appears above the list shifts everything below it
+ * down mid-tap, and the parent has to scroll back up to find what moved.
+ */
 export default function Children() {
   const [childList, setChildList] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-  const [showForm, setShowForm] = useState(false);
-  const [showLink, setShowLink] = useState(false);
+  const [showChildForm, setShowChildForm] = useState(false);
+  const [showLinkForm, setShowLinkForm] = useState(false);
   const [linkData, setLinkData] = useState(null);
   const [form, setForm] = useState({ name: '', age: '' });
+  /**
+   * A child's name and age were write-once. `PUT /children/:id` has always
+   * existed and this screen only ever used it to set an avatar, so a typo in a
+   * child's name — or an age left blank at signup, which is what tunes the
+   * default safety settings — could only be corrected by deleting the child, and
+   * that unlinks their devices and takes their whole history with it.
+   */
+  const [editChild, setEditChild] = useState(null);
   const [deviceForm, setDeviceForm] = useState({ deviceName: '', type: 'android' });
+  const [editDevice, setEditDevice] = useState(null);
+  // Set when the link sheet is finishing an existing device rather than
+  // creating one — the sheet then skips its form and goes straight to a code.
+  const [linkTarget, setLinkTarget] = useState(null);
+  /**
+   * The device that just confirmed the code on screen.
+   *
+   * The sheet handed out a code and then had no idea what became of it: the
+   * parent watched a code that had already been redeemed, and only found out by
+   * closing the sheet, which is what triggered the reload. Since the phone is
+   * usually in their other hand, that is precisely the moment they are watching
+   * for.
+   */
+  const [linkedDevice, setLinkedDevice] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
+  const { socket } = useSocket();
 
   // Track the selection by id so it always reflects the freshly loaded record
   // rather than a stale copy captured when the row was clicked.
@@ -39,16 +97,58 @@ export default function Children() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * A phone finished linking. The server says so the moment it happens.
+   *
+   * Handled on the page rather than in the socket context because this is the
+   * only screen that can act on it, and because it has to do two things: turn
+   * the open code sheet into a confirmation, and refresh the list underneath so
+   * the new card is already there when the sheet closes.
+   */
+  useEffect(() => {
+    if (!socket) return undefined;
+    const onLinked = (device) => {
+      setLinkedDevice(device);
+      load();
+    };
+    socket.on('device:linked', onLinked);
+    return () => socket.off('device:linked', onLinked);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket]);
+
   const addChild = async (e) => {
     e.preventDefault();
     setError('');
+    setSaving(true);
     try {
       await childrenApi.create({ name: form.name.trim(), age: parseInt(form.age, 10) || null });
       setForm({ name: '', age: '' });
-      setShowForm(false);
+      setShowChildForm(false);
       await load();
     } catch (err) {
       setError(errorMessage(err, 'Failed to add child'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveChildEdit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSaving(true);
+    try {
+      await childrenApi.update(editChild.id, {
+        name: editChild.name.trim(),
+        // Cleared rather than skipped when emptied: a parent removing a wrong age
+        // has to be able to leave it unset, not be stuck with the old value.
+        age: editChild.age === '' ? null : parseInt(editChild.age, 10),
+      });
+      setEditChild(null);
+      await load();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not save those details'));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -66,15 +166,91 @@ export default function Children() {
   const generateLink = async (e) => {
     e.preventDefault();
     setError('');
+    setSaving(true);
     try {
       const res = await devicesApi.generateLink({ childId: selected.id, ...deviceForm });
+      setLinkedDevice(null);
       setLinkData(res.data);
     } catch (err) {
       setError(errorMessage(err, 'Failed to generate a link code'));
+    } finally {
+      setSaving(false);
     }
   };
 
-  const removeDevice = async (id) => {
+  const closeLinkForm = async () => {
+    setShowLinkForm(false);
+    setLinkData(null);
+    setLinkTarget(null);
+    setLinkedDevice(null);
+    setDeviceForm({ deviceName: '', type: 'android' });
+    // A device may have confirmed the code while the sheet was open and the
+    // socket been down — the reload is the fallback for exactly that.
+    await load();
+  };
+
+  /**
+   * True once the phone this sheet is about has confirmed its code.
+   *
+   * Matched on the device id rather than merely "something linked", so a second
+   * child's phone finishing at the same moment cannot make this sheet claim the
+   * wrong one is done.
+   */
+  const justLinked = linkedDevice && linkData?.device?.id === linkedDevice.deviceId
+    ? linkedDevice
+    : null;
+
+  /* ── A device that never connected ───────────────────────────────────────
+     Linking codes expire after 30 minutes and the sheet that showed one does
+     not keep it. Re-issuing a code for the existing row is what lets a parent
+     finish the job later, instead of deleting the device and starting over. */
+  const connectDevice = async (device) => {
+    setError('');
+    setLinkData(null);
+    setLinkedDevice(null);
+    setLinkTarget(device);
+    setShowLinkForm(true);
+    setSaving(true);
+    try {
+      const res = await devicesApi.regenerateLink(device.id);
+      setLinkData(res.data);
+    } catch (err) {
+      setError(errorMessage(err, 'Could not create a new link code'));
+      setShowLinkForm(false);
+      setLinkTarget(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openDeviceEdit = (device) => {
+    setError('');
+    setEditDevice({ id: device.id, name: device.name, type: device.type || 'android' });
+  };
+
+  const saveDeviceEdit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSaving(true);
+    try {
+      await devicesApi.update(editDevice.id, {
+        name: editDevice.name.trim(),
+        type: editDevice.type,
+      });
+      setEditDevice(null);
+      await load();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not save that device'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Removing a device revokes its token: the phone stops reporting and cannot
+  // reconnect without being linked again. Worth a confirmation, the same as
+  // removing a child, since a trash icon is easy to hit by accident.
+  const removeDevice = async (id, name) => {
+    if (!confirm(`Remove ${name || 'this device'}? It will stop reporting and has to be linked again.`)) return;
     setError('');
     try {
       await devicesApi.remove(id);
@@ -115,169 +291,362 @@ export default function Children() {
 
   return (
     <div className="space-y-5">
-      <div className="flex justify-between items-start gap-3">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold">Children</h1>
-          <p className="text-gray-500 text-sm mt-1">Manage child profiles and linked devices</p>
-        </div>
-        <button onClick={() => setShowForm(true)} className="btn-primary shrink-0 text-sm">
-          + Add Child
+      <PageIntro description="Child profiles and the devices linked to them.">
+        <button onClick={() => setShowChildForm(true)} className="btn-primary btn-sm">
+          <Icon name="plus" size={16} strokeWidth={2.5} />
+          Add child
         </button>
-      </div>
+      </PageIntro>
 
-      {error && (
-        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
+      {error && <p className="notice-error">{error}</p>}
+
+      {childList.length === 0 ? (
+        <div className="card">
+          <EmptyState
+            icon="children"
+            title="No children yet"
+            description="Add a child profile, then link their phone or tablet to start monitoring."
+            action={
+              <button onClick={() => setShowChildForm(true)} className="btn-primary">
+                Add your first child
+              </button>
+            }
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 items-start">
+          {/* Master */}
+          <div className="space-y-2 lg:col-span-1">
+            {childList.map((c) => {
+              const active = selectedId === c.id;
+              return (
+                <div
+                  key={c.id}
+                  className={`card p-3 flex items-center gap-3 transition ${
+                    active ? 'border-primary-500 ring-1 ring-primary-500' : 'hover:border-gray-200'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(c.id)}
+                    aria-pressed={active}
+                    className="flex items-center gap-3 flex-1 min-w-0 text-left min-h-[44px]"
+                  >
+                    <Avatar name={c.name} imageUrl={c.avatarUrl} size="sm" />
+                    <span className="flex-1 min-w-0">
+                      <span className="block font-medium text-gray-900 truncate">{c.name}</span>
+                      <span className="block text-xs text-gray-500">
+                        {c.age ? `Age ${c.age}` : 'No age set'} · {c.devices?.length || 0} device
+                        {c.devices?.length === 1 ? '' : 's'}
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setEditChild({ id: c.id, name: c.name, age: c.age ?? '' })}
+                    className="icon-btn text-gray-400 hover:text-primary-600 hover:bg-primary-50"
+                    aria-label={`Edit ${c.name}`}
+                  >
+                    <Icon name="edit" size={18} />
+                  </button>
+                  <button
+                    onClick={() => removeChild(c.id)}
+                    className="icon-btn text-gray-400 hover:text-danger hover:bg-red-50"
+                    aria-label={`Remove ${c.name}`}
+                  >
+                    <Icon name="trash" size={18} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Detail */}
+          {selected && (
+            <div className="lg:col-span-2 space-y-4">
+              <div className="card text-center sm:text-left sm:flex sm:items-center sm:gap-5">
+                <Avatar
+                  name={selected.name}
+                  imageUrl={selected.avatarUrl}
+                  size="xl"
+                  className="mx-auto sm:mx-0 mb-4 sm:mb-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-gray-900 truncate">{selected.name}&apos;s photo</p>
+                  <p className="text-xs text-gray-500 mt-0.5 mb-3">JPEG, PNG or WebP, up to 5 MB</p>
+                  <div className="flex flex-wrap justify-center sm:justify-start gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={changePhoto}
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="btn-secondary btn-sm"
+                      disabled={uploading}
+                    >
+                      <Icon name="upload" size={15} />
+                      {uploading ? 'Uploading…' : selected.avatarUrl ? 'Change photo' : 'Upload photo'}
+                    </button>
+                    {selected.avatarUrl && (
+                      <button onClick={removePhoto} className="btn-ghost btn-sm" disabled={uploading}>
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="section-title truncate">{selected.name}&apos;s devices</h2>
+                <button onClick={() => setShowLinkForm(true)} className="btn-primary btn-sm shrink-0">
+                  <Icon name="link" size={15} />
+                  Link device
+                </button>
+              </div>
+
+              {(selected.devices || []).length === 0 ? (
+                <div className="card">
+                  <EmptyState
+                    compact
+                    icon="phone"
+                    title="No devices linked"
+                    description="Install the Parentix app on their phone and enter a link code to connect it."
+                    action={
+                      <button onClick={() => setShowLinkForm(true)} className="btn-primary">
+                        Link a device
+                      </button>
+                    }
+                  />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {selected.devices.map((d) => (
+                    <DeviceCard
+                      key={d.id}
+                      device={d}
+                      onRemove={removeDevice}
+                      onConnect={connectDevice}
+                      onEdit={openDeviceEdit}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
-      {showForm && (
-        <div className="card">
-          <h2 className="font-semibold mb-4">New Child Profile</h2>
-          <form onSubmit={addChild} className="space-y-3">
+      {/* ── New child ──────────────────────────────────────────────────────── */}
+      <Modal
+        open={showChildForm}
+        onClose={() => setShowChildForm(false)}
+        title="Add a child"
+        description="You can link their devices next."
+      >
+        <form onSubmit={addChild} className="space-y-4" id="add-child-form">
+          <label className="field">
+            <span className="field-label">Name</span>
             <input
               className="input"
-              placeholder="Child's name"
+              placeholder="e.g. Sarah"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               required
             />
+          </label>
+          <label className="field">
+            <span className="field-label">Age</span>
             <input
               className="input"
               type="number"
-              placeholder="Age (optional)"
+              inputMode="numeric"
+              min="1"
+              max="21"
+              placeholder="Optional"
               value={form.age}
               onChange={(e) => setForm({ ...form, age: e.target.value })}
             />
-            <div className="flex gap-2">
-              <button type="submit" className="btn-primary flex-1">
-                Save
-              </button>
-              <button type="button" onClick={() => setShowForm(false)} className="btn-ghost flex-1">
-                Cancel
-              </button>
-            </div>
+            <span className="field-hint">Used to tune the default safety settings.</span>
+          </label>
+          <button type="submit" className="btn-primary btn-block" disabled={saving || !form.name.trim()}>
+            {saving ? 'Adding…' : 'Add child'}
+          </button>
+        </form>
+      </Modal>
+
+      {/* ── Edit a child ───────────────────────────────────────────────────── */}
+      <Modal
+        open={!!editChild}
+        onClose={() => setEditChild(null)}
+        title="Edit child"
+        description="The name is what you see across the dashboard; the age tunes the default safety settings."
+      >
+        {editChild && (
+          <form onSubmit={saveChildEdit} className="space-y-4">
+            <label className="field">
+              <span className="field-label">Name</span>
+              <input
+                className="input"
+                value={editChild.name}
+                onChange={(e) => setEditChild({ ...editChild, name: e.target.value })}
+                required
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Age</span>
+              <input
+                className="input"
+                type="number"
+                inputMode="numeric"
+                min="1"
+                max="21"
+                placeholder="Optional"
+                value={editChild.age}
+                onChange={(e) => setEditChild({ ...editChild, age: e.target.value })}
+              />
+            </label>
+            <button type="submit" className="btn-primary btn-block" disabled={saving || !editChild.name.trim()}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
           </form>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-        <div className="space-y-2">
-          {childList.length === 0 && <p className="text-gray-400 text-sm text-center py-6">No children added yet.</p>}
-          {childList.map((c) => (
-            <div
-              key={c.id}
-              onClick={() => setSelectedId(c.id)}
-              className={`card cursor-pointer transition ${selectedId === c.id ? 'ring-2 ring-blue-500' : ''}`}
-            >
-              <div className="flex items-center gap-3">
-                <Avatar name={c.name} imageUrl={c.avatarUrl} />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{c.name}</p>
-                  <p className="text-xs text-gray-400">
-                    {c.age ? `Age ${c.age}` : 'No age'} · {c.devices?.length || 0} device(s)
-                  </p>
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeChild(c.id);
-                  }}
-                  className="text-red-400 hover:text-red-600 text-xs shrink-0"
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {selected && (
-          <div className="lg:col-span-2 space-y-4">
-            <div className="card flex items-center gap-4">
-              <Avatar name={selected.name} imageUrl={selected.avatarUrl} size="lg" />
-              <div className="min-w-0">
-                <p className="font-semibold truncate">{selected.name}</p>
-                <p className="text-xs text-gray-400 mb-2">JPEG, PNG or WebP, up to 5 MB</p>
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    className="hidden"
-                    onChange={changePhoto}
-                  />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="btn-ghost text-sm px-3 py-1 border border-gray-200"
-                    disabled={uploading}
-                  >
-                    {uploading ? 'Uploading…' : selected.avatarUrl ? 'Change photo' : 'Upload photo'}
-                  </button>
-                  {selected.avatarUrl && (
-                    <button onClick={removePhoto} className="btn-ghost text-sm px-3 py-1" disabled={uploading}>
-                      Remove photo
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center gap-3">
-              <h2 className="font-semibold truncate">{selected.name}&apos;s Devices</h2>
-              <button onClick={() => setShowLink(!showLink)} className="btn-primary text-sm shrink-0">
-                Link Device
-              </button>
-            </div>
-
-            {showLink && (
-              <div className="card">
-                <h3 className="font-medium mb-3">Link a new device</h3>
-                <form onSubmit={generateLink} className="space-y-3">
-                  <input
-                    className="input"
-                    placeholder="Device name (e.g. Sarah's Phone)"
-                    value={deviceForm.deviceName}
-                    onChange={(e) => setDeviceForm({ ...deviceForm, deviceName: e.target.value })}
-                    required
-                  />
-                  <select
-                    className="input"
-                    value={deviceForm.type}
-                    onChange={(e) => setDeviceForm({ ...deviceForm, type: e.target.value })}
-                  >
-                    <option value="android">Android</option>
-                    <option value="ios">iOS</option>
-                    <option value="windows">Windows</option>
-                    <option value="mac">Mac</option>
-                  </select>
-                  <button type="submit" className="btn-primary w-full">
-                    Generate Code
-                  </button>
-                </form>
-                {linkData && (
-                  <div className="mt-4 p-4 bg-blue-50 rounded-xl text-center">
-                    <p className="text-sm text-gray-600 mb-2">Enter this code on the child&apos;s device:</p>
-                    <p className="text-3xl md:text-4xl font-mono font-bold text-blue-600 tracking-widest">
-                      {linkData.code}
-                    </p>
-                    {linkData.qrCode && (
-                      <img src={linkData.qrCode} alt="Link QR code" className="mx-auto mt-3 w-28 h-28 md:w-32 md:h-32" />
-                    )}
-                    <p className="text-xs text-gray-400 mt-2">Valid for 30 minutes</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-3">
-              {(selected.devices || []).length === 0 ? (
-                <p className="text-gray-400 text-sm">No devices linked yet</p>
-              ) : (
-                selected.devices.map((d) => <DeviceCard key={d.id} device={d} onRemove={removeDevice} />)
-              )}
-            </div>
-          </div>
         )}
-      </div>
+      </Modal>
+
+      {/* ── Link a device ──────────────────────────────────────────────────── */}
+      <Modal
+        open={showLinkForm}
+        onClose={closeLinkForm}
+        title={linkTarget ? `Connect ${linkTarget.name}` : 'Link a device'}
+        description={
+          linkTarget
+            ? 'This device was set up but never connected. Here is a fresh code for it.'
+            : selected ? `Connect a phone or tablet to ${selected.name}.` : undefined
+        }
+      >
+        {!linkData && linkTarget ? (
+          <p className="text-sm text-gray-400 text-center py-8">Creating a code…</p>
+        ) : justLinked ? (
+          /* The code was redeemed while this sheet was open. Saying so is the
+             whole point of the realtime event — a parent standing over the
+             child's phone should not have to close the sheet to find out. */
+          <div className="text-center py-4">
+            <span className="w-14 h-14 rounded-full bg-green-50 text-success flex items-center justify-center mx-auto">
+              <Icon name="check" size={28} strokeWidth={2.5} />
+            </span>
+            <p className="font-semibold text-gray-900 mt-4">
+              {justLinked.name || 'That device'} is connected
+            </p>
+            <p className="text-sm text-gray-500 mt-1">
+              It is reporting to {selected?.name || 'this child'}&apos;s profile now
+              {justLinked.osVersion ? ` · ${justLinked.osVersion}` : ''}.
+            </p>
+            <button onClick={closeLinkForm} className="btn-primary btn-block mt-5">
+              Done
+            </button>
+          </div>
+        ) : linkData ? (
+          <div className="text-center">
+            <p className="text-sm text-gray-600">Enter this code in the Parentix app on their device:</p>
+            <p className="text-3xl sm:text-4xl font-mono font-bold text-primary-600 tracking-[0.2em] my-4">
+              {linkData.code}
+            </p>
+            {linkData.qrCode && (
+              <img
+                src={linkData.qrCode}
+                alt="Link QR code"
+                className="mx-auto w-40 h-40 rounded-2xl border border-gray-100"
+              />
+            )}
+            <p className="text-xs text-gray-400 mt-3">This code is valid for 30 minutes.</p>
+            {/* Not a spinner: nothing here is pending on this side. It tells the
+                parent the screen is live, which is what makes the switch to the
+                confirmation above read as an answer rather than a glitch. */}
+            <p className="text-xs text-gray-400 mt-1">
+              This page updates as soon as the device connects.
+            </p>
+            <button onClick={closeLinkForm} className="btn-secondary btn-block mt-5">
+              Done
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={generateLink} className="space-y-4">
+            <label className="field">
+              <span className="field-label">Device name</span>
+              <input
+                className="input"
+                placeholder="e.g. Sarah's Phone"
+                value={deviceForm.deviceName}
+                onChange={(e) => setDeviceForm({ ...deviceForm, deviceName: e.target.value })}
+                required
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Device type</span>
+              <select
+                className="input"
+                value={deviceForm.type}
+                onChange={(e) => setDeviceForm({ ...deviceForm, type: e.target.value })}
+              >
+                {DEVICE_TYPES.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="btn-primary btn-block"
+              disabled={saving || !deviceForm.deviceName.trim()}
+            >
+              <Icon name="qr" size={16} />
+              {saving ? 'Generating…' : 'Generate code'}
+            </button>
+          </form>
+        )}
+      </Modal>
+
+      {/* ── Edit a device ──────────────────────────────────────────────────── */}
+      <Modal
+        open={!!editDevice}
+        onClose={() => setEditDevice(null)}
+        title="Edit device"
+        description="The name is what you see across the dashboard; the type only picks its icon."
+      >
+        {editDevice && (
+          <form onSubmit={saveDeviceEdit} className="space-y-4">
+            <label className="field">
+              <span className="field-label">Device name</span>
+              <input
+                className="input"
+                placeholder="e.g. Sarah's Phone"
+                value={editDevice.name}
+                onChange={(e) => setEditDevice({ ...editDevice, name: e.target.value })}
+                required
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Device type</span>
+              <select
+                className="input"
+                value={editDevice.type}
+                onChange={(e) => setEditDevice({ ...editDevice, type: e.target.value })}
+              >
+                {EDITABLE_DEVICE_TYPES.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="btn-primary btn-block"
+              disabled={saving || !editDevice.name.trim()}
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }

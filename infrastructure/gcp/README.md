@@ -4,15 +4,25 @@ Terraform for the whole platform. One configuration, one workspace per
 environment.
 
 ```
-                       ┌─ app.<domain>   → GCS bucket + Cloud CDN
-Internet ─▶ Global LB ─┼─ admin.<domain> → GCS bucket + Cloud CDN
-            (anycast)  └─ api.<domain>   → Cloud Run ─┬─ Cloud SQL (Unix socket)
-                                                      ├─ Memorystore (VPC, prod)
-                                                      └─ Cloud Storage (uploads)
+            ┌─ parentix.ca / www / app.<domain> ─┐
+Internet ─▶ ┤                                    ├─▶ Firebase Hosting  (not Terraform's)
+            └─ admin.<domain> ──────────────────-┘
+
+Internet ─▶ Global LB ── api.<domain> → Cloud Run ─┬─ Cloud SQL (Unix socket)
+            (anycast)                              ├─ Memorystore (VPC, prod)
+                                                   └─ Cloud Storage (uploads)
 ```
 
-`/api/*` and `/socket.io/*` are also routed to Cloud Run from the two app
-hostnames, so each front end reaches the API same-origin and needs no CORS.
+This configuration owns the right-hand half. The web apps are published to
+Firebase Hosting by `scripts/deploy-web.sh` from `firebase.json` at the
+repository root — Hosting is content, not infrastructure, and having two tools
+own it is how a deployment ends up with two of it.
+
+What is here because of that split: the load balancer has one backend, its
+certificate covers `api.<domain>` alone, and `local.cors_origins` derives every
+browser origin the API must accept. Cross-origin is the whole of the access
+policy between the tiers, so a hostname missing from that list is a site that
+loads and then fails every request.
 
 ## What replaced what
 
@@ -22,13 +32,16 @@ hostnames, so each front end reaches the API same-origin and needs no CORS.
 | RDS PostgreSQL | Cloud SQL for PostgreSQL |
 | ElastiCache | Memorystore for Redis |
 | S3 | Cloud Storage |
-| CloudFront | Cloud CDN + global external Application LB |
-| ALB | the same load balancer |
+| CloudFront *(static)* | Firebase Hosting |
+| ALB / CloudFront *(API)* | global external Application LB |
 | ECR | Artifact Registry |
 | Secrets Manager | Secret Manager |
 | ACM | Google-managed SSL certificates |
 | Route 53 | Cloud DNS *(optional)* |
 | IAM roles | IAM service accounts |
+| EventBridge Scheduler | Cloud Scheduler |
+| CloudWatch | Cloud Logging + Cloud Monitoring |
+| SNS *(mobile push)* | Firebase Cloud Messaging |
 | CDK (TypeScript) | Terraform |
 | **SES** | **no equivalent — an external SMTP relay** |
 
@@ -50,8 +63,9 @@ enabled on the project — `terraform apply` enables the ~16 APIs it needs itsel
 ### `parentix-4be0d` is a Firebase project
 
 That is fine — a Firebase project *is* a Google Cloud project, with Firebase
-layered on top. Nothing here touches Firestore, Firebase Hosting, App Engine or
-the default `*.appspot.com` / `*.firebasestorage.app` bucket, and
+layered on top. Firebase Hosting is used deliberately (see below); nothing here touches
+Firestore, Firebase Authentication, App Engine or the default `*.appspot.com` /
+`*.firebasestorage.app` bucket, and
 `disable_on_destroy = false` on the API enablement means a `terraform destroy`
 cannot switch off an API that Firebase is relying on.
 
@@ -70,21 +84,23 @@ pay-as-you-go, not a flat fee, so an idle dev environment still costs about what
 the table further down says — but set a budget alert, because nothing here caps
 itself.
 
-### Why not Firebase Hosting for the web apps?
+### Why Firebase Hosting serves the apps but not the API
 
-It is a fair question given the project is already on Firebase, and it would be
-appealing: proper SPA rewrites (no 404-on-deep-link caveat), free TLS, a global
-CDN, and no ~$18/month load balancer.
+Hosting is a very good static CDN: real SPA rewrites (no 404-on-deep-link
+caveat), certificates it renews itself, atomic releases with one-click rollback,
+and a free tier two bundles never leave.
 
-**Firebase Hosting does not proxy WebSockets.** Socket.IO carries alerts, chat
-and location for this product; through Firebase Hosting it would be stuck on
-HTTP long-polling. Splitting static onto Firebase Hosting and the API onto its
-own hostname avoids that, but reintroduces cross-origin calls and a build-time
-`VITE_API_URL`, which is exactly what the same-origin routing here exists to
-avoid.
+It is a poor reverse proxy, and the API needs a good one. Hosting **does not
+proxy a websocket upgrade**, so a `/api/**` rewrite would hold Socket.IO — which
+carries alerts, chat and location for this product — on HTTP long-polling
+forever. It also strips every cookie but `__session`, which is what Cloud Run's
+session affinity uses to keep a polling handshake on one instance, and it adds a
+proxy hop that Express is not configured for (`TRUST_PROXY=1`), so rate limiting
+would start keying off an edge address.
 
-So the load balancer stays. Firebase Hosting remains a reasonable home for the
-marketing pages alone if that is ever worth splitting out.
+So: static on Hosting, API on the load balancer, and the browser makes a genuine
+cross-origin call. The price is one preflight per request shape and a build-time
+`VITE_API_URL`. `docs/ARCHITECTURE.md` has the longer version.
 
 ### Or use Cloud Shell
 
@@ -136,7 +152,7 @@ Then, from the repo root:
 
 ```bash
 ENV_NAME=dev ./scripts/deploy-api.sh     # build → Artifact Registry → Cloud Run
-ENV_NAME=dev ./scripts/deploy-web.sh     # build → GCS → CDN invalidation
+ENV_NAME=dev ./scripts/deploy-web.sh     # build → Firebase Hosting
 ```
 
 `deploy-api.sh` is not optional after the first apply. The registry is created
@@ -160,14 +176,19 @@ printf 'SG.…'       | gcloud secrets versions add parentix-prod-smtp-pass --da
 Cloud Run reads `latest`, so redeploy the API afterwards to pick them up.
 Terraform keeps managing only version 1 and will not overwrite these.
 
-**2. Point DNS at the load balancer.** `terraform output load_balancer_ip`, then
-create an A record for each of the three hostnames. The managed certificate stays
-in `PROVISIONING` until all three resolve — usually 15–60 minutes, occasionally
-longer. Check with:
+**2. Point DNS at both front doors.** Two destinations, not one: `api` gets an A
+record at `terraform output load_balancer_ip`; the apex, `www`, `app` and `admin`
+get the addresses Firebase prints when each custom domain is connected in the
+Firebase console. The load balancer's certificate covers `api.<domain>` alone and
+stays in `PROVISIONING` until that name resolves — usually 15–60 minutes,
+occasionally longer. Check with:
 
 ```bash
-gcloud compute ssl-certificates describe parentix-prod-cert --global
+gcloud compute ssl-certificates list --global   --format='table(name,managed.status,managed.domainStatus)'
 ```
+
+Firebase issues and renews its own certificates; there is nothing to wait on
+beyond its console showing the domain as connected.
 
 **3. Create the first staff account.** The admin dashboard has no sign-up.
 
@@ -182,6 +203,39 @@ Simpler alternative: connect through the Cloud SQL Auth Proxy and run the script
 locally against it.
 
 **4. Register the Stripe webhook** at `terraform output stripe_webhook_url`.
+
+**5. Register the two Android apps for push.** The server side needs nothing:
+`fcm.googleapis.com` is enabled by this config and the API sends with its own
+service account, so there is no server key to store anywhere. What is needed is
+the client side — an app registered in the Firebase project, and its
+`google-services.json` in the build:
+
+| App | Package | File goes in |
+|---|---|---|
+| Family (parent) | `ca.parentix.family` | `apps/family-app/android/app/` |
+| Child | `com.parentix.child` | `apps/child-app/android/app/` |
+
+Both Gradle projects apply the `google-services` plugin only when that file is
+present, so a build without it succeeds and then cannot receive a single
+notification. `scripts/build-apk.sh` warns when it is missing rather than letting
+that be discovered on a handset. The child app additionally needs its FCM
+credential uploaded to the Expo project (`eas credentials`), because its push
+goes through Expo's relay. See docs/DEPLOYMENT.md §2.3a and §2.3b.
+
+**6. Check the scheduled job ran.** Cloud Scheduler drives the hourly safety
+analysis; the API's in-process timer is off on Cloud Run (`JOB_RUNNER=external`),
+so if the job is broken nothing else picks the work up.
+
+```bash
+gcloud scheduler jobs describe parentix-prod-safety-analysis --location us-central1 \
+  --format='value(status.code,lastAttemptTime)'
+# Force one now rather than waiting for the hour:
+gcloud scheduler jobs run parentix-prod-safety-analysis --location us-central1
+```
+
+A `401` in the job's history is an audience or service-account mismatch between
+`scheduler.tf` and the `TASKS_AUDIENCE` the service was deployed with — it is
+recorded on the Scheduler side, not in the API's logs.
 
 ## Email needs a decision
 
@@ -201,8 +255,9 @@ Compute Engine blocks outbound port 25 permanently; use 587 or 465.
 | Memorystore | — | ~$35 |
 | VPC connector | — | ~$9 |
 | Load balancer | — | ~$18 |
-| Storage + CDN | ~$1 | ~$5 |
-| **Total** | **~$10–15** | **~$130–160** |
+| Firebase Hosting | $0 | $0–2 |
+| Cloud Storage (uploads) | ~$1 | ~$3 |
+| **Total** | **~$10–15** | **~$125–155** |
 
 Roughly half the AWS equivalent, mostly because Cloud Run scales to zero and
 there are no NAT gateway charges.
@@ -212,10 +267,17 @@ connector), `db_availability_type`, and `api_min_instances`.
 
 ## Known trade-offs
 
-**SPA deep links return HTTP 404.** A backend bucket serves `not_found_page`
-with a 404 status, so `app.<domain>/dashboard` returns the right HTML with the
-wrong status code. Browsers render it and routing works; crawlers see a 404.
-Firebase Hosting handles rewrites properly and is the fix if this ever matters.
+**The web tier is not in Terraform.** Firebase Hosting sites are created once
+with the CLI and released from `firebase.json`. `terraform destroy` therefore
+leaves the web apps serving, pointed at an API that no longer exists — tidy them
+up separately. The upside is that a web release cannot be blocked by, or block,
+an infrastructure change.
+
+**A new web hostname needs two edits, not one.** DNS and the Firebase console
+put it on the internet; `local.cors_origins` is what lets it call the API. Miss
+the second and the site loads perfectly and fails every request — which reads
+like an outage rather than a missing line of configuration. `terraform output
+cors_origins` is the list the API actually has.
 
 **Socket.IO relies on Cloud Run session affinity.** Serverless NEGs do not
 support load-balancer session affinity, so `session_affinity = true` on the

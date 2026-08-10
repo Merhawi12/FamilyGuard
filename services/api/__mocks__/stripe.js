@@ -10,6 +10,10 @@ const instance = {
     retrieve: jest.fn(async () => {
       throw new Error('stripe unavailable (mock)');
     }),
+    // Resolves by default: closing an account cancels the subscription first and
+    // refuses to delete anything if that fails, so a mock that threw would make
+    // every deletion test a test of the failure path.
+    cancel: jest.fn(async (id) => ({ id, status: 'canceled' })),
   },
   checkout: {
     sessions: {

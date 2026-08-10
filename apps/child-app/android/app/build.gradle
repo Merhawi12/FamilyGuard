@@ -2,6 +2,25 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+/**
+ * Firebase, and therefore push, only when the project has been given credentials.
+ *
+ * google-services.json is per-Firebase-project and is not in the repository, so
+ * applying this unconditionally would fail the build for every checkout that has
+ * not downloaded one — including CI, which never needs push. Applying it only
+ * when the file is present keeps `npm run apk:child` working out of the box.
+ *
+ * The cost of that choice is an APK that builds cleanly and then cannot receive a
+ * single notification, which is exactly the kind of silent degradation worth
+ * refusing. scripts/build-apk.sh says so at the top of every child build, so the
+ * gap is announced rather than discovered on a handset.
+ *
+ * See docs/DEPLOYMENT.md §2.3a for where the file comes from.
+ */
+if (file('google-services.json').exists()) {
+    apply plugin: "com.google.gms.google-services"
+}
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**

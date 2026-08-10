@@ -8,6 +8,10 @@
 <link rel="icon" href="/logo.png" />
 <link rel="apple-touch-icon" href="/logo.png" />
 <link rel="manifest" href="/manifest.json" />
+<!-- The hero photograph is the largest thing above the fold, and a CSS
+     background is not fetched until the box that carries it has been laid out —
+     late, even with the stylesheet inline. This starts it with the document. -->
+<link rel="preload" as="image" href="/hero.webp" fetchpriority="high" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..800;1,9..144,400..600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -222,7 +226,33 @@ body.nav-open .nav-toggle .ic-close{display:block;}
 
 /* ============ HERO ============ */
 .hero{position:relative;padding-top:clamp(8.5rem,14vw,11rem);padding-bottom:0;background:var(--foam);overflow:hidden;}
-.hero .current-field .blob{opacity:.5;}
+
+/* Hero photograph, in two layers.
+   ::before is the picture, ::after the scrim that keeps the copy readable over
+   it. Both sit at z-index 0, which puts them under .hero-grid (z-index 1) and —
+   because a ::after paints after an element's children — above the drifting
+   blobs, so the scrim tames those too rather than fighting them.
+   The photo is portrait and the hero is wide, so `cover` crops it hard: the
+   vertical position is set to keep the child's face in frame rather than
+   centring on the table. */
+.hero::before{
+  content:'';position:absolute;inset:0;z-index:0;
+  background:url('/hero.webp') center 34%/cover no-repeat;
+}
+/* Opaque on the left where the headline sits, clearing towards the right so the
+   photo reads behind the frosted dashboard cards. */
+.hero::after{
+  content:'';position:absolute;inset:0;z-index:0;
+  background:linear-gradient(96deg,
+    var(--foam) 0%,
+    rgba(242,249,250,.96) 32%,
+    rgba(242,249,250,.82) 50%,
+    rgba(242,249,250,.58) 76%,
+    rgba(242,249,250,.44) 100%);
+}
+/* Dialled back from .5: the photograph now carries the hero, and blobs at full
+   strength read as haze over it rather than as depth behind it. */
+.hero .current-field .blob{opacity:.22;}
 .hero .b1{width:420px;height:420px;left:-120px;top:60px;background:radial-gradient(circle at 35% 35%,var(--tide-light),var(--tide) 60%,transparent 100%);}
 .hero .b2{width:380px;height:380px;right:-100px;top:-60px;background:radial-gradient(circle at 60% 40%,var(--current),var(--abyss-soft) 70%,transparent 100%);opacity:.28;}
 .hero .b3{width:300px;height:300px;right:10%;bottom:-120px;background:radial-gradient(circle at 50% 50%,var(--coral),transparent 75%);opacity:.18;}
@@ -276,6 +306,20 @@ body.nav-open .nav-toggle .ic-close{display:block;}
   .hero-grid{grid-template-columns:1fr;}
   .hero-visual{height:clamp(220px,55vw,300px);margin-top:2.5rem;}
   .hero-copy p{max-width:100%;}
+  /* One column, so the copy has no side of its own and the sideways gradient
+     would run straight under the headline. Fades top to bottom instead.
+     The subject sits in the upper third of a portrait frame, which on a narrow
+     viewport is exactly where the copy is — there is no crop that moves a face
+     below a 600px block of text without leaving a gap above it. So the scrim is
+     tuned rather than the framing: light enough that the photograph is legible
+     as a room with a child in it, heavy enough that ink on foam keeps its
+     contrast. */
+  .hero::after{
+    background:linear-gradient(180deg,
+      rgba(242,249,250,.94) 0%,
+      rgba(242,249,250,.88) 46%,
+      rgba(242,249,250,.66) 100%);
+  }
 }
 @media (max-width:480px){
   .float-card--accent{display:none;}
@@ -437,7 +481,9 @@ body.nav-open .nav-toggle .ic-close{display:block;}
 
 /* ============ PRICING ============ */
 .pricing{background:#fff;}
-.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.3rem;margin-top:3rem;align-items:stretch;}
+/* Two plans. Left at three columns the pair sat squashed against the left edge
+   with a gap where Family Plus used to be. */
+.pricing-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1.3rem;margin-top:3rem;align-items:stretch;max-width:760px;margin-inline:auto;}
 .price-card{
   border:1px solid var(--line);border-radius:var(--radius-card);
   padding:2.1rem 1.8rem;display:flex;flex-direction:column;
@@ -840,6 +886,9 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
         </ul>
         <a href="/login" class="btn btn-secondary">Start Free</a>
       </div>
+      <!-- Two plans. Premium absorbed the retired Family Plus tier, so every
+           feature that cost $14.99 is now included at $9.99. Keep this list in
+           step with PLAN_CATALOGUE in packages/shared/src/constants.js. -->
       <div class="price-card popular" data-reveal>
         <span class="popular-tag">Most Popular</span>
         <div class="price-name">Premium Plan</div>
@@ -852,26 +901,15 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
           <li><svg class="use-icon"><use href="#ic-check"/></svg>App usage monitoring</li>
           <li><svg class="use-icon"><use href="#ic-check"/></svg>Website filtering &amp; blocking</li>
           <li><svg class="use-icon"><use href="#ic-check"/></svg>Screen time scheduling</li>
-          <li><svg class="use-icon"><use href="#ic-check"/></svg>Up to 5 child devices</li>
-          <li><svg class="use-icon"><use href="#ic-check"/></svg>Priority support</li>
-        </ul>
-        <a href="/login" class="btn btn-primary">Get Premium</a>
-      </div>
-      <div class="price-card" data-reveal>
-        <div class="price-name">Family Plus</div>
-        <p class="price-desc">Advanced protection for larger families.</p>
-        <div class="price-tag"><span class="amt">$14.99</span><span class="per">/mo</span></div>
-        <ul class="price-list">
-          <li><svg class="use-icon"><use href="#ic-check"/></svg>Everything in Premium</li>
           <li><svg class="use-icon"><use href="#ic-check"/></svg>Unlimited child devices</li>
           <li><svg class="use-icon"><use href="#ic-check"/></svg>AI-powered safety alerts</li>
           <li><svg class="use-icon"><use href="#ic-check"/></svg>Social media monitoring</li>
           <li><svg class="use-icon"><use href="#ic-check"/></svg>Cyberbullying detection</li>
           <li><svg class="use-icon"><use href="#ic-check"/></svg>Advanced family reports</li>
           <li><svg class="use-icon"><use href="#ic-check"/></svg>Instant emergency notifications</li>
-          <li><svg class="use-icon"><use href="#ic-check"/></svg>Premium support</li>
+          <li><svg class="use-icon"><use href="#ic-check"/></svg>Priority support</li>
         </ul>
-        <a href="/login" class="btn btn-secondary">Get Family Plus</a>
+        <a href="/login" class="btn btn-primary">Get Premium</a>
       </div>
     </div>
   </div>

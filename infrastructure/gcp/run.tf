@@ -127,18 +127,65 @@ resource "google_cloud_run_v2_service" "api" {
         value = var.redis_enabled ? "redis://:${google_redis_instance.main[0].auth_string}@${google_redis_instance.main[0].host}:${google_redis_instance.main[0].port}" : ""
       }
 
-      # Without a domain the two web apps are served straight from their buckets,
-      # so the browser origin is storage.googleapis.com for both. Naming it
-      # explicitly matters: the API withholds its localhost CORS defaults in
-      # production, so an empty value here would leave a deployed service with no
-      # allowed origins and it would refuse to start.
+      # ── Browser origins ──
+      #
+      # Firebase Hosting serves the web apps and Cloud Run serves this, so every
+      # call from a browser is cross-origin and this list is the whole of what
+      # the API will accept. One Family App deployment answers on the apex, www
+      # and app.<domain>, hence a comma-separated value rather than a single URL.
+      #
+      # The first entry is load-bearing beyond CORS: it is the origin the API
+      # builds links against — the password-reset email and Stripe's return URL
+      # — so app.<domain> leads.
+      #
+      # Naming these explicitly matters even without a custom domain: the API
+      # withholds its localhost CORS defaults in production, so an empty value
+      # would leave a deployed service with no allowed origins, and it refuses to
+      # start rather than serve one.
       env {
         name  = "CLIENT_URL"
-        value = local.use_domain ? "https://${local.app_host}" : "https://storage.googleapis.com"
+        value = join(",", local.client_origins)
       }
       env {
         name  = "ADMIN_URL"
-        value = local.use_domain ? "https://${local.admin_host}" : "https://storage.googleapis.com"
+        value = join(",", local.admin_origins)
+      }
+      # The *.web.app names, plus anything extra_cors_origins adds. Kept separate
+      # from the two above because ADMIN_URL's first entry is read on its own as
+      # the console's address.
+      env {
+        name  = "CORS_ORIGINS"
+        value = join(",", local.cors_origins)
+      }
+
+      # Public client IDs, not credentials — see variables.tf. Plain environment
+      # variables rather than secrets so that a change is a one-line tfvars edit
+      # and a redeploy, not a new secret version.
+      env {
+        name  = "GOOGLE_CLIENT_ID"
+        value = var.google_client_id
+      }
+      env {
+        name  = "GOOGLE_EXTRA_CLIENT_IDS"
+        value = join(",", var.google_extra_client_ids)
+      }
+
+      # ── Recurring jobs ──
+      #
+      # Cloud Scheduler drives them, so the in-process timer stays off. See
+      # scheduler.tf for why a setInterval is wrong on Cloud Run specifically,
+      # and routes/tasks.js for how the incoming call is authenticated.
+      env {
+        name  = "JOB_RUNNER"
+        value = "external"
+      }
+      env {
+        name  = "SCHEDULER_SERVICE_ACCOUNT"
+        value = google_service_account.scheduler.email
+      }
+      env {
+        name  = "TASKS_AUDIENCE"
+        value = local.tasks_audience
       }
 
       env {
@@ -174,6 +221,18 @@ resource "google_cloud_run_v2_service" "api" {
           SMTP_HOST               = google_secret_manager_secret.supplied["smtp-host"].secret_id
           SMTP_USER               = google_secret_manager_secret.supplied["smtp-user"].secret_id
           SMTP_PASS               = google_secret_manager_secret.supplied["smtp-pass"].secret_id
+          VAPID_PUBLIC_KEY        = google_secret_manager_secret.supplied["vapid-public-key"].secret_id
+          VAPID_PRIVATE_KEY       = google_secret_manager_secret.supplied["vapid-private-key"].secret_id
+
+          # Phone sign-in. Mounted unconditionally: until a real version is
+          # added each of these is the single-space placeholder, which `secret()`
+          # trims to empty, so `isEnabled()` stays false and the API reports
+          # phone sign-in as unavailable rather than half-working. Adding the
+          # versions is the whole of turning the feature on.
+          TWILIO_ACCOUNT_SID           = google_secret_manager_secret.supplied["twilio-account-sid"].secret_id
+          TWILIO_AUTH_TOKEN            = google_secret_manager_secret.supplied["twilio-auth-token"].secret_id
+          TWILIO_FROM_NUMBER           = google_secret_manager_secret.supplied["twilio-from-number"].secret_id
+          TWILIO_MESSAGING_SERVICE_SID = google_secret_manager_secret.supplied["twilio-messaging-service-sid"].secret_id
         }
         content {
           name = env.key

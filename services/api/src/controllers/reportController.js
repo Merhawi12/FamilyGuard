@@ -1,12 +1,28 @@
 const { Op } = require('sequelize');
 const { ActivityLog, Child } = require('../models');
+const { isUuid } = require('../utils/ids');
+
+// A malformed id is "not found", not a database error — see utils/ids.js for why
+// this has to be checked before the query rather than after it.
+const resolveChild = (childId, parentId) =>
+  (isUuid(childId) ? Child.findOne({ where: { id: childId, parentId } }) : null);
 
 const getDailySummary = async (req, res) => {
-  const child = await Child.findOne({ where: { id: req.params.childId, parentId: req.user.id } });
+  const child = await resolveChild(req.params.childId, req.user.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
 
   const { date } = req.query;
   const target = date ? new Date(date) : new Date();
+  /**
+   * An unparseable `?date=` is the caller's mistake, not a server fault.
+   *
+   * `new Date('yesterday')` is an Invalid Date, which flows into the `Op.between`
+   * bounds and then into `target.toISOString()` at the bottom of this handler —
+   * where it throws a RangeError and turns a mistyped query string into a 500.
+   */
+  if (Number.isNaN(target.getTime())) {
+    return res.status(400).json({ error: 'date must be a valid date, for example 2026-08-09' });
+  }
   const start = new Date(target); start.setHours(0, 0, 0, 0);
   const end = new Date(target); end.setHours(23, 59, 59, 999);
 
@@ -28,7 +44,7 @@ const getDailySummary = async (req, res) => {
 };
 
 const getWeeklySummary = async (req, res) => {
-  const child = await Child.findOne({ where: { id: req.params.childId, parentId: req.user.id } });
+  const child = await resolveChild(req.params.childId, req.user.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
 
   const end = new Date();

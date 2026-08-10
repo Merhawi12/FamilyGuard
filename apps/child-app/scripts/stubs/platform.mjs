@@ -15,6 +15,11 @@ export const spy = {
   setBlockedAppsCalls: [],
   vpnDomains: null,       // last argument to VpnControl.startVpn
   vpnStarted: false,
+  webHistoryFlushes: 0,   // times JS asked the DNS proxy for its buffer
+  notificationHandler: null,
+  notificationChannels: [],
+  notificationPrompts: 0,
+  pushTokenRequests: [],
   backgroundTasks: [],
   locationTaskOptions: null,
   reset() {
@@ -22,6 +27,11 @@ export const spy = {
     this.setBlockedAppsCalls = [];
     this.vpnDomains = null;
     this.vpnStarted = false;
+    this.webHistoryFlushes = 0;
+    this.notificationHandler = null;
+    this.notificationChannels = [];
+    this.notificationPrompts = 0;
+    this.pushTokenRequests = [];
     this.backgroundTasks = [];
     this.locationTaskOptions = null;
   },
@@ -30,13 +40,24 @@ export const spy = {
 // ── Test-controlled platform state ───────────────────────────────────────────
 export const platformState = {
   usageStats: {},
+  /** Domains the DNS proxy has seen but not yet handed to JS. */
+  pendingWebVisits: [],
   permissions: {
     usage: true,
     accessibility: true,
     vpn: true,
     locationForeground: true,
     locationBackground: true,
+    /** 'granted' | 'denied' | 'undetermined' — the OS's notification answer. */
+    notifications: 'undetermined',
   },
+  /** False once the OS will no longer show the notification prompt. */
+  canAskForNotifications: true,
+  /** What the prompt resolves to when it is shown. */
+  notificationPromptResult: 'granted',
+  expoPushToken: 'ExponentPushToken[e2e-child-device-token]',
+  /** A notification response waiting from before the app started, or null. */
+  coldStartNotification: null,
 };
 
 // ── expo-secure-store ────────────────────────────────────────────────────────
@@ -77,6 +98,21 @@ export const NativeModules = {
     async requestPermission() { return platformState.permissions.vpn; },
     async startVpn(domains) { spy.vpnDomains = domains; spy.vpnStarted = true; return true; },
     async stopVpn() { spy.vpnStarted = false; return true; },
+    /**
+     * Stands in for the DNS proxy's flush. A test queues domains through
+     * `platformState.pendingWebVisits` and this hands them to JS the way the
+     * native reporter's batch emit does.
+     */
+    async flushWebHistory() {
+      spy.webHistoryFlushes += 1;
+      const pending = platformState.pendingWebVisits;
+      if (pending.length === 0) return true;
+      platformState.pendingWebVisits = [];
+      emitNativeEvent('onWebVisits', pending);
+      return true;
+    },
+    addListener() {},
+    removeListeners() {},
   },
 };
 
@@ -87,6 +123,74 @@ export class NativeEventEmitter {
     if (!nativeListeners.has(event)) nativeListeners.set(event, new Set());
     nativeListeners.get(event).add(handler);
     return { remove: () => nativeListeners.get(event)?.delete(handler) };
+  }
+}
+
+// ── expo-device / expo-constants ─────────────────────────────────────────────
+// `isDevice` is fixed true: emulator detection is a property of the hardware,
+// not something this harness can meaningfully vary.
+export const deviceInfoStub = { isDevice: true, manufacturer: 'Google', modelName: 'Pixel 7' };
+
+export const constantsStub = {
+  expoConfig: { extra: { eas: { projectId: 'e2e-project-id' } } },
+  easConfig: { projectId: 'e2e-project-id' },
+};
+
+// ── expo-notifications ───────────────────────────────────────────────────────
+/** Notifications the app asked the OS to display while in the foreground. */
+const notificationListeners = { received: new Set(), response: new Set() };
+
+export const notificationsStub = {
+  AndroidImportance: { HIGH: 4, DEFAULT: 3 },
+
+  setNotificationHandler(handler) { spy.notificationHandler = handler; },
+
+  async setNotificationChannelAsync(id, options) {
+    spy.notificationChannels.push({ id, options });
+  },
+
+  async getPermissionsAsync() {
+    const state = platformState.permissions.notifications;
+    return { status: state, granted: state === 'granted', canAskAgain: platformState.canAskForNotifications };
+  },
+
+  async requestPermissionsAsync() {
+    // Mirrors the OS: a prompt is only answered when the app is allowed to ask.
+    if (platformState.canAskForNotifications) {
+      platformState.permissions.notifications = platformState.notificationPromptResult;
+    }
+    const state = platformState.permissions.notifications;
+    spy.notificationPrompts += 1;
+    return { status: state, granted: state === 'granted', canAskAgain: platformState.canAskForNotifications };
+  },
+
+  async getExpoPushTokenAsync({ projectId } = {}) {
+    spy.pushTokenRequests.push(projectId);
+    return { data: platformState.expoPushToken };
+  },
+
+  addNotificationReceivedListener(handler) {
+    notificationListeners.received.add(handler);
+    return { remove: () => notificationListeners.received.delete(handler) };
+  },
+
+  addNotificationResponseReceivedListener(handler) {
+    notificationListeners.response.add(handler);
+    return { remove: () => notificationListeners.response.delete(handler) };
+  },
+
+  async getLastNotificationResponseAsync() {
+    return platformState.coldStartNotification;
+  },
+};
+
+/** Deliver a notification to the app the way the OS would. */
+export function deliverNotification(data, { tapped = false } = {}) {
+  const notification = { request: { content: { data } } };
+  if (tapped) {
+    for (const handler of notificationListeners.response) handler({ notification });
+  } else {
+    for (const handler of notificationListeners.received) handler(notification);
   }
 }
 

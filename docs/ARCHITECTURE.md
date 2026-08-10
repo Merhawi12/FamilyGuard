@@ -3,59 +3,96 @@
 ## System shape
 
 ```
-                        ┌──────────────────────────────────────┐
-   Parent (browser) ───▶│ app.parentix.ca                      │
-                        │  /            → GCS bucket + CDN     │
-                        │  /api/*       → Cloud Run            │
-                        │  /socket.io/* → Cloud Run            │
-                        └──────────────┬───────────────────────┘
-                                       │
-   Staff (browser) ────▶┌──────────────┴───────────────────────┐
-                        │ admin.parentix.ca                    │
-                        │  /            → GCS bucket + CDN     │
-                        │  /api/*       → Cloud Run            │
-                        └──────────────┬───────────────────────┘
-                                       │   (one global external
-                                       │    Application LB, one
-   Child device ───────────────────────┼───▶ anycast IP, three hosts)
-                                       │         │
-                                       └─────────┤ api.parentix.ca
-                                                 ▼
-                                   ┌──────────────────────────┐
-                                   │ Cloud Run: Parentix API  │
-                                   │ 1-6 instances, autoscaled│
-                                   └───┬──────┬──────┬────────┘
-                                       │      │      │
-                    Cloud SQL Postgres ┘      │      └ SMTP relay (transactional mail)
-                    (Unix socket, Auth Proxy) │
-                                     Memorystore Redis
-                                     (Socket.IO fan-out, via VPC connector)
+                     ┌───────────────────────────────┐
+   Parent  ─────────▶│ Firebase Hosting — family     │
+   (browser)         │   parentix.ca                 │
+                     │   www.parentix.ca             │
+                     │   app.parentix.ca             │──┐
+                     │   parentix-4be0d.web.app      │  │
+                     └───────────────────────────────┘  │
+                                                        │ XHR + WebSocket,
+                     ┌───────────────────────────────┐  │ cross-origin
+   Staff   ─────────▶│ Firebase Hosting — admin      │  │
+   (browser)         │   admin.parentix.ca           │──┤
+                     │   parentix-admin.web.app      │  │
+                     └───────────────────────────────┘  │
+                                                        ▼
+   Child device ──────────────────────────▶ ┌──────────────────────────┐
+   (Android, direct)                        │ Global external HTTPS LB │
+                                            │   api.parentix.ca        │
+                                            └────────────┬─────────────┘
+                                                         ▼
+                                            ┌──────────────────────────┐
+                                            │ Cloud Run: Parentix API  │
+                                            │ 1-6 instances, autoscaled│
+                                            └───┬──────┬──────┬────────┘
+                                                │      │      │
+                             Cloud SQL Postgres ┘      │      └ SMTP relay
+                             (Unix socket, Auth Proxy) │        (transactional mail)
+                                              Memorystore Redis
+                                              (Socket.IO fan-out, via VPC connector)
 ```
 
-### Why the load balancer fronts the API
+### Why the web tier and the API are separate origins
 
-Both web apps are served from the same load balancer that routes `/api/*` and
-`/socket.io/*` to Cloud Run. The browser therefore sees a single origin, which
-means:
+Firebase Hosting serves the two static bundles. The load balancer fronts the API
+and nothing else. So every browser call is cross-origin, and the API's CORS
+allowlist — not routing — is what decides who may talk to it.
 
-- no CORS preflight on the hot path;
-- the apps never have to be rebuilt when the backend URL changes — `VITE_API_URL`
-  stays empty in production;
-- the static marketing pages can call `/api/contact` with a relative URL.
+Firebase Hosting *can* rewrite `/api/**` to Cloud Run, which would put both back
+on one origin. It is not used here, for three reasons, in order of how much they
+cost you:
 
-The child app is not a browser and has no such constraint, so it talks to
-`api.parentix.ca` directly.
+1. **It does not proxy a websocket upgrade.** Socket.IO would be held down to
+   long-polling for every parent, permanently.
+2. **It strips every cookie except `__session`.** Cloud Run's session affinity is
+   cookie-based, and that affinity is what keeps a Socket.IO polling handshake on
+   one instance. Losing it breaks the handshake intermittently above one
+   instance — the hardest class of bug to see in production.
+3. **It adds a proxy hop.** Express is configured for exactly one
+   (`TRUST_PROXY=1`), so rate limiting and audit logs would start keying off an
+   edge address instead of the caller's.
 
-The API still validates `Origin`: a request is accepted when the origin is on the
-configured allowlist **or** matches the host the request arrived on. The second
-rule is what makes a same-origin request work through a freshly created load
-balancer without a redeploy — and it grants nothing that a same-origin request
-did not already have.
+The cost of the separation is one CORS preflight per distinct request shape,
+cached by the browser for the preflight max-age. That is the cheaper trade.
+
+Consequences worth knowing:
+
+- `VITE_API_URL` is baked into the bundle at build time, so changing the API
+  hostname means a rebuild and a redeploy of both apps.
+- One deployment answers on several origins. The Family App site carries the
+  apex, `www` and `app.` — four names counting `.web.app` — and each is a
+  separate `Origin` header. `local.cors_origins` in `infrastructure/gcp/main.tf`
+  derives the list; `CLIENT_URL`, `ADMIN_URL` and `CORS_ORIGINS` carry it to the
+  service.
+- The child app is not a browser and has no such constraint. It talks to
+  `api.parentix.ca` directly and always has.
+
+The API accepts an origin only if it is on that allowlist. There is no
+same-origin fallback any more — nothing is same-origin — so a hostname nobody
+told the API about fails visibly at the browser rather than working by accident.
+`services/api/tests/cors.test.js` pins both halves of that.
+
+### Why the marketing page is not `index.html`
+
+Firebase Hosting resolves a static file before it consults any rewrite, and a
+request for `/` is answered by `index.html` whenever one exists. The Family App
+build therefore emits its React shell as `app.html`
+(`apps/family-app/vite.config.js`), leaving no `index.html` for `/` to match, so
+the `/` → `landing.html` rewrite in `firebase.json` is what runs. Without that,
+`https://parentix.ca/` would serve an empty SPA shell that redirects itself to
+the marketing page — a flash of nothing for a visitor and a redirect for the
+crawler reading `public/sitemap.xml`, which names `/` as the home page.
+
+Both CI and `scripts/deploy-web.sh` assert the layout, because the failure is a
+deploy that succeeds and serves the wrong thing at the most visible URL on the
+site.
 
 ## How things connect
 
 | From | To | Path |
 | --- | --- | --- |
+| Internet | web apps | Firebase Hosting (its own CDN and certificates) |
 | Internet | Cloud Run | Load balancer → serverless NEG |
 | Cloud Run | Cloud SQL | Unix socket at `/cloudsql/<connection-name>`, via the Auth Proxy |
 | Cloud Run | Memorystore | Serverless VPC Access connector → peered VPC |
@@ -82,35 +119,49 @@ ordering from the dependency graph:
 | `network.tf` | VPC, subnet, VPC connector, private service access *(only with Redis)* |
 | `database.tf` | Cloud SQL instance, database, user |
 | `redis.tf` | Memorystore *(optional)* |
-| `storage.tf` | uploads bucket + two web buckets |
+| `storage.tf` | uploads bucket (the web apps are Firebase Hosting's) |
 | `registry.tf` | Artifact Registry |
 | `secrets.tf` | Secret Manager: generated and supplied |
 | `iam.tf` | the API service account and its grants |
 | `run.tf` | the Cloud Run service |
-| `loadbalancer.tf` | NEG, backends, URL map, certificate, forwarding rules |
-| `dns.tf` | Cloud DNS *(optional)* |
+| `loadbalancer.tf` | NEG, API backend, URL map, certificate, forwarding rules |
+| `dns.tf` | Cloud DNS for the API hostname *(optional)* |
+
+Firebase Hosting is not in here. Its sites are created once with the Firebase
+CLI and its releases are content, not infrastructure — modelling them in
+Terraform as well would mean two tools owning one resource. `firebase.json` and
+`.firebaserc` at the repository root are the whole of its configuration; the
+site IDs are recorded in the tfvars only so the API can be told to accept their
+origins.
 
 Sizing lives in `envs/dev.tfvars` and `envs/prod.tfvars`.
 
 ## Request lifecycle
 
-1. The load balancer matches host and path against the URL map. Static paths go
-   to a backend bucket through Cloud CDN; `/api/*` and `/socket.io/*` go to the
-   serverless NEG uncached.
-2. Cloud Run routes to an instance, starting one if none is warm. Session
+1. A page load is answered by Firebase Hosting from its own edge: a static file
+   if the path matches one, otherwise the first rewrite in `firebase.json` — the
+   marketing page at `/`, the SPA shell everywhere else, always with a 200.
+2. An API call goes to `api.parentix.ca`, preceded by a CORS preflight the first
+   time that request shape is used. The load balancer has one backend, so
+   everything arriving there is forwarded to the serverless NEG uncached.
+3. Cloud Run routes to an instance, starting one if none is warm. Session
    affinity keeps a Socket.IO client on one instance across its polling
    handshake.
-3. Express assigns a request id, applies Helmet, CORS, compression and rate
+4. Express assigns a request id, applies Helmet, CORS, compression and rate
    limits, then dispatches to a router.
-4. Handlers `next(err)` on failure. The central error handler logs 5xx with the
+5. Handlers `next(err)` on failure. The central error handler logs 5xx with the
    request id and returns a generic message in production, so Sequelize text and
    stack frames never reach a client.
 
 ## Authentication
 
-Authentication is entirely the application's own — there is no Identity Platform,
-no Firebase Auth, and nothing was migrated from a cloud provider, because nothing
-ever lived in one.
+Authentication is entirely the application's own — there is no Identity Platform
+and no Firebase Authentication, and nothing was migrated from a cloud provider,
+because nothing ever lived in one. Using Firebase Hosting does not change this:
+Hosting is a static CDN and shares nothing with Firebase Auth. The Firebase
+products this platform uses are Hosting and FCM — the latter both directly, for
+the parents' Android app, and as the transport Expo push rides on to reach the
+child device. Neither touches authentication.
 
 Three token shapes, all signed with the same secret:
 
@@ -177,6 +228,57 @@ identically.
 Cloud Run's request timeout is raised to its 60-minute maximum, and the load
 balancer backend matches it, because the default 5 minutes would sever every
 websocket.
+
+## Push notifications
+
+The socket above only reaches an app that is open. Push is what reaches one that
+is not, and there are three transports because there are three clients, each of
+which can only be reached one way:
+
+| Client | Transport | Configured by |
+|---|---|---|
+| Parent, in a browser | Web Push (VAPID) | `vapid-public-key` / `vapid-private-key` secrets |
+| Parent, Android app | FCM HTTP v1 | `roles/firebasemessaging.admin` on the API service account |
+| Child device | Expo push *(which relays to FCM)* | FCM credentials uploaded to the Expo project |
+
+The parent's Android app cannot use the browser transport even though it renders
+the same React code: Capacitor runs it in a WebView, and Android's WebView does
+not implement the Push API — `PushManager` is absent — so a subscription cannot
+be created there at all. That is what FCM is for, and it is the only route to
+that app.
+
+FCM sends are authenticated with Application Default Credentials, so on Cloud Run
+there is **no key and no secret**: the IAM role is the credential. `firebase-admin`
+is deliberately not used — it is ~50 MB to wrap one authenticated POST, and
+`google-auth-library` was already a dependency for verifying Google sign-in.
+
+Every send is best-effort and never fails the request that triggered it: the
+alert is already in the database and on the socket, and the notification is the
+redundant copy. A token the service rejects outright is retired; one that fails
+transiently is counted, and only retired after three consecutive failures.
+
+## Scheduled work
+
+One recurring job: an hourly pass over every active parent looking for risk
+patterns. It has two runners, selected by `JOB_RUNNER`:
+
+- `internal` — a `setInterval` in the process. Local development, Docker Compose
+  and the single-host deployment.
+- `external` — Cloud Scheduler POSTs to `/api/tasks/safety-analysis`. This is
+  what Cloud Run uses.
+
+An in-process timer is wrong on Cloud Run in both directions at once. A service
+scaled to zero has its CPU throttled between requests, so the timer never fires
+and the job silently does not happen; a service scaled out runs a copy on every
+warm instance. Scheduler makes it exactly once, on a schedule that holds whether
+the service is warm or cold, with a retry and a recorded outcome per run.
+
+The endpoint is not JWT-authenticated — the caller is a service account. It
+verifies the OIDC token Scheduler attaches: Google's signature, the audience, and
+the sending account's address. All three are needed, because a valid
+Google-signed token on its own only proves that *some* Google identity called.
+Cloud Run cannot do this check itself, since the service is invokable by
+`allUsers` so that Stripe's webhook and the child app can reach it.
 
 ## Email
 

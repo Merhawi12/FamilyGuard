@@ -1,153 +1,248 @@
-import { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, AppState } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import AppShell from '../components/AppShell';
+import Icon from '../components/Icon';
+import ProgressRing from '../components/ProgressRing';
+import { Card, Pill } from '../components/ui';
+import { loadChildName } from '../services/profile';
 import { startMonitoring, getMonitoringStatus } from '../services/monitoring';
+import { lockState } from '../services/schedule';
+import { colors, space, type } from '../theme';
 
+const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+/** 135 → "2h 15m". Whole hours drop the minutes; under an hour drops the hours. */
+function formatDuration(minutes) {
+  const total = Math.max(0, Math.round(minutes));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (!h) return `${m}m`;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** The schedule arrives parsed, but a device that has never synced holds JSON. */
+function todayWindow(rule) {
+  let schedule = rule?.schedule;
+  if (typeof schedule === 'string') {
+    try { schedule = JSON.parse(schedule); } catch { schedule = null; }
+  }
+  const today = schedule?.[DAY_KEYS[new Date().getDay()]];
+  return today?.enabled ? `${today.start} – ${today.end}` : null;
+}
+
+/**
+ * My Day — what the child actually needs to know: how much time is left, when
+ * the phone stops, and what is paused right now.
+ *
+ * Everything on this screen comes from the parent's rules and this device's own
+ * usage. The detail — which apps, which sites, what is being monitored — lives
+ * on Settings, one tap away, so the first screen is an answer rather than a
+ * report.
+ */
 export default function HomeScreen({ navigation }) {
-  const [status, setStatus] = useState({
-    monitoring: false,
-    appBlocking: false,
-    websiteBlocking: false,
-    locationTracking: false,
-  });
   const [rules, setRules] = useState({ appRules: [], websiteRules: [], screenTimeRule: null });
+  const [blockedPackages, setBlockedPackages] = useState([]);
   const [todayMinutes, setTodayMinutes] = useState(0);
-  const [deviceId, setDeviceId] = useState(null);
+  const [childName, setChildName] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const appState = useRef(AppState.currentState);
 
-  const refresh = async () => {
-    const mon = getMonitoringStatus();
-    setStatus(mon.status);
-    setRules(mon.rules);
-    setTodayMinutes(mon.todayMinutes);
-  };
+  const refresh = useCallback(async () => {
+    const monitoring = getMonitoringStatus();
+    setRules(monitoring.rules);
+    setBlockedPackages(monitoring.blockedPackages || []);
+    setTodayMinutes(monitoring.todayMinutes);
+    setChildName(await loadChildName());
+  }, []);
+
+  const pullToRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refresh();
+    setRefreshing(false);
+  }, [refresh]);
 
   useEffect(() => {
-    SecureStore.getItemAsync('fg_device_id').then(setDeviceId);
-
     startMonitoring().then(refresh);
 
-    // Re-check permissions when the user returns from Settings
-    const sub = AppState.addEventListener('change', (next) => {
-      if (appState.current.match(/inactive|background/) && next === 'active') {
-        refresh();
-      }
+    // Permissions and usage both change while the child is in Android Settings,
+    // so the numbers are re-read on the way back rather than left stale.
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (appState.current.match(/inactive|background/) && next === 'active') refresh();
       appState.current = next;
     });
-
     const interval = setInterval(refresh, 30_000);
 
     return () => {
-      sub.remove();
+      subscription.remove();
       clearInterval(interval);
     };
-  }, []);
+  }, [refresh]);
 
-  const screenTimeLimit = rules.screenTimeRule?.dailyLimitMinutes ?? null;
-  const screenTimePct = screenTimeLimit ? Math.min((todayMinutes / screenTimeLimit) * 100, 100) : 0;
-  const blockedApps = rules.appRules.filter((r) => r.action === 'block');
+  const rule = rules.screenTimeRule;
+  const limit = rule?.dailyLimitMinutes || null;
+  const used = Math.round(todayMinutes);
+  const remaining = limit ? Math.max(limit - used, 0) : null;
+  const progress = limit ? Math.min(used / limit, 1) : 0;
+
+  const lock = lockState(rule, todayMinutes);
+  /**
+   * What the blocker is actually enforcing, not what the rules could imply.
+   *
+   * Filtering the rules for `action === 'block'` answered a different question
+   * and got it wrong both ways once time limits existed: an app with a limit it
+   * has not reached is not paused, and one that has reached it is — and neither
+   * appeared here. `'*'` is the whole-device lock, which the message above
+   * already explains, so it is not counted as an app.
+   */
+  const pausedApps = blockedPackages.filter((p) => p !== '*');
   const blockedSites = rules.websiteRules.filter((r) => r.action === 'block');
+  const window = todayWindow(rule);
+
+  const ringColor = lock.blocked ? colors.danger
+    : progress > 0.8 ? colors.warning
+      : colors.teal500;
+
+  const message = lock.reason === 'daily_limit' ? "That's all your screen time for today."
+    : lock.reason === 'bedtime' ? "It's bedtime — see you in the morning."
+      : lock.reason === 'outside_schedule' ? 'Your phone is having a rest right now.'
+        : remaining !== null && remaining <= 15 ? 'Nearly out of time — make it count!'
+          : limit ? "You're doing great today." : 'No time limit today. Have fun.';
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>🛡️ Parentix</Text>
-      <Text style={styles.sub}>Device ID: {deviceId?.slice(0, 8) ?? '—'}...</Text>
+    <AppShell route="Home" navigation={navigation} refreshing={refreshing} onRefresh={pullToRefresh}>
+      <Card tone="teal" style={styles.hero}>
+        <View style={styles.heroAvatar}>
+          <Icon name="sparkle" size={22} color={colors.white} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.heroGreeting} numberOfLines={1}>
+            Hi{childName ? `, ${childName}` : ' there'}! 👋
+          </Text>
+          <Text style={styles.heroMessage}>{message}</Text>
+        </View>
+      </Card>
 
-      <TouchableOpacity style={styles.messagesBtn} onPress={() => navigation.navigate('Messages')}>
-        <Text style={styles.messagesText}>💬  Messages</Text>
-        <Text style={styles.messagesHint}>Talk to your parent, or send an SOS</Text>
-      </TouchableOpacity>
+      <Card style={{ alignItems: 'center' }}>
+        <Text style={[type.section, { textAlign: 'center' }]}>Today&apos;s Time</Text>
+        <Text style={[type.caption, { marginTop: 2, marginBottom: space.lg }]}>Make it count!</Text>
 
-      {/* Monitoring status */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Monitoring Status</Text>
-        <StatusRow label="Active monitoring" on={status.monitoring} />
-        <StatusRow label="App blocking" on={status.appBlocking} />
-        <StatusRow label="Website blocking" on={status.websiteBlocking} />
-        <StatusRow label="Location tracking" on={status.locationTracking} />
-      </View>
+        <ProgressRing progress={progress} color={ringColor}>
+          <View style={styles.ringCentre}>
+            <Text style={[styles.ringValue, { color: ringColor }]}>
+              {remaining !== null ? formatDuration(remaining) : formatDuration(used)}
+            </Text>
+            <Text style={styles.ringLabel}>{remaining !== null ? 'LEFT' : 'USED TODAY'}</Text>
+          </View>
+        </ProgressRing>
 
-      {/* Screen time */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Today's Screen Time</Text>
-        <Text style={styles.bigNum}>{Math.round(todayMinutes)} min</Text>
-        {screenTimeLimit && (
-          <>
-            <View style={styles.barTrack}>
-              <View style={[styles.barFill, { width: `${screenTimePct}%`, backgroundColor: screenTimePct > 90 ? '#ef4444' : '#2563eb' }]} />
-            </View>
-            <Text style={styles.barLabel}>Limit: {screenTimeLimit} min/day</Text>
-          </>
+        <Pill
+          style={{ marginTop: space.lg }}
+          icon="time"
+          tone={lock.blocked ? 'danger' : 'teal'}
+          label={limit ? `Total limit: ${formatDuration(limit)}` : 'No daily limit set'}
+        />
+        {limit !== null && (
+          <Text style={[type.caption, { marginTop: space.sm }]}>
+            {formatDuration(used)} used so far
+          </Text>
         )}
+      </Card>
+
+      <View style={styles.pair}>
+        <Card style={styles.pairCard}>
+          <View style={[styles.pairIcon, { backgroundColor: colors.teal50 }]}>
+            <Icon name="bedtime" size={20} color={colors.teal700} />
+          </View>
+          <Text style={styles.pairValue}>
+            {rule?.bedtimeEnabled ? `${rule.bedtimeStart} – ${rule.bedtimeEnd}` : 'Off'}
+          </Text>
+          <Text style={type.caption}>Bedtime</Text>
+        </Card>
+
+        <Card style={styles.pairCard}>
+          <View style={[styles.pairIcon, { backgroundColor: colors.teal50 }]}>
+            <Icon name="calendar" size={20} color={colors.teal700} />
+          </View>
+          <Text style={styles.pairValue}>{window || 'All day'}</Text>
+          <Text style={type.caption}>Today&apos;s hours</Text>
+        </Card>
       </View>
 
-      {/* Blocked apps */}
-      {blockedApps.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Blocked Apps ({blockedApps.length})</Text>
-          {blockedApps.map((r) => (
-            <View key={r.id} style={styles.row}>
-              <Text style={styles.rowLabel}>{r.appName || r.appPackage}</Text>
-              <Text style={styles.badge}>Blocked</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Blocked websites */}
-      {blockedSites.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Blocked Websites ({blockedSites.length})</Text>
-          {blockedSites.map((r) => (
-            <View key={r.id} style={styles.row}>
-              <Text style={styles.rowLabel}>{r.url || r.category}</Text>
-              <Text style={styles.badge}>Blocked</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {blockedApps.length === 0 && blockedSites.length === 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>No Active Restrictions</Text>
-          <Text style={styles.muted}>Your parent hasn't set any blocks yet.</Text>
-        </View>
-      )}
-
-      <TouchableOpacity style={styles.refreshBtn} onPress={refresh}>
-        <Text style={styles.refreshText}>Refresh</Text>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => navigation.navigate('Settings')}
+        accessibilityRole="button"
+        accessibilityLabel="See what is paused right now"
+      >
+        <Card style={styles.linkCard}>
+          <View style={[styles.pairIcon, { backgroundColor: colors.teal50, marginBottom: 0 }]}>
+            <Icon name="blocked" size={20} color={colors.teal700} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={type.section}>Paused right now</Text>
+            <Text style={[type.small, { marginTop: 2 }]}>
+              {lock.blocked
+                ? 'Every app is paused right now.'
+                : pausedApps.length + blockedSites.length === 0
+                  ? 'Nothing is blocked — everything is open.'
+                  : `${pausedApps.length} app${pausedApps.length === 1 ? '' : 's'} · `
+                    + `${blockedSites.length} site${blockedSites.length === 1 ? '' : 's'}`}
+            </Text>
+          </View>
+          <Icon name="forward" size={18} color={colors.muted} />
+        </Card>
       </TouchableOpacity>
-    </ScrollView>
-  );
-}
 
-function StatusRow({ label, on }) {
-  return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={{ color: on ? '#16a34a' : '#9ca3af', fontWeight: '600' }}>{on ? 'ON' : 'OFF'}</Text>
-    </View>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => navigation.navigate('Messages')}
+        accessibilityRole="button"
+        accessibilityLabel="Ask your parent for more time"
+      >
+        <Card tone="teal" style={styles.askCard}>
+          <View style={styles.askIcon}>
+            <Icon name="messages" size={20} color={colors.teal700} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.askTitle}>Need more time?</Text>
+            <Text style={styles.askText}>Send your parent a message and ask.</Text>
+          </View>
+          <Icon name="forward" size={18} color={colors.teal200} />
+        </Card>
+      </TouchableOpacity>
+    </AppShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f4ff' },
-  content: { padding: 24, paddingTop: 60, gap: 16 },
-  title: { fontSize: 28, fontWeight: 'bold', color: '#2563eb' },
-  sub: { color: '#9ca3af', fontSize: 12, marginBottom: 8 },
-  card: { backgroundColor: '#fff', borderRadius: 16, padding: 16 },
-  cardTitle: { fontWeight: '700', fontSize: 15, marginBottom: 12, color: '#111827' },
-  bigNum: { fontSize: 36, fontWeight: 'bold', color: '#2563eb', textAlign: 'center', marginBottom: 12 },
-  barTrack: { height: 8, backgroundColor: '#e5e7eb', borderRadius: 4, overflow: 'hidden' },
-  barFill: { height: '100%', borderRadius: 4 },
-  barLabel: { color: '#6b7280', fontSize: 12, marginTop: 6, textAlign: 'right' },
-  row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  rowLabel: { color: '#374151', flex: 1 },
-  badge: { color: '#ef4444', fontWeight: '600', fontSize: 13 },
-  muted: { color: '#9ca3af', fontSize: 14 },
-  refreshBtn: { backgroundColor: '#eff6ff', borderRadius: 12, padding: 14, alignItems: 'center' },
-  refreshText: { color: '#2563eb', fontWeight: '600' },
-  messagesBtn: { backgroundColor: '#2563eb', borderRadius: 16, padding: 16 },
-  messagesText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  messagesHint: { color: '#dbeafe', fontSize: 12, marginTop: 2 },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  heroAvatar: {
+    width: 46, height: 46, borderRadius: 23,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  heroGreeting: { fontSize: 17, fontWeight: '800', color: colors.white },
+  heroMessage: { fontSize: 13.5, fontWeight: '500', color: colors.teal100, marginTop: 3 },
+
+  ringCentre: { alignItems: 'center', justifyContent: 'center' },
+  ringValue: { fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
+  ringLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 1.4, color: colors.muted, marginTop: 2 },
+
+  pair: { flexDirection: 'row', gap: space.md },
+  pairCard: { flex: 1, alignItems: 'flex-start', gap: 2 },
+  pairIcon: {
+    width: 38, height: 38, borderRadius: 19,
+    alignItems: 'center', justifyContent: 'center', marginBottom: space.sm,
+  },
+  pairValue: { fontSize: 15, fontWeight: '800', color: colors.ink },
+
+  linkCard: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+
+  askCard: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  askIcon: {
+    width: 38, height: 38, borderRadius: 19, backgroundColor: colors.white,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  askTitle: { fontSize: 15.5, fontWeight: '800', color: colors.white },
+  askText: { fontSize: 13, fontWeight: '500', color: colors.teal100, marginTop: 2 },
 });

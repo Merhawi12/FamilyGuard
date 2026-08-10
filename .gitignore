@@ -12,6 +12,13 @@ build/
 .vite/
 *.tsbuildinfo
 
+# Firebase CLI upload cache. firebase.json and .firebaserc are committed —
+# they are the hosting configuration; this is only a per-machine hash index of
+# what was last uploaded.
+.firebase/
+firebase-debug.log
+.runtimeconfig.json
+
 # Terraform — provider binaries, and state/plan files that contain secrets.
 # .terraform.lock.hcl is deliberately NOT ignored: it pins provider versions and
 # their checksums, so CI and every machine resolve the same ones.
@@ -51,3 +58,13 @@ apps/child-app/android/local.properties
 keystore.properties
 parentix-release.keystore
 *.jks
+
+# Capacitor — the Android project is committed (it holds signing and manifest
+# configuration), its build output is not.
+apps/family-app/android/.gradle/
+apps/family-app/android/build/
+apps/family-app/android/app/build/
+apps/family-app/android/capacitor-cordova-android-plugins/build/
+apps/family-app/android/local.properties
+# Copied from dist/ by `npx cap sync` on every build.
+apps/family-app/android/app/src/main/assets/public/

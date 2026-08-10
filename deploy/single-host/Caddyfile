@@ -49,15 +49,19 @@
 		root * /srv/family
 
 		# The marketing page is the root, not the React app. This mirrors the
-		# URL-map rewrite in infrastructure/gcp/loadbalancer.tf and the dev-server
-		# plugin in apps/family-app/vite.config.js, so all three environments agree.
+		# rewrites in firebase.json and the dev-server plugin in
+		# apps/family-app/vite.config.js, so all three environments agree.
 		@root path /
 		rewrite @root /landing.html
 		@contact path /contact
 		rewrite @contact /contact.html
 
-		# Anything else that is not a real file is a client-side route.
-		try_files {path} {path}/ /index.html
+		# Anything else that is not a real file is a client-side route. The shell
+		# is app.html, not index.html: the build renames it so that Firebase
+		# Hosting, which answers `/` from a static index.html before it consults
+		# any rewrite, cannot serve the React app on the marketing home page. The
+		# same output ships here, so this fallback has to name the same file.
+		try_files {path} {path}/ /app.html
 		file_server
 	}
 }

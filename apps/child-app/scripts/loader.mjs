@@ -11,6 +11,9 @@ const STUBS = {
   'expo-location': './stubs/expo-location.mjs',
   'expo-task-manager': './stubs/expo-task-manager.mjs',
   'expo-background-fetch': './stubs/expo-background-fetch.mjs',
+  'expo-notifications': './stubs/expo-notifications.mjs',
+  'expo-device': './stubs/expo-device.mjs',
+  'expo-constants': './stubs/expo-constants.mjs',
   'react-native': './stubs/react-native.mjs',
 };
 

@@ -32,22 +32,27 @@ variable "domain" {
   description = <<-EOT
     Apex domain, e.g. "parentix.ca". Leave empty to deploy without custom
     domains: the API is then reachable on its generated *.run.app URL and the
-    web apps directly on their bucket URLs, with no managed certificate and no
-    CDN. Useful for a first smoke test, not for production — and note the child
-    app pins an https:// API hostname, so it needs a real domain.
+    web apps on their *.web.app Firebase Hosting URLs, with no load balancer and
+    no managed certificate. Useful for a first smoke test, not for production —
+    and note the child app pins an https:// API hostname, so it needs a real
+    domain.
+
+    This load balancer fronts the API alone. The web apps are served by Firebase
+    Hosting, which issues its own certificates and holds its own addresses, so
+    only api.<domain> points here.
   EOT
   type        = string
   default     = ""
 }
 
 variable "app_subdomain" {
-  description = "Family app hostname prefix."
+  description = "Family app hostname prefix. Served by Firebase Hosting, not by this load balancer."
   type        = string
   default     = "app"
 }
 
 variable "admin_subdomain" {
-  description = "Admin dashboard hostname prefix."
+  description = "Admin dashboard hostname prefix. Served by Firebase Hosting, not by this load balancer."
   type        = string
   default     = "admin"
 }
@@ -60,13 +65,103 @@ variable "api_subdomain" {
 
 variable "manage_dns" {
   description = <<-EOT
-    Create a Cloud DNS managed zone and the A records for the load balancer.
+    Create a Cloud DNS managed zone and the A record for the API load balancer.
     Set false if the domain's nameservers stay with your current registrar — you
-    then create one A record per hostname by hand, pointing at the
-    load_balancer_ip output.
+    then create the record by hand, pointing at the load_balancer_ip output.
+
+    Even when this is true, the web hostnames are not managed here: Firebase
+    Hosting mints a fresh pair of A records per custom domain when the domain is
+    connected, and they are not derivable from this configuration. Take them
+    from the Firebase console and add them alongside.
   EOT
   type        = bool
   default     = false
+}
+
+# ── Sign in with Google ──────────────────────────────────────────────────────
+
+variable "google_client_id" {
+  description = <<-EOT
+    OAuth Web client ID for Sign in with Google, from the Google Cloud console
+    under APIs & Services → Credentials.
+
+    Not a secret, which is why it is here rather than in Secret Manager: it ships
+    inside the browser bundle and is sent to Google in the clear. It is still
+    load-bearing — it is the audience an incoming Google ID token is checked
+    against, and an empty value disables the feature outright rather than
+    accepting a token minted for somebody else's application.
+
+    The console's "Authorised JavaScript origins" must list every hostname that
+    serves the Family App, including the *.web.app one.
+
+    Empty leaves the Google button unrendered and POST /api/auth/google
+    answering 503.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "google_extra_client_ids" {
+  description = <<-EOT
+    Further audiences to accept, beyond google_client_id. The packaged Android
+    app authenticates with its own OAuth client, whose ID tokens carry a
+    different `aud`, so that client ID belongs here.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+# ── Firebase Hosting ─────────────────────────────────────────────────────────
+
+variable "firebase_family_site" {
+  description = <<-EOT
+    Firebase Hosting site ID serving the Family App. Its default
+    https://<site>.web.app URL never goes away, and stays the way to reach a
+    release before the custom domain is pointed at it — so it is added to the
+    API's CORS allowlist rather than only the custom hostnames.
+
+    The sites themselves are created with the Firebase CLI (`firebase
+    hosting:sites:create`), not here: Hosting is not modelled by the stable
+    Google provider, and splitting one resource across two tools is how a
+    deployment ends up with two of it.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "firebase_admin_site" {
+  description = "Firebase Hosting site ID serving the Admin Dashboard. See firebase_family_site."
+  type        = string
+  default     = ""
+}
+
+variable "extra_cors_origins" {
+  description = <<-EOT
+    Additional browser origins the API accepts, on top of the web hostnames this
+    configuration already derives. For a staging preview or a Firebase Hosting
+    preview channel URL, which is minted per pull request and cannot be derived.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+variable "retained_ssl_certificate" {
+  description = <<-EOT
+    Name of an existing managed certificate to keep attached to the HTTPS proxy
+    alongside the one this configuration manages. Empty in steady state.
+
+    This exists for one job: replacing the certificate without dropping TLS on
+    api.<domain>. A Google-managed certificate sits in PROVISIONING for anywhere
+    from fifteen minutes to several hours after it is created, and a proxy
+    holding only that certificate serves nothing over HTTPS in the meantime. So
+    when the domain list changes — as it does when the web hostnames move to
+    Firebase Hosting and the certificate shrinks to the API alone — set this to
+    the outgoing certificate's name for one apply, wait for the new one to read
+    ACTIVE, then clear it and apply again. Both are attached in between and the
+    proxy serves from whichever matches the SNI.
+  EOT
+  type        = string
+  default     = ""
 }
 
 # ── API (Cloud Run) ──────────────────────────────────────────────────────────

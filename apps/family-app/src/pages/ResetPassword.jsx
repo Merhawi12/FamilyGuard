@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { auth as authApi } from '@parentix/shared';
+import { auth as authApi, errorMessage, Icon } from '@parentix/shared';
+import AuthShell from '../components/AuthShell';
+import PasswordField from '../components/PasswordField';
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
@@ -14,67 +16,67 @@ export default function ResetPassword() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (password !== confirm) return setError('Passwords do not match');
-    if (password.length < 6) return setError('Password must be at least 6 characters');
+    if (password !== confirm) return setError('Those passwords do not match.');
+    if (password.length < 10) return setError('Use at least 10 characters.');
 
     setLoading(true);
     try {
       await authApi.resetPassword({ token, newPassword: password });
       setDone(true);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to reset password');
+      setError(errorMessage(err, 'That reset link is invalid or has expired.'));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4 py-8">
-      <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 w-full max-w-md">
-        <div className="text-center mb-8">
-          <a href="/"><img src="/logo.png" alt="Parentix" className="h-28 w-auto mx-auto cursor-pointer" /></a>
-          <p className="text-gray-500 text-sm mt-2">Parental Control & Digital Safety</p>
+    <AuthShell>
+      {!token ? (
+        <p className="notice-error">
+          <Icon name="warning" size={16} className="mt-0.5" />
+          <span>This reset link is missing its token. Please use the link from your email.</span>
+        </p>
+      ) : done ? (
+        <div className="text-center">
+          <span className="inline-flex w-14 h-14 bg-green-50 text-green-600 rounded-2xl items-center justify-center mb-3">
+            <Icon name="check" size={26} strokeWidth={2.4} />
+          </span>
+          <h2 className="text-xl font-bold text-gray-900 mb-1">Password reset</h2>
+          <p className="text-sm text-gray-500 mb-5">You can sign in with your new password now.</p>
+          <Link to="/login" className="btn-primary btn-block">Sign in</Link>
         </div>
-
-        {!token ? (
-          <p className="text-sm text-red-500 text-center">
-            This reset link is missing its token. Please use the link from your email.
-          </p>
-        ) : done ? (
-          <div className="text-center">
-            <p className="text-sm text-green-600 mb-4">Your password has been reset successfully.</p>
-            <Link to="/login" className="btn-primary w-full py-3 inline-block">Sign In</Link>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="text-center mb-2">
+            <h2 className="text-xl font-bold text-gray-900">Choose a new password</h2>
+            <p className="text-sm text-gray-500 mt-1">At least 10 characters, including a letter and a number.</p>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <h2 className="text-xl font-bold text-gray-900 text-center mb-2">Choose a new password</h2>
-            <input
-              className="input"
-              type="password"
-              aria-label="New password"
-              autoComplete="new-password"
-              placeholder="New password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-            <input
-              className="input"
-              type="password"
-              aria-label="Confirm new password"
-              autoComplete="new-password"
-              placeholder="Confirm new password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              required
-            />
-            {error && <p className="text-sm text-red-500">{error}</p>}
-            <button type="submit" disabled={loading} className="btn-primary w-full py-3">
-              {loading ? 'Resetting...' : 'Reset Password'}
-            </button>
-          </form>
-        )}
-      </div>
-    </div>
+
+          <PasswordField
+            label="New password"
+            autoComplete="new-password"
+            placeholder="New password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          <PasswordField
+            label="Confirm new password"
+            autoComplete="new-password"
+            placeholder="Confirm new password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            required
+          />
+
+          {error && <p className="notice-error">{error}</p>}
+
+          <button type="submit" disabled={loading} className="btn-primary btn-block">
+            {loading ? 'Resetting…' : 'Reset password'}
+          </button>
+        </form>
+      )}
+    </AuthShell>
   );
 }

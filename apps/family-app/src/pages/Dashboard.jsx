@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { children as childrenApi, alerts as alertsApi, reports as reportsApi, StatsCard } from '@parentix/shared';
+import {
+  children as childrenApi, reports as reportsApi,
+  alertLabel, Avatar, EmptyState, Icon, StatsCard, useSocket,
+} from '@parentix/shared';
+import PageIntro from '../components/PageIntro';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const SEVERITY_DOT = { high: 'bg-danger', medium: 'bg-warning', low: 'bg-success' };
 
 function formatMinutes(total) {
   const h = Math.floor(total / 60);
@@ -12,18 +19,19 @@ function formatMinutes(total) {
 
 export default function Dashboard() {
   const [childList, setChildList] = useState([]);
-  const [alertList, setAlertList] = useState([]);
+  // Shared with the bell and the Alerts page, so the counts here cannot drift
+  // from what the rest of the dashboard shows — and it saves a second fetch.
+  const { alerts: alertList } = useSocket();
   const [weeklyUsage, setWeeklyUsage] = useState([]);
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    Promise.all([childrenApi.list(), alertsApi.list()])
-      .then(async ([c, a]) => {
+    childrenApi.list()
+      .then(async (c) => {
         const children = Array.isArray(c.data) ? c.data : [];
         setChildList(children);
-        setAlertList(Array.isArray(a.data) ? a.data : []);
 
         if (children.length === 0) return;
 
@@ -61,69 +69,110 @@ export default function Dashboard() {
   const totalDevices = childList.reduce((s, c) => s + (c.devices?.length || 0), 0);
   const unreadAlerts = alertList.filter((a) => !a.isRead).length;
 
-  if (loading) return <div className="text-gray-400 text-sm p-4">Loading...</div>;
-  if (error) return (
-    <div className="p-6">
-      <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-        <p className="text-red-700 font-medium text-sm">Unable to connect to the server</p>
-        <p className="text-red-500 text-xs mt-1">{error}</p>
-        <button onClick={() => window.location.reload()} className="mt-3 text-sm text-red-600 underline">Retry</button>
+  if (loading) return <p className="text-sm text-gray-400 py-8">Loading your dashboard…</p>;
+
+  if (error) {
+    return (
+      <div className="card">
+        <EmptyState
+          icon="warning"
+          title="Unable to reach the server"
+          description={error}
+          action={
+            <button onClick={() => window.location.reload()} className="btn-primary">
+              Try again
+            </button>
+          }
+        />
       </div>
-    </div>
-  );
+    );
+  }
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-500 text-sm mt-1">Overview of your family's digital activity</p>
+      <PageIntro description="An overview of your family's digital activity." />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <Link to="/dashboard/children" className="block">
+          <StatsCard icon="children" title="Children" value={childList.length} color="blue" />
+        </Link>
+        <Link to="/dashboard/children" className="block">
+          <StatsCard icon="phone" title="Devices" value={totalDevices} color="green" />
+        </Link>
+        <Link to="/dashboard/alerts" className="block">
+          <StatsCard icon="bell" title="Unread alerts" value={unreadAlerts} color="red" />
+        </Link>
+        <Link to="/dashboard/screen-time" className="block">
+          <StatsCard
+            icon="clock"
+            title="Screen time"
+            value={formatMinutes(todayMinutes)}
+            subtitle="Today"
+            color="amber"
+          />
+        </Link>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <StatsCard icon="👨‍👩‍👧" title="Children" value={childList.length} color="blue" />
-        <StatsCard icon="📱" title="Devices" value={totalDevices} color="green" />
-        <StatsCard icon="🔔" title="Unread Alerts" value={unreadAlerts} color="red" />
-        <StatsCard icon="⏱️" title="Screen Time" value={formatMinutes(todayMinutes)} subtitle="Today" color="yellow" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
         <div className="card">
-          <h2 className="font-semibold mb-4 text-sm md:text-base">Screen Time This Week</h2>
+          <h2 className="section-title mb-4">Screen time this week</h2>
           {weeklyUsage.length === 0 ? (
-            <p className="text-gray-400 text-sm">No activity recorded yet</p>
+            <EmptyState
+              compact
+              icon="clock"
+              title="Nothing recorded yet"
+              description="Usage appears once a linked device starts reporting."
+            />
           ) : (
             <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={weeklyUsage}>
-                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
-                <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} width={35} />
-                <Tooltip formatter={(v) => [`${v} min`]} />
-                <Bar dataKey="minutes" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+              <BarChart data={weeklyUsage} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} />
+                <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} width={44} />
+                <Tooltip
+                  cursor={{ fill: '#f3f4f6' }}
+                  formatter={(v) => [`${v} min`, 'Screen time']}
+                  contentStyle={{ borderRadius: 12, border: '1px solid #f3f4f6', fontSize: 12 }}
+                />
+                <Bar dataKey="minutes" fill="#2563eb" radius={[6, 6, 0, 0]} maxBarSize={40} />
               </BarChart>
             </ResponsiveContainer>
           )}
         </div>
 
         <div className="card">
-          <h2 className="font-semibold mb-4 text-sm md:text-base">Children</h2>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h2 className="section-title">Children</h2>
+            <Link to="/dashboard/children" className="text-sm font-medium text-primary-600 hover:underline">
+              Manage
+            </Link>
+          </div>
+
           {childList.length === 0 ? (
-            <div className="text-center py-8">
-              <span className="text-4xl">👧</span>
-              <p className="text-gray-400 text-sm mt-2">No children added yet</p>
-              <a href="/dashboard/children" className="text-blue-500 text-sm hover:underline mt-1 block">Add a child</a>
-            </div>
+            <EmptyState
+              compact
+              icon="children"
+              title="No children yet"
+              description="Add a child profile to start monitoring their devices."
+              action={<Link to="/dashboard/children" className="btn-primary">Add a child</Link>}
+            />
           ) : (
             <div className="space-y-2">
               {childList.map((child) => (
-                <div key={child.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-                  <div className="w-9 h-9 md:w-10 md:h-10 bg-blue-100 rounded-full flex items-center justify-center font-bold text-blue-600 shrink-0">
-                    {child.name[0]}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm truncate">{child.name}</p>
-                    <p className="text-xs text-gray-400">{child.devices?.length || 0} device(s)</p>
-                  </div>
-                  <span className="badge-blue text-xs shrink-0">{child.age ? `Age ${child.age}` : 'No age'}</span>
-                </div>
+                <Link
+                  key={child.id}
+                  to="/dashboard/children"
+                  className="list-row bg-gray-50 hover:bg-gray-100"
+                >
+                  <Avatar name={child.name} imageUrl={child.avatarUrl} size="sm" />
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-medium text-sm text-gray-900 truncate">{child.name}</span>
+                    <span className="block text-xs text-gray-500">
+                      {child.devices?.length || 0} device{child.devices?.length === 1 ? '' : 's'}
+                    </span>
+                  </span>
+                  {child.age ? <span className="badge-blue">Age {child.age}</span> : null}
+                  <Icon name="chevronRight" size={16} className="text-gray-300" />
+                </Link>
               ))}
             </div>
           )}
@@ -131,17 +180,33 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
-        <h2 className="font-semibold mb-4 text-sm md:text-base">Recent Alerts</h2>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h2 className="section-title">Recent alerts</h2>
+          <Link to="/dashboard/alerts" className="text-sm font-medium text-primary-600 hover:underline">
+            View all
+          </Link>
+        </div>
+
         {alertList.length === 0 ? (
-          <p className="text-gray-400 text-sm">No alerts yet</p>
+          <EmptyState
+            compact
+            icon="shieldCheck"
+            title="All quiet"
+            description="Safety alerts from your children's devices will show up here."
+          />
         ) : (
           <div className="space-y-2">
             {alertList.slice(0, 5).map((a) => (
-              <div key={a.id} className={`flex items-start gap-3 p-3 rounded-xl ${!a.isRead ? 'bg-blue-50' : 'bg-gray-50'}`}>
-                <span className="shrink-0 mt-0.5">{a.severity === 'high' ? '🔴' : a.severity === 'medium' ? '🟡' : '🟢'}</span>
+              <div
+                key={a.id}
+                className={`flex items-start gap-3 p-3 rounded-xl ${!a.isRead ? 'bg-primary-50' : 'bg-gray-50'}`}
+              >
+                <span className={`w-2 h-2 rounded-full shrink-0 mt-1.5 ${SEVERITY_DOT[a.severity] || SEVERITY_DOT.low}`} />
                 <div className="min-w-0">
-                  <p className="text-sm">{a.message}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{new Date(a.createdAt).toLocaleString()}</p>
+                  <p className="text-sm text-gray-900">{a.message}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {alertLabel(a.type)} · {new Date(a.createdAt).toLocaleString()}
+                  </p>
                 </div>
               </div>
             ))}

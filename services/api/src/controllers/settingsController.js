@@ -1,5 +1,5 @@
 const { getSetting, setSetting } = require('../utils/settings');
-const { DEFAULT_PLAN_FEATURES, FEATURE_LABELS } = require('../config/planFeatures');
+const { DEFAULT_PLAN_FEATURES, FEATURE_LABELS } = require('../config/plans');
 const { auditLog } = require('../utils/auditLogger');
 
 const DEFAULTS = {

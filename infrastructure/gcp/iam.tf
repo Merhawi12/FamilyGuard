@@ -55,6 +55,19 @@ resource "google_service_account_iam_member" "api_self_sign" {
   member             = "serviceAccount:${google_service_account.api.email}"
 }
 
+# Send Firebase Cloud Messaging notifications to the parents' Android app.
+#
+# This grant is the entire credential. The API reaches FCM's HTTP v1 endpoint
+# with an access token minted from Application Default Credentials — which on
+# Cloud Run is this service account — so there is no server key, no service
+# account JSON in Secret Manager and nothing to rotate. Removing the role is how
+# you turn FCM off.
+resource "google_project_iam_member" "api_fcm" {
+  project = var.project_id
+  role    = "roles/firebasemessaging.admin"
+  member  = "serviceAccount:${google_service_account.api.email}"
+}
+
 resource "google_project_iam_member" "api_logging" {
   project = var.project_id
   role    = "roles/logging.logWriter"

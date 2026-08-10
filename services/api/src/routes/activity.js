@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const { authenticate } = require('../middleware/auth');
-const { getActivity, logActivity } = require('../controllers/activityController');
+const { getActivity, logActivity, getWebHistory } = require('../controllers/activityController');
 
 const logLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -11,6 +11,7 @@ const logLimiter = rateLimit({
 });
 
 router.use(authenticate);
+router.get('/:childId/web-history', getWebHistory);
 router.get('/:childId', getActivity);
 router.post('/', logLimiter, logActivity);
 

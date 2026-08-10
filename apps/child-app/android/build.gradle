@@ -17,6 +17,13 @@ buildscript {
     dependencies {
         classpath('com.android.tools.build:gradle')
         classpath('com.facebook.react:react-native-gradle-plugin')
+        // Reads google-services.json and turns it into the resources
+        // firebase-messaging looks up at startup. expo-notifications pulls
+        // firebase-messaging in on its own, but nothing generates those
+        // resources, so without this plugin the library initialises against
+        // nothing and getExpoPushTokenAsync() throws "Default FirebaseApp is not
+        // initialized". Applied conditionally in app/build.gradle — see there.
+        classpath('com.google.gms:google-services:4.4.2')
     }
 }
 

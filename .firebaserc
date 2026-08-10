@@ -1,0 +1,17 @@
+{
+  "projects": {
+    "default": "parentix-4be0d"
+  },
+  "targets": {
+    "parentix-4be0d": {
+      "hosting": {
+        "family": [
+          "parentix-4be0d"
+        ],
+        "admin": [
+          "parentix-admin"
+        ]
+      }
+    }
+  }
+}

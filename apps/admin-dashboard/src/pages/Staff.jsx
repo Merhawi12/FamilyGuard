@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  admin as adminApi, useAuth, errorMessage,
+  admin as adminApi, useAuth, errorMessage, EmptyState, Icon, Modal,
   ROLES, STAFF_ROLES, roleLabel, PERMISSION_KEYS, PERMISSION_LABELS,
   PERMISSION_DESCRIPTIONS, defaultPermissionsFor,
 } from '@parentix/shared';
+import DataTable from '../components/DataTable';
 
 const ROLE_BLURB = {
   [ROLES.SUPER_ADMIN]: 'Full control, including staff accounts.',
@@ -14,16 +15,6 @@ const ROLE_BLURB = {
 };
 
 const EMPTY_FORM = { name: '', email: '', role: ROLES.SUPPORT, permissions: defaultPermissionsFor(ROLES.SUPPORT) };
-
-const Badge = ({ children, tone = 'gray' }) => {
-  const tones = {
-    gray: 'bg-gray-100 text-gray-600',
-    blue: 'bg-blue-50 text-blue-700',
-    green: 'bg-green-50 text-green-700',
-    red: 'bg-red-50 text-red-700',
-  };
-  return <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tones[tone]}`}>{children}</span>;
-};
 
 export default function Staff() {
   const { user } = useAuth();
@@ -189,129 +180,172 @@ export default function Staff() {
     `Permanently delete ${member.email}? This cannot be undone.`
   );
 
-  if (loading) return <div className="text-gray-400 text-sm">Loading staff accounts…</div>;
+  const columns = [
+    {
+      key: 'member',
+      header: 'Name',
+      primary: true,
+      cell: (member) => (
+        <>
+          <p className="font-medium text-gray-900 truncate">
+            {member.name}
+            {member.id === user?.id && <span className="text-xs text-gray-400 font-normal"> (you)</span>}
+          </p>
+          <p className="text-xs text-gray-400 truncate">{member.email}</p>
+        </>
+      ),
+    },
+    { key: 'role', header: 'Role', cell: (member) => <span className="badge-blue">{roleLabel(member.role)}</span> },
+    {
+      key: 'permissions',
+      header: 'Permissions',
+      cell: (member) => (member.role === ROLES.SUPER_ADMIN ? (
+        <span className="text-xs text-gray-500">All permissions</span>
+      ) : (
+        <div className="flex flex-wrap gap-1 justify-end lg:justify-start lg:max-w-xs">
+          {(member.permissions || []).length
+            ? member.permissions.map((p) => <span key={p} className="badge-gray">{PERMISSION_LABELS[p] || p}</span>)
+            : <span className="text-xs text-gray-400">None</span>}
+        </div>
+      )),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      cell: (member) => (
+        <span className={member.isActive ? 'badge-green' : 'badge-red'}>
+          {member.isActive ? 'Active' : 'Deactivated'}
+        </span>
+      ),
+    },
+  ];
+
+  const actions = (member) => {
+    const isSelf = member.id === user?.id;
+    const busy = busyId === member.id;
+    return (
+      <>
+        <button onClick={() => openEdit(member)} disabled={busy} className="btn btn-sm bg-gray-100 text-gray-700 hover:bg-gray-200">
+          Edit
+        </button>
+        <button onClick={() => openReset(member)} disabled={busy} className="btn btn-sm bg-blue-50 text-blue-700 hover:bg-blue-100">
+          Reset password
+        </button>
+        {/* A Super Admin cannot switch off or delete their own account — that is
+            what guarantees one always remains. */}
+        <button
+          onClick={() => toggleActive(member)}
+          disabled={busy || isSelf}
+          title={isSelf ? 'You cannot deactivate your own account' : ''}
+          className="btn btn-sm bg-amber-50 text-amber-700 hover:bg-amber-100"
+        >
+          {member.isActive ? 'Deactivate' : 'Activate'}
+        </button>
+        <button
+          onClick={() => remove(member)}
+          disabled={busy || isSelf}
+          title={isSelf ? 'You cannot delete your own account' : ''}
+          className="btn btn-sm bg-red-50 text-red-600 hover:bg-red-100"
+        >
+          Delete
+        </button>
+      </>
+    );
+  };
+
+  const passwordModeChoices = [
+    { mode: 'generate', label: 'Generate a strong password', hint: 'Shown once after saving, for you to pass on securely.' },
+    { mode: 'manual', label: 'Set a specific password', hint: 'Choose it yourself — useful for a temporary hand-over.' },
+  ];
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-bold">Staff Accounts</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Department accounts and what each one is allowed to do. Only a Super Admin sees this screen.
-          </p>
-        </div>
-        <button onClick={openCreate} className="btn-primary shrink-0">+ New staff account</button>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-gray-500 flex-1 min-w-0">
+          Department accounts and what each one is allowed to do. Only a Super Admin sees this screen.
+        </p>
+        <button onClick={openCreate} className="btn-primary btn-sm shrink-0">
+          <Icon name="plus" size={16} strokeWidth={2.4} />
+          New staff account
+        </button>
       </div>
 
-      {error && <div className="p-3 bg-red-50 text-red-700 rounded-xl text-sm">{error}</div>}
-      {notice && <div className="p-3 bg-green-50 text-green-700 rounded-xl text-sm">{notice}</div>}
+      {error && <p className="notice-error">{error}</p>}
+      {notice && <p className="notice-success">{notice}</p>}
 
       {revealed && (
-        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+        <div className="notice-warning block">
           <p className="text-sm font-semibold text-amber-900">Password for {revealed.email}</p>
           <p className="text-xs text-amber-800 mt-1">
-            Shown once — it is stored hashed. Send it to them over a secure channel and have them change it.
+            Shown once — it is stored hashed. Send it over a secure channel and have them change it.
           </p>
           <code className="block mt-2 px-3 py-2 bg-white rounded-lg text-sm font-mono break-all border border-amber-200">
             {revealed.password}
           </code>
-          <button onClick={() => setRevealed(null)} className="text-xs text-amber-900 underline mt-2">Dismiss</button>
+          <button onClick={() => setRevealed(null)} className="btn-ghost btn-sm mt-2 text-amber-900">Dismiss</button>
         </div>
       )}
 
-      {resetTarget && (
-        <form onSubmit={submitReset} className="card space-y-4">
-          <div>
-            <h2 className="font-semibold">Reset password</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              For <span className="font-medium text-gray-700">{resetTarget.name}</span> ({resetTarget.email}).
-              Their current password stops working immediately and they are signed out everywhere.
-            </p>
-          </div>
+      <DataTable
+        title={`Staff accounts (${staff.length})`}
+        columns={columns}
+        rows={staff}
+        rowKey={(member) => member.id}
+        actions={actions}
+        loading={loading}
+        loadingLabel="Loading staff accounts…"
+        empty={
+          <EmptyState
+            icon="shield"
+            title="No staff accounts yet"
+            description="Create one to give a colleague access to this console."
+            action={<button onClick={openCreate} className="btn-primary">New staff account</button>}
+          />
+        }
+      />
 
-          <div className="space-y-2">
-            <label className={`flex gap-2 items-start p-3 rounded-xl border cursor-pointer transition ${
-              resetMode === 'generate' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
-            }`}>
-              <input type="radio" name="resetMode" className="mt-1" checked={resetMode === 'generate'}
-                onChange={() => setResetMode('generate')} />
-              <span>
-                <span className="text-sm font-medium block">Generate a strong password</span>
-                <span className="text-xs text-gray-500">Shown once after saving, for you to pass on securely.</span>
-              </span>
+      {/* ── Create / edit ──────────────────────────────────────────────────── */}
+      <Modal
+        open={showForm}
+        onClose={() => { setShowForm(false); setEditingId(null); }}
+        size="lg"
+        title={editingId ? 'Edit staff account' : 'New staff account'}
+        description={editingId
+          ? 'Saving signs this account out, so the new permissions take effect immediately.'
+          : 'A strong password is generated and shown once after you save.'}
+      >
+        <form onSubmit={submit} className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="field">
+              <span className="field-label">Full name</span>
+              <input
+                className="input" required value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
             </label>
-
-            <label className={`flex gap-2 items-start p-3 rounded-xl border cursor-pointer transition ${
-              resetMode === 'manual' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
-            }`}>
-              <input type="radio" name="resetMode" className="mt-1" checked={resetMode === 'manual'}
-                onChange={() => setResetMode('manual')} />
-              <span>
-                <span className="text-sm font-medium block">Set a specific password</span>
-                <span className="text-xs text-gray-500">Choose it yourself — useful for a temporary hand-over.</span>
-              </span>
-            </label>
-          </div>
-
-          {resetMode === 'manual' && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="block">
-                <span className="text-sm text-gray-500">New password</span>
-                <input className="input mt-1" type="password" autoComplete="new-password" required
-                  value={resetForm.password}
-                  onChange={(e) => setResetForm({ ...resetForm, password: e.target.value })} />
-                <span className="text-xs text-gray-400 mt-1 block">
-                  At least 10 characters, with a letter and a number.
-                </span>
-              </label>
-              <label className="block">
-                <span className="text-sm text-gray-500">Confirm password</span>
-                <input className="input mt-1" type="password" autoComplete="new-password" required
-                  value={resetForm.confirm}
-                  onChange={(e) => setResetForm({ ...resetForm, confirm: e.target.value })} />
-              </label>
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <button type="submit" className="btn-primary disabled:opacity-60" disabled={resetting}>
-              {resetting ? 'Resetting…' : 'Reset password'}
-            </button>
-            <button type="button" onClick={() => setResetTarget(null)}
-              className="px-4 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
-              Cancel
-            </button>
-          </div>
-        </form>
-      )}
-
-      {showForm && (
-        <form onSubmit={submit} className="card space-y-4">
-          <h2 className="font-semibold">{editingId ? 'Edit staff account' : 'New staff account'}</h2>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block">
-              <span className="text-sm text-gray-500">Full name</span>
-              <input className="input mt-1" required value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </label>
-            <label className="block">
-              <span className="text-sm text-gray-500">Email</span>
-              <input className="input mt-1" type="email" required value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <label className="field">
+              <span className="field-label">Email</span>
+              <input
+                className="input" type="email" required value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
             </label>
           </div>
 
           <div>
-            <span className="text-sm text-gray-500">Department / role</span>
-            <div className="grid gap-2 sm:grid-cols-2 mt-2">
+            <p className="field-label mb-2">Department</p>
+            <div className="grid gap-2 sm:grid-cols-2">
               {STAFF_ROLES.map((role) => (
-                <label key={role}
-                  className={`flex gap-2 items-start p-3 rounded-xl border cursor-pointer transition ${
-                    form.role === role ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
-                  }`}>
-                  <input type="radio" name="role" className="mt-1" checked={form.role === role}
-                    onChange={() => changeRole(role)} />
+                <label
+                  key={role}
+                  className={`flex gap-3 items-start p-3 rounded-xl border cursor-pointer transition ${
+                    form.role === role ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  <input
+                    type="radio" name="role" className="mt-1"
+                    checked={form.role === role} onChange={() => changeRole(role)}
+                  />
                   <span>
                     <span className="text-sm font-medium block">{roleLabel(role)}</span>
                     <span className="text-xs text-gray-500">{ROLE_BLURB[role]}</span>
@@ -322,24 +356,24 @@ export default function Staff() {
           </div>
 
           <div>
-            <span className="text-sm text-gray-500">Permissions</span>
+            <p className="field-label">Permissions</p>
             <p className="text-xs text-gray-400 mb-2">
               {form.role === ROLES.SUPER_ADMIN
                 ? 'A Super Admin always holds every permission.'
                 : 'Starts from the role defaults — adjust for this person only.'}
             </p>
-            <div className="space-y-2">
+            <div className="space-y-1">
               {PERMISSION_KEYS.map((key) => (
-                <label key={key} className="flex gap-2 items-start">
+                <label key={key} className="flex gap-3 items-start py-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    className="mt-1"
+                    className="mt-1 w-4 h-4"
                     disabled={form.role === ROLES.SUPER_ADMIN}
                     checked={form.role === ROLES.SUPER_ADMIN || form.permissions.includes(key)}
                     onChange={() => togglePermission(key)}
                   />
                   <span>
-                    <span className="text-sm block">{PERMISSION_LABELS[key]}</span>
+                    <span className="text-sm block text-gray-900">{PERMISSION_LABELS[key]}</span>
                     <span className="text-xs text-gray-400">{PERMISSION_DESCRIPTIONS[key]}</span>
                   </span>
                 </label>
@@ -347,92 +381,80 @@ export default function Staff() {
             </div>
           </div>
 
-          {!editingId && (
-            <p className="text-xs text-gray-500">
-              A strong password is generated and shown once after you save.
-            </p>
-          )}
-          {editingId && (
-            <p className="text-xs text-gray-500">
-              Saving signs this account out, so the new permissions take effect immediately.
-            </p>
-          )}
-
-          <div className="flex gap-2">
-            <button type="submit" className="btn-primary disabled:opacity-60" disabled={saving}>
-              {saving ? 'Saving…' : editingId ? 'Save changes' : 'Create account'}
-            </button>
-            <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }}
-              className="px-4 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
+          <div className="flex flex-col-reverse sm:flex-row gap-2">
+            <button
+              type="button"
+              onClick={() => { setShowForm(false); setEditingId(null); }}
+              className="btn-secondary sm:w-auto btn-block"
+            >
               Cancel
+            </button>
+            <button type="submit" className="btn-primary btn-block sm:w-auto" disabled={saving}>
+              {saving ? 'Saving…' : editingId ? 'Save changes' : 'Create account'}
             </button>
           </div>
         </form>
-      )}
+      </Modal>
 
-      <div className="card overflow-x-auto">
-        <table className="w-full text-sm min-w-[720px]">
-          <thead>
-            <tr className="text-left text-gray-500 text-xs uppercase">
-              <th className="py-2">Name</th>
-              <th className="py-2">Role</th>
-              <th className="py-2">Permissions</th>
-              <th className="py-2">Status</th>
-              <th className="py-2 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {staff.map((member) => {
-              const isSelf = member.id === user?.id;
-              const busy = busyId === member.id;
-              return (
-                <tr key={member.id} className="border-t border-gray-100 align-top">
-                  <td className="py-3">
-                    <p className="font-medium">{member.name} {isSelf && <span className="text-xs text-gray-400">(you)</span>}</p>
-                    <p className="text-xs text-gray-400">{member.email}</p>
-                  </td>
-                  <td className="py-3"><Badge tone="blue">{roleLabel(member.role)}</Badge></td>
-                  <td className="py-3">
-                    {member.role === ROLES.SUPER_ADMIN ? (
-                      <span className="text-xs text-gray-500">All permissions</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1 max-w-xs">
-                        {(member.permissions || []).length
-                          ? member.permissions.map((p) => <Badge key={p}>{PERMISSION_LABELS[p] || p}</Badge>)
-                          : <span className="text-xs text-gray-400">None</span>}
-                      </div>
-                    )}
-                  </td>
-                  <td className="py-3">
-                    <Badge tone={member.isActive ? 'green' : 'red'}>{member.isActive ? 'Active' : 'Deactivated'}</Badge>
-                  </td>
-                  <td className="py-3">
-                    <div className="flex gap-2 justify-end flex-wrap">
-                      <button onClick={() => openEdit(member)} disabled={busy}
-                        className="text-xs text-blue-600 hover:underline disabled:opacity-40">Edit</button>
-                      <button onClick={() => openReset(member)} disabled={busy}
-                        className="text-xs text-blue-600 hover:underline disabled:opacity-40">Reset password</button>
-                      {/* A Super Admin cannot switch off or delete their own account —
-                          that is what guarantees one always remains. */}
-                      <button onClick={() => toggleActive(member)} disabled={busy || isSelf}
-                        className="text-xs text-amber-700 hover:underline disabled:opacity-40 disabled:no-underline"
-                        title={isSelf ? 'You cannot deactivate your own account' : ''}>
-                        {member.isActive ? 'Deactivate' : 'Activate'}
-                      </button>
-                      <button onClick={() => remove(member)} disabled={busy || isSelf}
-                        className="text-xs text-red-600 hover:underline disabled:opacity-40 disabled:no-underline"
-                        title={isSelf ? 'You cannot delete your own account' : ''}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {!staff.length && <p className="text-sm text-gray-400 py-6 text-center">No staff accounts yet.</p>}
-      </div>
+      {/* ── Reset password ─────────────────────────────────────────────────── */}
+      <Modal
+        open={!!resetTarget}
+        onClose={() => setResetTarget(null)}
+        title="Reset password"
+        description={resetTarget
+          ? `For ${resetTarget.name} (${resetTarget.email}). Their current password stops working immediately and they are signed out everywhere.`
+          : undefined}
+      >
+        <form onSubmit={submitReset} className="space-y-4">
+          <div className="space-y-2">
+            {passwordModeChoices.map(({ mode, label, hint }) => (
+              <label
+                key={mode}
+                className={`flex gap-3 items-start p-3 rounded-xl border cursor-pointer transition ${
+                  resetMode === mode ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <input
+                  type="radio" name="resetMode" className="mt-1"
+                  checked={resetMode === mode} onChange={() => setResetMode(mode)}
+                />
+                <span>
+                  <span className="text-sm font-medium block">{label}</span>
+                  <span className="text-xs text-gray-500">{hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          {resetMode === 'manual' && (
+            <div className="space-y-3">
+              <label className="field">
+                <span className="field-label">New password</span>
+                <input
+                  className="input" type="password" autoComplete="new-password" required
+                  value={resetForm.password}
+                  onChange={(e) => setResetForm({ ...resetForm, password: e.target.value })}
+                />
+                <span className="field-hint">At least 10 characters, with a letter and a number.</span>
+              </label>
+              <label className="field">
+                <span className="field-label">Confirm password</span>
+                <input
+                  className="input" type="password" autoComplete="new-password" required
+                  value={resetForm.confirm}
+                  onChange={(e) => setResetForm({ ...resetForm, confirm: e.target.value })}
+                />
+              </label>
+            </div>
+          )}
+
+          {error && <p className="notice-error">{error}</p>}
+
+          <button type="submit" className="btn-primary btn-block" disabled={resetting}>
+            {resetting ? 'Resetting…' : 'Reset password'}
+          </button>
+        </form>
+      </Modal>
     </div>
   );
 }

@@ -18,6 +18,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const roles = require('../src/config/roles');
+const planCatalogue = require('../src/config/plans');
+const { normalizeDomain } = require('../src/utils/domain');
 
 const SHARED = path.join(__dirname, '../../../packages/shared/src/constants.js');
 const API_SRC = path.join(__dirname, '../src');
@@ -140,6 +142,142 @@ describe('roles and permissions stay in step with the API', () => {
   it('lists the same plans the API gates on', () => {
     const plans = sharedArrayLiterals('PLANS');
 
-    expect(plans.sort()).toEqual(['family', 'free', 'premium']);
+    expect(plans.sort()).toEqual([...planCatalogue.PLAN_KEYS].sort());
+  });
+});
+
+/**
+ * The pricing catalogue is the case this file exists for. Price, entitlements
+ * and device allowance were previously restated in the Stripe route, the
+ * entitlement config, two React files and the landing page — and they disagreed:
+ * the Settings page advertised "Up to 5 child devices" on a plan the API gave
+ * unlimited, and Family Plus was sellable after being dropped from the
+ * entitlement table. Charging one price while enforcing another is the failure
+ * mode worth a test.
+ */
+describe('the pricing catalogue stays in step across API and web apps', () => {
+  /** Reads PLAN_CATALOGUE out of the shared ESM file as a list of plain objects. */
+  const sharedCatalogue = () => {
+    const start = sharedSource.indexOf('export const PLAN_CATALOGUE');
+    if (start === -1) throw new Error('PLAN_CATALOGUE is not exported from constants.js');
+    const body = sharedSource.slice(start, sharedSource.indexOf('\n];', start));
+
+    return [...body.matchAll(/\{\s*\n\s*key:\s*PLANS\.([A-Z_]+),([\s\S]*?)\n {2}\}/g)].map((m) => {
+      const chunk = m[2];
+      const read = (field, pattern) => chunk.match(new RegExp(`${field}:\\s*(${pattern})`))?.[1];
+      return {
+        constName: m[1],
+        label: read('label', "'[^']*'")?.slice(1, -1),
+        amountCents: Number(read('amountCents', '\\d+')),
+        maxDevices: read('maxDevices', 'null|\\d+') === 'null' ? null : Number(read('maxDevices', 'null|\\d+')),
+        featureKeys: [...(chunk.match(/featureKeys:\s*\[([^\]]*)\]/)?.[1] || '').matchAll(/'([^']+)'/g)].map((f) => f[1]),
+      };
+    });
+  };
+
+  const shared = sharedCatalogue();
+
+  it('parses the shared catalogue at all', () => {
+    // A guard on the guard: a regex that stops matching would make every
+    // assertion below pass against an empty list.
+    expect(shared.length).toBe(planCatalogue.PLAN_KEYS.length);
+    expect(shared.map((p) => p.constName)).toContain('PREMIUM');
+  });
+
+  it('offers the same plans in the same order', () => {
+    const sharedKeys = shared.map((p) => p.constName.toLowerCase());
+    expect(sharedKeys).toEqual(planCatalogue.PLAN_KEYS);
+  });
+
+  it.each(planCatalogue.PLAN_KEYS)('agrees on price, label, features and device limit for %s', (key) => {
+    const api = planCatalogue.PLANS[key];
+    const web = shared.find((p) => p.constName.toLowerCase() === key);
+
+    expect(web).toBeDefined();
+    expect(web.label).toBe(api.label);
+    expect(web.amountCents).toBe(api.amount);
+    expect(web.maxDevices).toBe(api.maxDevices);
+    expect(web.featureKeys.sort()).toEqual([...api.features].sort());
+  });
+
+  it('gates only on features that have a label', () => {
+    for (const key of planCatalogue.PLAN_KEYS) {
+      for (const feature of planCatalogue.PLANS[key].features) {
+        expect(planCatalogue.FEATURE_LABELS[feature]).toBeTruthy();
+      }
+    }
+  });
+
+  it('grants the trial tier a real, sellable plan', () => {
+    expect(planCatalogue.PLAN_KEYS).toContain(planCatalogue.TRIAL_PLAN);
+    expect(planCatalogue.PAID_PLAN_KEYS).toContain(planCatalogue.TRIAL_PLAN);
+  });
+
+  it('has no trace of the retired family tier', () => {
+    expect(planCatalogue.PLAN_KEYS).not.toContain('family');
+    expect(planCatalogue.DEFAULT_PLAN_FEATURES).not.toHaveProperty('family');
+    expect(sharedSource).not.toMatch(/FAMILY:/);
+  });
+});
+
+/**
+ * The filter categories are the third list restated on both sides, and the one
+ * where a mismatch is silent in the worst way: the family app would offer a
+ * category the server has no domains for, so a parent would switch on a control
+ * that blocks nothing — which is exactly the bug this catalogue was written to
+ * end. Keys and labels only; the domain lists stay on the server.
+ */
+describe('the content categories stay in step across API and web apps', () => {
+  const contentCategories = require('../src/config/contentCategories');
+
+  /** Reads CONTENT_CATEGORIES out of the shared ESM file. */
+  const sharedCategories = () => {
+    const start = sharedSource.indexOf('export const CONTENT_CATEGORIES');
+    if (start === -1) throw new Error('CONTENT_CATEGORIES is not exported from constants.js');
+    const body = sharedSource.slice(start, sharedSource.indexOf('\n];', start));
+
+    return [...body.matchAll(/key:\s*'([^']+)',\s*label:\s*'([^']+)',\s*description:\s*'([^']+)'/g)]
+      .map((m) => ({ key: m[1], label: m[2], description: m[3] }));
+  };
+
+  const shared = sharedCategories();
+
+  it('parses the shared catalogue at all', () => {
+    // A guard on the guard: a regex that stopped matching would make every
+    // assertion below pass against an empty list.
+    expect(shared.length).toBe(contentCategories.CONTENT_CATEGORIES.length);
+    expect(shared.map((c) => c.key)).toContain('adult');
+  });
+
+  it('offers the same categories in the same order', () => {
+    expect(shared.map((c) => c.key)).toEqual(contentCategories.CATEGORY_KEYS);
+  });
+
+  it.each(contentCategories.CATEGORY_KEYS)('agrees on the label and description for %s', (key) => {
+    const api = contentCategories.CONTENT_CATEGORIES.find((c) => c.key === key);
+    const web = shared.find((c) => c.key === key);
+
+    expect(web.label).toBe(api.label);
+    expect(web.description).toBe(api.description);
+  });
+
+  it('has domains behind every category it offers', () => {
+    for (const category of contentCategories.CONTENT_CATEGORIES) {
+      expect(category.domains.length).toBeGreaterThan(0);
+      // A rule is matched against DNS names, so every entry has to be one.
+      for (const domain of category.domains) {
+        expect(normalizeDomain(domain)).toBe(domain);
+      }
+    }
+  });
+
+  it('claims each domain for exactly one category', () => {
+    const seen = new Map();
+    for (const category of contentCategories.CONTENT_CATEGORIES) {
+      for (const domain of category.domains) {
+        expect(seen.get(domain)).toBeUndefined();
+        seen.set(domain, category.key);
+      }
+    }
   });
 });

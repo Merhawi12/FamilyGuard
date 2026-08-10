@@ -2,18 +2,78 @@ const express = require('express');
 const { env } = require('../config/env');
 const logger = require('../utils/logger');
 const router = express.Router();
-const Stripe = require('stripe');
 const { User, Transaction } = require('../models');
 const { authenticate } = require('../middleware/auth');
-
+const { PLANS: PLAN_CATALOGUE, PAID_PLAN_KEYS } = require('../config/plans');
 // A misconfigured/missing Stripe key must not crash the whole API — payments
 // degrade to 503 while every other route (alerts, location, monitoring) stays up.
-const stripe = env.stripe.secretKey ? Stripe(env.stripe.secretKey) : null;
-if (!stripe) logger.warn('STRIPE_SECRET_KEY not set — payment routes disabled');
+// The client itself lives in services/billing, because closing an account needs
+// it too and two clients would be two connection pools.
+const { stripe } = require('../services/billing');
 
-const PLANS = {
-  premium: { priceId: env.stripe.premiumPriceId, name: 'Premium', amount: 999 },
-  family:  { priceId: env.stripe.familyPriceId,  name: 'Family Plus', amount: 1499 },
+// Checkout targets, derived from the catalogue so a plan cannot be sellable
+// here and absent there — the mismatch that let `family` outlive its removal
+// from the entitlement table and bill for features nothing granted.
+const CHECKOUT_PLANS = Object.fromEntries(
+  PAID_PLAN_KEYS.map((key) => [key, {
+    priceId: env.stripe[PLAN_CATALOGUE[key].priceEnv],
+    name: PLAN_CATALOGUE[key].label,
+    amount: PLAN_CATALOGUE[key].amount,
+  }])
+);
+
+/**
+ * Which plan a Stripe price grants.
+ *
+ * Premium is the only tier sold, so any live subscription entitles the account
+ * to it — including the retired $14.99 Family Plus price, which grandfathered
+ * customers still bill against. Their entitlements come from Premium (it
+ * absorbed every Family Plus feature); only the amount they pay is legacy.
+ *
+ * An unrecognised price still resolves to Premium, because a subscription
+ * exists and refusing to name a plan would leave a paying customer with none —
+ * but it is logged, since it means a Stripe price nobody configured here.
+ */
+const planForPrice = (priceId) => {
+  const known = PAID_PLAN_KEYS.find((key) => priceId && CHECKOUT_PLANS[key].priceId === priceId);
+  if (known) return known;
+  if (priceId && priceId !== env.stripe.legacyFamilyPriceId) {
+    logger.warn('Stripe subscription on an unrecognised price — defaulting to premium', { priceId });
+  }
+  return 'premium';
+};
+
+/**
+ * Turns a Stripe exception into a status and a message worth reading.
+ *
+ * "Failed to create checkout session" was the answer to every failure, so a
+ * placeholder API key, an archived price and a genuine Stripe outage were
+ * indistinguishable from the browser — and the one line that could tell them
+ * apart only existed in the server log. A misconfiguration is the operator's
+ * problem, not the customer's, and saying so is what makes it fixable.
+ *
+ * Stripe's own message is passed through only for configuration faults, which
+ * are about this deployment's setup and carry no customer data. Everything else
+ * gets a generic message and a full log line.
+ */
+const sendStripeFailure = (res, err, context) => {
+  const configFault = err?.type === 'StripeAuthenticationError'
+    || (err?.type === 'StripeInvalidRequestError' && /No such price|No such plan|not.*recurring/i.test(err.message || ''));
+
+  logger.error('Stripe request failed', { ...context, type: err?.type, code: err?.code, error: err?.message });
+
+  if (configFault) {
+    return res.status(503).json({
+      error: 'Payments are not set up correctly on this deployment. Please contact support.',
+      configurationError: true,
+      // Stripe's wording names the exact key or price at fault, which is what
+      // makes it fixable — but it describes our infrastructure, so a customer
+      // in production never sees it. Locally it is the whole point.
+      ...(env.isProduction ? {} : { detail: err.message }),
+    });
+  }
+
+  return res.status(502).json({ error: 'The payment provider could not be reached. Please try again.' });
 };
 
 // POST /api/payments/create-checkout-session
@@ -21,7 +81,13 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
   if (!stripe) return res.status(503).json({ error: 'Payments are not configured' });
 
   const { plan } = req.body;
-  if (!PLANS[plan]) return res.status(400).json({ error: 'Invalid plan' });
+  if (!CHECKOUT_PLANS[plan]) return res.status(400).json({ error: 'Invalid plan' });
+  if (!CHECKOUT_PLANS[plan].priceId) {
+    // A plan with no Stripe price would send the customer to a checkout that
+    // fails on Stripe's side with nothing to explain it.
+    logger.error('Checkout attempted for a plan with no Stripe price configured', { plan });
+    return res.status(503).json({ error: 'That plan is not available for purchase right now' });
+  }
 
   try {
     const user = await User.findByPk(req.user.id);
@@ -29,7 +95,13 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
     // Create or reuse Stripe customer
     let customerId = user.stripeCustomerId;
     if (!customerId) {
-      const customer = await stripe.customers.create({ email: user.email, name: user.name });
+      // `email` is omitted rather than sent as null for a phone-only account:
+      // Stripe treats an explicit null as "clear it", and a customer with no
+      // address simply has no receipt destination until one is added.
+      const customer = await stripe.customers.create({
+        name: user.name,
+        ...(user.email ? { email: user.email } : {}),
+      });
       customerId = customer.id;
       await user.update({ stripeCustomerId: customerId });
     }
@@ -37,7 +109,7 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
-      line_items: [{ price: PLANS[plan].priceId, quantity: 1 }],
+      line_items: [{ price: CHECKOUT_PLANS[plan].priceId, quantity: 1 }],
       mode: 'subscription',
       success_url: `${env.clientUrl}/dashboard/settings?payment=success`,
       cancel_url:  `${env.clientUrl}/dashboard/settings?payment=cancelled`,
@@ -46,9 +118,9 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
 
     res.json({ url: session.url });
   } catch (err) {
-    logger.error('Stripe checkout failed', { error: err.message });
-    res.status(500).json({ error: 'Failed to create checkout session' });
+    return sendStripeFailure(res, err, { where: 'checkout', plan });
   }
+  return undefined;
 });
 
 // POST /api/payments/customer-portal
@@ -66,9 +138,9 @@ router.post('/customer-portal', authenticate, async (req, res) => {
 
     res.json({ url: session.url });
   } catch (err) {
-    logger.error('Stripe billing portal failed', { error: err.message });
-    res.status(500).json({ error: 'Failed to open billing portal' });
+    return sendStripeFailure(res, err, { where: 'billing_portal' });
   }
+  return undefined;
 });
 
 // GET /api/payments/subscription
@@ -121,13 +193,50 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object;
-        const { userId, plan } = session.metadata;
+        const { userId, plan } = session.metadata || {};
+
+        /**
+         * Attribution, by metadata first and by Stripe customer second.
+         *
+         * `create-checkout-session` always sets the metadata, but it is not the
+         * only way a subscription starts: a Stripe payment link, the Buy Button
+         * and a subscription started from the dashboard all produce this event
+         * with no metadata at all. That used to destructure to `undefined`, and
+         * `where: { id: undefined }` throws in Sequelize — so the handler 500'd,
+         * Stripe redelivered the event for three days, and a customer who had
+         * genuinely paid stayed on the free plan throughout.
+         *
+         * The customer id belongs to us either way, so it is enough to find the
+         * account.
+         */
+        const user = userId
+          ? await User.findByPk(userId)
+          : session.customer
+            ? await User.findOne({ where: { stripeCustomerId: session.customer } })
+            : null;
+
+        if (!user) {
+          // Nothing to retry: no later delivery of this event will carry an
+          // attribution it does not have. Acknowledge so Stripe stops, and log
+          // it as the operator's problem to reconcile.
+          logger.error('checkout.session.completed could not be attributed to an account', {
+            eventId: event.id, customer: session.customer, metadataUserId: userId,
+          });
+          break;
+        }
+
+        // Premium is the only tier sold, so an attributed checkout that names no
+        // plan is a Premium one — and `customer.subscription.updated` follows
+        // within moments, resolving the plan from the price that was actually
+        // billed if it ever differs.
+        const resolvedPlan = plan || 'premium';
+
         await User.update(
-          { plan, stripeSubscriptionId: session.subscription, subscriptionStatus: 'active' },
-          { where: { id: userId } }
+          { plan: resolvedPlan, stripeSubscriptionId: session.subscription, subscriptionStatus: 'active' },
+          { where: { id: user.id } }
         );
         await recordTransaction({
-          userId, type: 'checkout_completed', plan, status: 'succeeded',
+          userId: user.id, type: 'checkout_completed', plan: resolvedPlan, status: 'succeeded',
           amount: session.amount_total, currency: session.currency,
         });
         break;
@@ -137,7 +246,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         const sub = event.data.object;
         const user = await User.findOne({ where: { stripeCustomerId: sub.customer } });
         if (user) {
-          const plan = sub.items.data[0]?.price?.id === env.stripe.familyPriceId ? 'family' : 'premium';
+          const plan = planForPrice(sub.items.data[0]?.price?.id);
           await user.update({ subscriptionStatus: sub.status, plan });
           await recordTransaction({ userId: user.id, type: 'subscription_updated', plan, status: sub.status });
         }
@@ -180,7 +289,13 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       }
     }
   } catch (err) {
-    logger.error('Stripe webhook handler failed', { error: err.message });
+    // Answering 200 here would tell Stripe the event was applied and it would
+    // never be redelivered — a customer who paid during a database blip would
+    // stay on the free plan with no second chance. 5xx puts the event back into
+    // Stripe's retry schedule; the handlers are idempotent (plan writes are
+    // absolute, and `stripeEventId` is unique), so a replay is safe.
+    logger.error('Stripe webhook handler failed', { eventId: event.id, type: event.type, error: err.message });
+    return res.status(500).json({ error: 'Webhook handler failed' });
   }
 
   res.json({ received: true });

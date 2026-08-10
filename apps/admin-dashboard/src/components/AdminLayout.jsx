@@ -1,83 +1,91 @@
-import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
-import { useAuth, PERMISSIONS, hasPermission, isSuperAdmin, roleLabel } from '@parentix/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
+import { useBodyScrollLock } from '@parentix/shared';
+import Sidebar from './Sidebar.jsx';
+import Topbar from './Topbar.jsx';
+import usePersistentState from '../hooks/usePersistentState';
+import useMediaQuery from '../hooks/useMediaQuery';
 
 /**
- * `permission` hides a link the account cannot use; `superAdmin` marks the
- * screens only a Super Admin gets. Presentation only — the API enforces both.
+ * The console shell: a navy rail, a header that names the screen, and the
+ * screen itself on a light working surface.
+ *
+ * The rail is a drawer below `lg` and permanent above it, and above `lg` it can
+ * be collapsed to icon width — a preference that is remembered, because an
+ * operator who works in the tables all day wants the width back and should not
+ * have to reclaim it on every visit.
+ *
+ * The document scrolls, not an inner pane. A `h-screen`/`overflow-hidden` shell
+ * looks identical on a desktop and stops a mobile browser collapsing its URL
+ * bar, which costs a phone ~10% of its screen on every screen.
  */
-const NAV = [
-  { to: '/', label: 'Overview', icon: '📊', end: true },
-  { to: '/users', label: 'Users', icon: '👥', permission: PERMISSIONS.MANAGE_USERS },
-  { to: '/sessions', label: 'Sessions', icon: '🔐', permission: PERMISSIONS.MANAGE_SESSIONS },
-  { to: '/billing', label: 'Billing', icon: '💳', permission: PERMISSIONS.MANAGE_BILLING },
-  { to: '/notifications', label: 'Notifications', icon: '🔔', permission: PERMISSIONS.SEND_NOTIFICATIONS },
-  { to: '/settings', label: 'Settings', icon: '⚙️', permission: PERMISSIONS.MANAGE_SETTINGS },
-  { to: '/audit-logs', label: 'Audit Logs', icon: '📋', permission: PERMISSIONS.VIEW_AUDIT_LOGS },
-  { to: '/staff', label: 'Staff Accounts', icon: '🛡️', superAdmin: true },
-  { to: '/profile', label: 'My Profile', icon: '👤' },
-];
-
-const visibleTo = (user) => NAV.filter((item) => {
-  if (item.superAdmin) return isSuperAdmin(user);
-  if (item.permission) return hasPermission(user, item.permission);
-  return true;
-});
-
-const linkClass = ({ isActive }) =>
-  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-    isActive ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-  }`;
-
 export default function AdminLayout() {
-  const { user, logout } = useAuth();
+  const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = usePersistentState('px_admin_rail_collapsed', false);
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
+  const panelRef = useRef(null);
+  const menuButtonRef = useRef(null);
 
-  const nav = (
-    <nav className="space-y-1">
-      {visibleTo(user).map(({ to, label, icon, end }) => (
-        <NavLink key={to} to={to} end={end} className={linkClass} onClick={() => setMenuOpen(false)}>
-          <span aria-hidden="true">{icon}</span>
-          {label}
-        </NavLink>
-      ))}
-    </nav>
-  );
+  // Icon width is a desktop affordance; on a phone the drawer is the collapse.
+  const railed = isDesktop && collapsed;
+
+  useBodyScrollLock(menuOpen);
+
+  // Follow a link and the drawer has done its job.
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
+
+  /** Dismissed rather than navigated — put the keyboard back where it was. */
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+    menuButtonRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onKeyDown = (e) => { if (e.key === 'Escape') closeMenu(); };
+    document.addEventListener('keydown', onKeyDown);
+    panelRef.current?.focus({ preventScroll: true });
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [menuOpen, closeMenu]);
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row">
-      <header className="lg:hidden flex items-center justify-between bg-white border-b border-gray-200 px-4 py-3">
-        <span className="font-bold text-gray-900">Parentix Admin</span>
-        <button className="btn-ghost px-3 py-1" onClick={() => setMenuOpen((open) => !open)}>
-          {menuOpen ? '✕' : '☰'}
-        </button>
-      </header>
-
-      <aside
-        className={`${menuOpen ? 'block' : 'hidden'} lg:block lg:w-64 shrink-0 bg-white border-r border-gray-200 p-4`}
+    <div className="min-h-dvh bg-canvas lg:flex">
+      <a
+        href="#console-main"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60]
+                   focus:px-4 focus:py-2.5 focus:rounded-xl focus:bg-white focus:shadow-pop
+                   focus:text-sm focus:font-semibold focus:text-gray-900"
       >
-        <div className="hidden lg:flex items-center gap-2 px-2 pb-6">
-          <img src="/logo.png" alt="" className="w-8 h-8 rounded-lg" />
-          <div>
-            <p className="font-bold text-gray-900 leading-tight">Parentix</p>
-            <p className="text-xs text-gray-400 leading-tight">Admin console</p>
+        Skip to content
+      </a>
+
+      <div
+        className={`fixed inset-0 z-40 bg-navy-950/60 backdrop-blur-[2px] lg:hidden
+                    transition-opacity duration-300
+                    ${menuOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        onClick={closeMenu}
+        aria-hidden="true"
+      />
+
+      <Sidebar
+        open={menuOpen}
+        onClose={closeMenu}
+        railed={railed}
+        collapsed={collapsed}
+        onToggleCollapse={() => setCollapsed((v) => !v)}
+        panelRef={panelRef}
+      />
+
+      <div className="flex-1 min-w-0 flex flex-col">
+        <Topbar menuOpen={menuOpen} onOpenMenu={() => setMenuOpen(true)} menuButtonRef={menuButtonRef} />
+
+        <main id="console-main" className="flex-1 p-4 sm:p-6 lg:p-8">
+          <div className="mx-auto w-full max-w-7xl">
+            <Outlet />
           </div>
-        </div>
-
-        {nav}
-
-        <div className="mt-6 pt-4 border-t border-gray-100">
-          <p className="px-3 text-sm font-medium text-gray-900 truncate">{user?.name}</p>
-          <p className="px-3 text-xs text-gray-400">{roleLabel(user?.role)}</p>
-          <button onClick={logout} className="btn-ghost w-full text-left mt-2 px-3">
-            Sign out
-          </button>
-        </div>
-      </aside>
-
-      <main className="flex-1 p-4 md:p-8 max-w-full overflow-x-hidden">
-        <Outlet />
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

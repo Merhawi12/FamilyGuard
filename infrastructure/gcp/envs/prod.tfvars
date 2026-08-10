@@ -18,11 +18,22 @@ api_subdomain   = "api"
 # Set true only if you delegate the domain's nameservers to Cloud DNS. Leave
 # false to keep DNS at your registrar and create three A records by hand.
 #
-# Stays false: the A records were created at GoDaddy and app/admin/api all
-# resolve to the load balancer already. Delegating now would create a Cloud DNS
-# zone that answers nothing, because the domain's nameservers would still be
-# GoDaddy's — and switching them means up to 48 hours of propagation to reach
-# exactly the state that already works.
+# Stays false: the records live at GoDaddy (ns51/ns52.domaincontrol.com).
+# Delegating now would create a Cloud DNS zone that answers nothing, because the
+# domain's nameservers would still be GoDaddy's — and switching them means up to
+# 48 hours of propagation to reach the state that already works.
+#
+# Since the web tier moved to Firebase Hosting the records point at two
+# different places, and only one of them is ours:
+#
+#   @ www app admin   →  Firebase Hosting (addresses minted per connected
+#                        domain in the console — see docs/DEPLOYMENT.md §1.5)
+#   api               →  the load balancer, 34.149.73.107
+#
+# The load balancer address is written down here on purpose. It is a reserved
+# global address that does not change, `terraform output load_balancer_ip` is
+# the authority, and a DNS edit that drops the `api` record takes sign-in down
+# everywhere with no clue left behind as to what it should be restored to.
 manage_dns = false
 
 # At least one warm instance: a cold start on a real user's login is a bad first
@@ -62,3 +73,20 @@ alert_email = "merhawigu@gmail.com"
 labels = {
   cost-center = "production"
 }
+
+# ── Firebase Hosting ─────────────────────────────────────────────────────────
+# The two Hosting sites serving the web apps. Created once with
+#   firebase hosting:sites:create <id> --project parentix-4be0d
+# and mapped to the `family` / `admin` deploy targets in .firebaserc.
+#
+# Recorded here because the API has to accept their permanent *.web.app origins,
+# not only the custom domains: that address is how a release is verified before
+# DNS is pointed at it, and afterwards it is the way in when the custom domain is
+# the thing that is broken.
+firebase_family_site = "parentix-4be0d"
+firebase_admin_site  = "parentix-admin"
+
+# Set to the outgoing certificate's name for one apply when the certificate's
+# domain list changes, so api.parentix.ca keeps serving TLS while the
+# replacement provisions. Empty in steady state — see variables.tf.
+retained_ssl_certificate = ""

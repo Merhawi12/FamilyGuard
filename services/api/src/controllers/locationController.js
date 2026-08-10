@@ -1,6 +1,14 @@
 const { Op } = require('sequelize');
 const { Location, Child, Device, SafeZone } = require('../models');
 const { createAlert } = require('../utils/alertHelper');
+const { parsePagination } = require('../utils/pagination');
+const { parseFix, INVALID_FIX } = require('../utils/geo');
+const { isUuid } = require('../utils/ids');
+
+// A malformed id is "not found", not a database error — see utils/ids.js for why
+// this has to be checked before the query rather than after it.
+const resolveChild = (childId, parentId) =>
+  (isUuid(childId) ? Child.findOne({ where: { id: childId, parentId } }) : null);
 
 // Haversine distance in metres between two lat/lng points
 const haversineMeters = (lat1, lng1, lat2, lng2) => {
@@ -51,10 +59,8 @@ const postLocation = async (req, res, next) => {
     // NOT from the request body — prevents spoofing another child's location.
     const childId = req.childId;
     const deviceId = req.deviceId;
-    const { latitude, longitude, accuracy, speed, heading, address } = req.body;
-    if (latitude == null || longitude == null) {
-      return res.status(400).json({ error: 'latitude and longitude are required' });
-    }
+    const fix = parseFix(req.body);
+    if (!fix) return res.status(400).json({ error: INVALID_FIX });
 
     const child = await Child.findByPk(childId, { attributes: ['parentId'] });
     if (!child) return res.status(404).json({ error: 'Child not found' });
@@ -63,7 +69,7 @@ const postLocation = async (req, res, next) => {
       childId,
       deviceId,
       parentId: child.parentId,
-      fix: { latitude, longitude, accuracy, speed, heading, address },
+      fix,
       touchDevice: true,
     });
 
@@ -83,17 +89,18 @@ const postLocation = async (req, res, next) => {
  */
 const setManualLocation = async (req, res, next) => {
   try {
-    const child = await Child.findOne({ where: { id: req.params.childId, parentId: req.user.id } });
+    const child = await resolveChild(req.params.childId, req.user.id);
     if (!child) return res.status(404).json({ error: 'Child not found' });
 
-    const { latitude, longitude, accuracy, address } = req.body;
-    if (latitude == null || longitude == null) {
-      return res.status(400).json({ error: 'latitude and longitude are required' });
-    }
+    const fix = parseFix(req.body);
+    if (!fix) return res.status(400).json({ error: INVALID_FIX });
 
     // Every location belongs to a device, so there has to be one to attribute
     // the fix to.
-    const device = await Device.findOne({ where: { childId: child.id }, order: [['createdAt', 'ASC']] });
+    const device = await Device.findOne({
+      where: { childId: child.id, isActive: true },
+      order: [['createdAt', 'ASC']],
+    });
     if (!device) {
       return res.status(400).json({ error: 'Link a device to this child before setting a location' });
     }
@@ -102,14 +109,8 @@ const setManualLocation = async (req, res, next) => {
       childId: child.id,
       deviceId: device.id,
       parentId: req.user.id,
-      fix: {
-        latitude,
-        longitude,
-        accuracy: accuracy ?? null,
-        speed: null,
-        heading: null,
-        address: address ?? null,
-      },
+      // A position typed in by a parent carries no motion, whatever was sent.
+      fix: { ...fix, speed: null, heading: null },
       touchDevice: false,
     });
 
@@ -165,7 +166,7 @@ const checkGeofences = async (req, parentId, childId, lat, lng, io) => {
 // GET /api/locations/:childId/current  — latest known position
 const getCurrentLocation = async (req, res, next) => {
   try {
-    const child = await Child.findOne({ where: { id: req.params.childId, parentId: req.user.id } });
+    const child = await resolveChild(req.params.childId, req.user.id);
     if (!child) return res.status(404).json({ error: 'Child not found' });
 
     const location = await Location.findOne({
@@ -183,10 +184,11 @@ const getCurrentLocation = async (req, res, next) => {
 // GET /api/locations/:childId/history  — paginated route history
 const getHistory = async (req, res, next) => {
   try {
-    const child = await Child.findOne({ where: { id: req.params.childId, parentId: req.user.id } });
+    const child = await resolveChild(req.params.childId, req.user.id);
     if (!child) return res.status(404).json({ error: 'Child not found' });
 
-    const { from, to, limit = 100, offset = 0 } = req.query;
+    const { limit, offset } = parsePagination(req.query, { max: 500, defaultLimit: 100 });
+    const { from, to } = req.query;
     const where = { childId: child.id };
     if (from || to) {
       where.recordedAt = {};
@@ -197,8 +199,8 @@ const getHistory = async (req, res, next) => {
     const history = await Location.findAndCountAll({
       where,
       order: [['recordedAt', 'DESC']],
-      limit: Math.min(parseInt(limit), 500),
-      offset: parseInt(offset),
+      limit,
+      offset,
     });
 
     res.json(history);

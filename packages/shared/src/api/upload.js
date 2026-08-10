@@ -1,11 +1,11 @@
 import { uploads } from './endpoints.js';
 
 /**
- * Uploads an image straight to S3 and returns the URL to persist.
+ * Uploads an image straight to Cloud Storage and returns the URL to persist.
  *
  * The bytes never touch the API — it only signs the request. The PUT itself
  * must carry no Authorization header (the signature covers the headers, and an
- * extra one makes S3 reject it), which is why plain `fetch` is used here rather
+ * extra one makes the bucket reject it), which is why plain `fetch` is used rather
  * than the configured axios client.
  *
  * @param {File} file

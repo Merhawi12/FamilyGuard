@@ -7,7 +7,7 @@ const Child = sequelize.define('Child', {
   name: { type: DataTypes.STRING, allowNull: false },
   age: { type: DataTypes.INTEGER },
   // Preset avatar name (e.g. 'default'); `avatarUrl` overrides it when the
-  // parent has uploaded a photo to S3.
+  // parent has uploaded a photo to Cloud Storage.
   avatar: { type: DataTypes.STRING, defaultValue: 'default' },
   avatarUrl: { type: DataTypes.STRING },
   pin: { type: DataTypes.STRING },

@@ -16,6 +16,54 @@ locals {
   admin_host = local.use_domain ? "${var.admin_subdomain}.${var.domain}" : ""
   api_host   = local.use_domain ? "${var.api_subdomain}.${var.domain}" : ""
 
+  # ── Browser origins ────────────────────────────────────────────────────────
+  #
+  # One Firebase Hosting site answers on several names, and each is a separate
+  # Origin header as far as a browser is concerned. The Family App site carries
+  # the apex and www — that is where the marketing page lives — as well as
+  # app.<domain>; the console carries admin.<domain> alone.
+  #
+  # The *.web.app names are included deliberately. They are permanent, they are
+  # how a release is checked before DNS is pointed at it, and an API that has
+  # never been told about them makes that check fail in a way that looks like a
+  # broken build rather than a missing origin.
+  firebase_default_origins = compact([
+    var.firebase_family_site != "" ? "https://${var.firebase_family_site}.web.app" : "",
+    var.firebase_family_site != "" ? "https://${var.firebase_family_site}.firebaseapp.com" : "",
+    var.firebase_admin_site != "" ? "https://${var.firebase_admin_site}.web.app" : "",
+    var.firebase_admin_site != "" ? "https://${var.firebase_admin_site}.firebaseapp.com" : "",
+  ])
+
+  # app.<domain> leads, because the API answers with this list's first entry
+  # whenever it has to *build* a link rather than merely allow one — the
+  # password-reset email and Stripe's return URL both do. In an environment with
+  # no custom domain that job falls to the site's own web.app address, which is
+  # the only name it has.
+  client_origins = local.use_domain ? [
+    "https://${local.app_host}",
+    "https://${var.domain}",
+    "https://www.${var.domain}",
+    ] : compact([
+      var.firebase_family_site != "" ? "https://${var.firebase_family_site}.web.app" : "",
+  ])
+
+  admin_origins = local.use_domain ? ["https://${local.admin_host}"] : compact([
+    var.firebase_admin_site != "" ? "https://${var.firebase_admin_site}.web.app" : "",
+  ])
+
+  # The load balancer's certificate covers the API hostname and nothing else.
+  certificate_domains = local.use_domain ? [local.api_host] : []
+
+  # Everything the API will accept, deduplicated. Without a custom domain the
+  # *.web.app names are the whole of it, which is what makes a domainless
+  # environment usable rather than merely deployable.
+  cors_origins = distinct(concat(
+    local.client_origins,
+    local.admin_origins,
+    local.firebase_default_origins,
+    var.extra_cors_origins,
+  ))
+
   # Bootstrap image, deliberately not the real one.
   #
   # On a first apply the Artifact Registry repository is created by this same
@@ -55,6 +103,20 @@ resource "google_project_service" "services" {
     "vpcaccess.googleapis.com",
     "dns.googleapis.com",
     "cloudbuild.googleapis.com",
+    # Recurring jobs. See scheduler.tf.
+    "cloudscheduler.googleapis.com",
+    # The web tier. Enabling them here means a fresh project can run
+    # `firebase deploy` without a detour through the console first.
+    "firebase.googleapis.com",
+    "firebasehosting.googleapis.com",
+    # Push to the parents' Android app — the HTTP v1 send API. See iam.tf: the
+    # API sends with its own service account, so enabling this and granting the
+    # role is the whole of the server-side setup.
+    #
+    # fcmregistrations.googleapis.com is deliberately absent. It backs the
+    # Firebase JS SDK's own token registration, which nothing here uses — the
+    # Android app gets its token from Play Services through Capacitor.
+    "fcm.googleapis.com",
     "monitoring.googleapis.com",
     "logging.googleapis.com",
   ])

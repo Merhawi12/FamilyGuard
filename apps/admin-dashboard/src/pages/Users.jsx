@@ -1,50 +1,70 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  admin as adminApi, errorMessage, useAuth, Pagination,
+  admin as adminApi, errorMessage, useAuth, Avatar, EmptyState, Icon, Modal,
   ROLES, STAFF_ROLES, roleLabel, isSuperAdmin, hasPermission, PERMISSIONS,
   PERMISSION_KEYS, PERMISSION_LABELS, defaultPermissionsFor,
 } from '@parentix/shared';
+import DataTable from '../components/DataTable';
+import StatTile from '../components/StatTile';
+import { Sparkline, DayBars, Meter } from '../components/MiniChart';
 
 const PAGE_SIZE = 50;
 
-const PLAN_COLORS = {
-  premium: 'bg-green-100 text-green-700',
-  family: 'bg-purple-100 text-purple-700',
-  free: 'bg-gray-100 text-gray-600',
-  suspended: 'bg-red-100 text-red-600',
+/**
+ * How a plan reads in the table: its badge tone and the mark beside it. Premium
+ * is the paid tier, suspended is the off switch rather than a tier.
+ */
+const PLAN_STYLE = {
+  premium: { badge: 'badge-green', icon: 'sparkle', label: 'Premium' },
+  free: { badge: 'badge-gray', icon: 'shield', label: 'Free' },
+  suspended: { badge: 'badge-red', icon: 'block', label: 'Suspended' },
 };
 
+const planStyle = (plan) => PLAN_STYLE[plan] || { badge: 'badge-gray', icon: 'shield', label: plan };
+
+/** Percentage change between two periods, or null when there is no baseline. */
+const changeBetween = (now, before) => (before > 0 ? Math.round(((now - before) / before) * 1000) / 10 : null);
+
+/**
+ * One action on a row.
+ *
+ * Labelled on a phone card, icon-only in the desktop table: six labelled buttons
+ * plus five columns is more than a table has room for, and an icon that carries
+ * an `aria-label` and a tooltip is still one click and still announced properly.
+ * `shortLabel` is for actions whose full name is a sentence ("Set a password") —
+ * the card shows the short form, assistive tech gets the whole thing.
+ */
+function RowAction({ label, shortLabel, icon, tone, onClick, disabled = false }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      // Square from `lg` up, where the label is hidden: a 39px pill around a 15px
+      // icon is padding the directory's action column cannot spare.
+      className={`btn btn-sm ${tone} lg:w-9 lg:px-0`}
+    >
+      <Icon name={icon} size={15} />
+      <span className="lg:hidden">{shortLabel || label}</span>
+    </button>
+  );
+}
+
 // Parent plus every department. Editing an existing staff account's role and
-// permissions belongs on the Staff Accounts screen; this modal is the way an
+// permissions belongs on the Staff Accounts screen; this dialog is the way an
 // account crosses the customer/staff boundary.
 const ASSIGNABLE_ROLES = [ROLES.PARENT, ...STAFF_ROLES];
 
 const isStaffRole = (role) => STAFF_ROLES.includes(role);
-
-function Modal({ title, onClose, children }) {
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="font-semibold text-lg">{title}</h3>
-          {/* The glyph is decorative, so the button needs a name of its own —
-              otherwise it is announced only as "button". */}
-          <button type="button" onClick={onClose} aria-label="Close dialog" className="text-gray-400 hover:text-gray-600">
-            <span aria-hidden="true">×</span>
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionId, setActionId] = useState(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [summary, setSummary] = useState(null);
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [filters, setFilters] = useState({ role: '', plan: '', status: '' });
@@ -74,12 +94,23 @@ export default function AdminUsers() {
   const load = useCallback(() => {
     setLoading(true);
     return adminApi.listUsers({ search: appliedSearch || undefined, ...filters, limit: PAGE_SIZE, offset })
-      .then((r) => { setUsers(r.data.rows); setCount(r.data.count); })
+      .then((r) => { setUsers(r.data.rows); setCount(r.data.count); setSummary(r.data.summary); })
       .catch((e) => setError(errorMessage(e, 'Failed to load users')))
       .finally(() => setLoading(false));
   }, [appliedSearch, filters, offset]);
 
   useEffect(() => { load(); }, [load]);
+
+  /**
+   * The account base across the last 30 days, running forward from where it stood
+   * a month ago. Deleted accounts leave no row behind, so this is the shape of
+   * growth rather than an exact history — which is all a 40px line can claim.
+   */
+  const cumulativeSignups = useMemo(() => {
+    if (!summary) return [];
+    let running = Math.max(0, summary.customers - summary.signups.month);
+    return summary.signups.byDay.map((day) => { running += day.count; return running; });
+  }, [summary]);
 
   // A narrower filter or search can leave the offset past the end of the results.
   const changeFilters = (next) => { setFilters(next); setOffset(0); };
@@ -172,262 +203,450 @@ export default function AdminUsers() {
     }));
   };
 
-  if (loading && users.length === 0) return <div className="text-gray-400">Loading users...</div>;
+  const columns = [
+    {
+      key: 'user',
+      header: 'User details',
+      primary: true,
+      cell: (u) => (
+        <div className="flex items-center gap-3 min-w-0">
+          <Avatar name={u.name} size="sm" />
+          {/* Capped rather than merely truncating: an auto-layout table takes its
+              width from its content, so a long email would widen this column and
+              push the actions into a scroller instead of shortening itself. */}
+          <div className="min-w-0 lg:max-w-[11rem] 2xl:max-w-[18rem]">
+            <p className="font-semibold text-gray-900 truncate">{u.name}</p>
+            <p className="text-xs text-gray-400 truncate">{u.email}</p>
+            <span className="flex flex-wrap items-center gap-1 mt-1 empty:hidden">
+              {/* A colleague in the customer directory is worth calling out —
+                  most of their row's actions do not apply to them. */}
+              {isStaffRole(u.role) && <span className="badge-blue">{roleLabel(u.role)}</span>}
+              {!u.emailVerified && <span className="badge-amber">Unverified</span>}
+            </span>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'plan',
+      header: 'Plan type',
+      cell: (u) => {
+        const plan = planStyle(u.plan);
+        return (
+          <span className={`${plan.badge} gap-1`}>
+            <Icon name={plan.icon} size={12} strokeWidth={2.2} />
+            {plan.label}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'devices',
+      header: 'Devices',
+      align: 'center',
+      cell: (u) => (
+        <span className={`text-sm font-semibold tabular-nums ${u.deviceCount ? 'text-gray-900' : 'text-gray-300'}`}>
+          {u.deviceCount ?? 0}
+        </span>
+      ),
+    },
+    {
+      key: 'children',
+      header: 'Children',
+      align: 'center',
+      cell: (u) => (
+        <span className={`text-sm font-semibold tabular-nums ${u.childCount ? 'text-gray-900' : 'text-gray-300'}`}>
+          {u.childCount ?? 0}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      cell: (u) => (
+        <span className="block min-w-0">
+          <span className={`${u.isActive ? 'badge-green' : 'badge-red'} gap-1.5`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${u.isActive ? 'bg-success' : 'bg-danger'}`} />
+            {u.isActive ? 'Active' : 'Blocked'}
+          </span>
+          <span className="block text-xs text-gray-400 mt-1 whitespace-nowrap">
+            {u.lastLoginAt ? `Seen ${new Date(u.lastLoginAt).toLocaleDateString()}` : 'Never signed in'}
+          </span>
+        </span>
+      ),
+    },
+  ];
+
+  /**
+   * Deleting used to be a two-click affair in the row itself, which left a
+   * "Confirm / Cancel" pair sitting where five other buttons already were. Every
+   * other irreversible action on this screen confirms in a dialog; this one now
+   * does too, and says what goes with the account.
+   */
+  const confirmDelete = (u) => {
+    if (!window.confirm(
+      `Delete ${u.email}? Their children, devices and history are deleted with the account. `
+      + 'This cannot be undone.'
+    )) return;
+    runAction(u.id, () => adminApi.deleteClient(u.id));
+  };
+
+  const actions = (u) => {
+    const staff = isStaffRole(u.role);
+
+    return (
+      <>
+        {/* Staff accounts are administered on the Staff Accounts screen, so most
+            of these do not apply to a colleague who appears in the directory. */}
+        {!staff && <RowAction label="Edit" icon="edit" tone="bg-gray-100 text-gray-700 hover:bg-gray-200" onClick={() => openEdit(u)} />}
+
+        {/* Only a Super Admin can move an account across the staff boundary. */}
+        {superAdmin && (
+          <RowAction
+            label="Role and permissions" shortLabel="Role" icon="shield"
+            tone="bg-purple-50 text-purple-700 hover:bg-purple-100"
+            onClick={() => openRole(u)}
+          />
+        )}
+
+        {canResetPasswords && !staff && (
+          <RowAction
+            label="Set a password" shortLabel="Password" icon="lock"
+            tone="bg-blue-50 text-blue-700 hover:bg-blue-100"
+            onClick={() => openReset(u)}
+          />
+        )}
+
+        {!u.emailVerified && !staff && (
+          <RowAction
+            label="Approve" icon="mail" tone="bg-amber-50 text-amber-700 hover:bg-amber-100"
+            disabled={actionId === u.id}
+            onClick={() => runAction(u.id, () => adminApi.approveUser(u.id))}
+          />
+        )}
+
+        {!staff && (
+          <>
+            <RowAction
+              label={u.isActive ? 'Block' : 'Unblock'}
+              icon={u.isActive ? 'block' : 'check'}
+              tone={u.isActive
+                ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                : 'bg-green-50 text-green-700 hover:bg-green-100'}
+              disabled={actionId === u.id}
+              onClick={() => runAction(u.id, () => adminApi.toggleBlock(u.id))}
+            />
+            <RowAction
+              label="Delete" icon="trash"
+              tone="bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600"
+              disabled={actionId === u.id}
+              onClick={() => confirmDelete(u)}
+            />
+          </>
+        )}
+      </>
+    );
+  };
 
   return (
     <div className="space-y-4">
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl flex justify-between">
-          {error}
-          <button onClick={() => setError('')} className="font-bold">×</button>
-        </div>
+        <p className="notice-error">
+          <Icon name="warning" size={16} className="mt-0.5" />
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError('')} aria-label="Dismiss" className="shrink-0">
+            <Icon name="close" size={16} />
+          </button>
+        </p>
       )}
 
       {revealed && (
-        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+        <div className="notice-warning block">
           <p className="text-sm font-semibold text-amber-900">New password for {revealed.email}</p>
           <p className="text-xs text-amber-800 mt-1">
-            Shown once — it is stored hashed. Send it to them over a secure channel and have them change it.
+            Shown once — it is stored hashed. Send it over a secure channel and have them change it.
           </p>
           <code className="block mt-2 px-3 py-2 bg-white rounded-lg text-sm font-mono break-all border border-amber-200">
             {revealed.password}
           </code>
-          <button onClick={() => setRevealed(null)} className="text-xs text-amber-900 underline mt-2">Dismiss</button>
+          <button onClick={() => setRevealed(null)} className="btn-ghost btn-sm mt-2 text-amber-900">
+            Dismiss
+          </button>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 items-center justify-between">
-        <div className="flex flex-wrap gap-2">
-          <input
-            className="input w-48"
-            placeholder="Search name or email..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && applySearch()}
-          />
-          <select className="input w-32" value={filters.role} onChange={(e) => changeFilters({ ...filters, role: e.target.value })}>
-            <option value="">All roles</option>
-            <option value="admin">Admin</option>
-            <option value="support">Support</option>
-            <option value="parent">Parent</option>
-          </select>
-          <select className="input w-32" value={filters.plan} onChange={(e) => changeFilters({ ...filters, plan: e.target.value })}>
+      {/* What the screen is, and the three controls the reference puts beside the
+          title: find someone, narrow by plan, add an account. The heading itself
+          belongs to the console header, which titles every screen the same way. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-gray-500 max-w-md">
+          Manage parent accounts, their subscriptions and how many devices each family has linked.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <form
+            onSubmit={(e) => { e.preventDefault(); applySearch(); }}
+            className="relative flex-1 min-w-[11rem] sm:w-64 sm:flex-none"
+          >
+            <Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="search"
+              className="input pl-9 sm:min-h-[38px] sm:py-1.5 sm:text-xs"
+              placeholder="Search users by name or email…"
+              aria-label="Search users"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </form>
+
+          <select
+            className="input w-auto sm:min-h-[38px] sm:py-1.5 sm:text-xs"
+            value={filters.plan} aria-label="Filter by plan"
+            onChange={(e) => changeFilters({ ...filters, plan: e.target.value })}
+          >
             <option value="">All plans</option>
             <option value="free">Free</option>
             <option value="premium">Premium</option>
-            <option value="family">Family</option>
+            <option value="suspended">Suspended</option>
           </select>
-          <select className="input w-32" value={filters.status} onChange={(e) => changeFilters({ ...filters, status: e.target.value })}>
-            <option value="">All status</option>
-            <option value="active">Active</option>
-            <option value="blocked">Blocked</option>
-          </select>
-          <button onClick={applySearch} className="btn-ghost text-sm">Search</button>
+
+          <button onClick={() => setCreateOpen(true)} className="btn-primary btn-sm shrink-0">
+            <Icon name="plus" size={16} strokeWidth={2.4} />
+            Add new user
+          </button>
         </div>
-        <button onClick={() => setCreateOpen(true)} className="btn-primary text-sm">+ Create User</button>
       </div>
 
-      <div className="card p-0 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-800">Users ({users.length})</h2>
-        </div>
+      {/* The directory at a glance. Customers only — counting ourselves would
+          inflate every number here — and unaffected by the filters below. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+        <StatTile
+          label="Total active users"
+          value={summary ? summary.active.toLocaleString() : '—'}
+          unit="parent accounts"
+          icon="children"
+          delta={summary ? summary.growth : null}
+          deltaLabel="Signups over the previous account base, last 30 days"
+        >
+          {summary && <Sparkline values={cumulativeSignups} />}
+        </StatTile>
 
-        {users.length === 0 ? (
-          <div className="text-center py-12 text-gray-400 text-sm">No users found.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="px-6 py-3 text-left">User</th>
-                  <th className="px-6 py-3 text-left">Role</th>
-                  <th className="px-6 py-3 text-left">Plan</th>
-                  <th className="px-6 py-3 text-left">Status</th>
-                  <th className="px-6 py-3 text-left">Last Login</th>
-                  <th className="px-6 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {users.map((u) => (
-                  <tr key={u.id} className="hover:bg-gray-50 transition">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center font-bold text-blue-600 text-sm">
-                          {u.name[0].toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900">{u.name}</p>
-                          <p className="text-xs text-gray-400">{u.email}</p>
-                          {!u.emailVerified && <span className="text-xs text-yellow-600">Unverified</span>}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">{roleLabel(u.role)}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-lg text-xs font-medium ${PLAN_COLORS[u.plan] || 'bg-gray-100 text-gray-600'}`}>{u.plan}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-lg text-xs font-medium ${u.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-                        {u.isActive ? 'Active' : 'Blocked'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-gray-400 text-xs">
-                      {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never'}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2 justify-end flex-wrap">
-                        {!isStaffRole(u.role) && (
-                          <button onClick={() => openEdit(u)} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition">Edit</button>
-                        )}
-                        {/* Only a Super Admin can move an account across the staff boundary. */}
-                        {superAdmin && (
-                          <button onClick={() => openRole(u)} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-50 text-purple-600 hover:bg-purple-100 transition">Role</button>
-                        )}
-                        {/* Staff passwords are reset from the Staff Accounts screen. */}
-                        {canResetPasswords && !isStaffRole(u.role) && (
-                          <button onClick={() => openReset(u)} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 transition">Password</button>
-                        )}
+        <StatTile
+          label="New signups (30 days)"
+          value={summary ? summary.signups.month.toLocaleString() : '—'}
+          unit="this month"
+          icon="sparkle"
+          delta={summary ? changeBetween(summary.signups.month, summary.signups.previousMonth) : null}
+          deltaLabel="Against the 30 days before that"
+        >
+          {summary && <DayBars values={summary.signups.byDay.map((d) => d.count)} />}
+        </StatTile>
 
-                        {!u.emailVerified && !isStaffRole(u.role) && (
-                          <button disabled={actionId === u.id} onClick={() => runAction(u.id, () => adminApi.approveUser(u.id))}
-                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-yellow-50 text-yellow-700 hover:bg-yellow-100 transition">
-                            Approve
-                          </button>
-                        )}
+        {/* Renewal rate would need Stripe's subscription history, which nothing
+            here aggregates. Paid share is the same question this data can answer
+            honestly: how much of the directory is on Premium today. */}
+        <StatTile
+          label="Premium share"
+          value={summary ? `${summary.premiumShare}%` : '—'}
+          unit={summary ? `${summary.premium.toLocaleString()} of ${summary.customers.toLocaleString()}` : ''}
+          icon="card"
+        >
+          {summary && <Meter percent={summary.premiumShare} />}
+        </StatTile>
+      </div>
 
-                        {/* Staff accounts are administered on the Staff Accounts screen. */}
-                        {!isStaffRole(u.role) && (
-                          <>
-                            <button disabled={actionId === u.id} onClick={() => runAction(u.id, () => adminApi.toggleBlock(u.id))}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${u.isActive ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}>
-                              {u.isActive ? 'Block' : 'Unblock'}
-                            </button>
-
-                            {deleteConfirm === u.id ? (
-                              <>
-                                <button disabled={actionId === u.id} onClick={() => runAction(u.id, () => adminApi.deleteClient(u.id))}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 text-white hover:bg-red-700 transition">Confirm</button>
-                                <button onClick={() => setDeleteConfirm(null)} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition">Cancel</button>
-                              </>
-                            ) : (
-                              <button onClick={() => setDeleteConfirm(u.id)} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600 transition">Delete</button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <DataTable
+        dense
+        title={`Users (${count.toLocaleString()})`}
+        toolbar={(
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className="input w-auto sm:min-h-[38px] sm:py-1.5 sm:text-xs"
+              value={filters.role} aria-label="Filter by role"
+              onChange={(e) => changeFilters({ ...filters, role: e.target.value })}
+            >
+              <option value="">All roles</option>
+              {ASSIGNABLE_ROLES.map((role) => (
+                <option key={role} value={role}>{roleLabel(role)}</option>
+              ))}
+            </select>
+            <select
+              className="input w-auto sm:min-h-[38px] sm:py-1.5 sm:text-xs"
+              value={filters.status} aria-label="Filter by status"
+              onChange={(e) => changeFilters({ ...filters, status: e.target.value })}
+            >
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="blocked">Blocked</option>
+            </select>
           </div>
         )}
-
-        <div className="px-6 pb-4">
-          <Pagination
-            offset={offset} limit={PAGE_SIZE} count={count}
-            onChange={setOffset} disabled={loading} label="users"
+        columns={columns}
+        rows={users}
+        rowKey={(u) => u.id}
+        actions={actions}
+        loading={loading}
+        loadingLabel="Loading users…"
+        empty={
+          <EmptyState
+            icon="children"
+            title="No users found"
+            description={appliedSearch ? 'Nothing matches that search.' : 'Customers appear here once they sign up.'}
           />
-        </div>
-      </div>
+        }
+        pagination={{ offset, limit: PAGE_SIZE, count, onChange: setOffset, disabled: loading, label: 'users' }}
+      />
 
-      {resetUser && (
-        <Modal title={`Set a password — ${resetUser.name}`} onClose={() => setResetUser(null)}>
-          <form onSubmit={handleReset} className="space-y-4">
-            <p className="text-sm text-gray-500">
-              For <span className="font-medium text-gray-700">{resetUser.email}</span>. Their current password stops
-              working immediately and they are signed out everywhere.
-            </p>
-
-            <div className="space-y-2">
-              <label className={`flex gap-2 items-start p-3 rounded-xl border cursor-pointer transition ${
-                resetMode === 'generate' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
-              }`}>
-                <input type="radio" name="userResetMode" className="mt-1" checked={resetMode === 'generate'}
-                  onChange={() => setResetMode('generate')} />
+      {/* ── Set a password ─────────────────────────────────────────────────── */}
+      <Modal
+        open={!!resetUser}
+        onClose={() => setResetUser(null)}
+        title={resetUser ? `Set a password — ${resetUser.name}` : ''}
+        description={resetUser
+          ? `For ${resetUser.email}. Their current password stops working immediately and they are signed out everywhere.`
+          : undefined}
+      >
+        <form onSubmit={handleReset} className="space-y-4">
+          <div className="space-y-2">
+            {[
+              { mode: 'generate', label: 'Generate a strong password', hint: 'Shown once after saving.' },
+              { mode: 'manual', label: 'Assign a specific password', hint: 'Choose it yourself and tell them directly.' },
+            ].map(({ mode, label, hint }) => (
+              <label
+                key={mode}
+                className={`flex gap-3 items-start p-3 rounded-xl border cursor-pointer transition ${
+                  resetMode === mode ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <input
+                  type="radio" name="userResetMode" className="mt-1"
+                  checked={resetMode === mode} onChange={() => setResetMode(mode)}
+                />
                 <span>
-                  <span className="text-sm font-medium block">Generate a strong password</span>
-                  <span className="text-xs text-gray-500">Shown once after saving.</span>
+                  <span className="text-sm font-medium block">{label}</span>
+                  <span className="text-xs text-gray-500">{hint}</span>
                 </span>
               </label>
-              <label className={`flex gap-2 items-start p-3 rounded-xl border cursor-pointer transition ${
-                resetMode === 'manual' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
-              }`}>
-                <input type="radio" name="userResetMode" className="mt-1" checked={resetMode === 'manual'}
-                  onChange={() => setResetMode('manual')} />
-                <span>
-                  <span className="text-sm font-medium block">Assign a specific password</span>
-                  <span className="text-xs text-gray-500">Choose it yourself and tell them directly.</span>
-                </span>
+            ))}
+          </div>
+
+          {resetMode === 'manual' && (
+            <div className="space-y-3">
+              <label className="field">
+                <span className="field-label">New password</span>
+                <input
+                  className="input" type="password" autoComplete="new-password" required
+                  value={resetForm.password}
+                  onChange={(e) => setResetForm({ ...resetForm, password: e.target.value })}
+                />
+                <span className="field-hint">At least 10 characters, with a letter and a number.</span>
+              </label>
+              <label className="field">
+                <span className="field-label">Confirm password</span>
+                <input
+                  className="input" type="password" autoComplete="new-password" required
+                  value={resetForm.confirm}
+                  onChange={(e) => setResetForm({ ...resetForm, confirm: e.target.value })}
+                />
               </label>
             </div>
+          )}
 
-            {resetMode === 'manual' && (
-              <div className="space-y-3">
-                <label className="block">
-                  <span className="text-sm text-gray-500">New password</span>
-                  <input className="input mt-1" type="password" autoComplete="new-password" required
-                    value={resetForm.password}
-                    onChange={(e) => setResetForm({ ...resetForm, password: e.target.value })} />
-                  <span className="text-xs text-gray-400 mt-1 block">
-                    At least 10 characters, with a letter and a number.
-                  </span>
-                </label>
-                <label className="block">
-                  <span className="text-sm text-gray-500">Confirm password</span>
-                  <input className="input mt-1" type="password" autoComplete="new-password" required
-                    value={resetForm.confirm}
-                    onChange={(e) => setResetForm({ ...resetForm, confirm: e.target.value })} />
-                </label>
-              </div>
-            )}
+          <button type="submit" className="btn-primary btn-block" disabled={resetting}>
+            {resetting ? 'Setting…' : 'Set password'}
+          </button>
+        </form>
+      </Modal>
 
-            <button type="submit" className="btn-primary w-full disabled:opacity-60" disabled={resetting}>
-              {resetting ? 'Setting…' : 'Set password'}
-            </button>
-          </form>
-        </Modal>
-      )}
-
-      {createOpen && (
-        <Modal title="Create User" onClose={() => setCreateOpen(false)}>
-          <form onSubmit={handleCreate} className="space-y-3">
-            <input className="input" placeholder="Name" required value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} />
-            <input className="input" type="email" placeholder="Email" required value={createForm.email} onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })} />
-            <input className="input" type="password" placeholder="Password" required value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} />
-            {/* This screen creates customers. Staff accounts carry privileges, so
-                they are created on the Staff Accounts screen by a Super Admin. */}
-            <p className="text-xs text-gray-500">
-              Creates a parent (customer) account.{superAdmin && ' To add a colleague, use Staff Accounts.'}
-            </p>
-            <select className="input" value={createForm.plan} onChange={(e) => setCreateForm({ ...createForm, plan: e.target.value })}>
+      {/* ── Create ─────────────────────────────────────────────────────────── */}
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Create a user"
+        description={`Creates a parent (customer) account.${superAdmin ? ' To add a colleague, use Staff Accounts.' : ''}`}
+      >
+        <form onSubmit={handleCreate} className="space-y-4">
+          <label className="field">
+            <span className="field-label">Name</span>
+            <input
+              className="input" required value={createForm.name}
+              onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Email</span>
+            <input
+              className="input" type="email" required value={createForm.email}
+              onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Password</span>
+            <input
+              className="input" type="password" autoComplete="new-password" required value={createForm.password}
+              onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Plan</span>
+            <select
+              className="input" value={createForm.plan}
+              onChange={(e) => setCreateForm({ ...createForm, plan: e.target.value })}
+            >
               <option value="free">Free</option>
               <option value="premium">Premium</option>
-              <option value="family">Family</option>
             </select>
-            <button type="submit" className="btn-primary w-full">Create</button>
-          </form>
-        </Modal>
-      )}
+          </label>
+          <button type="submit" className="btn-primary btn-block">Create user</button>
+        </form>
+      </Modal>
 
-      {editUser && (
-        <Modal title={`Edit ${editUser.name}`} onClose={() => setEditUser(null)}>
-          <form onSubmit={handleEdit} className="space-y-3">
-            <input className="input" placeholder="Name" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
-            <input className="input" type="email" placeholder="Email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
-            <select className="input" value={editForm.plan} onChange={(e) => setEditForm({ ...editForm, plan: e.target.value })}>
+      {/* ── Edit ───────────────────────────────────────────────────────────── */}
+      <Modal
+        open={!!editUser}
+        onClose={() => setEditUser(null)}
+        title={editUser ? `Edit ${editUser.name}` : ''}
+      >
+        <form onSubmit={handleEdit} className="space-y-4">
+          <label className="field">
+            <span className="field-label">Name</span>
+            <input
+              className="input" value={editForm.name}
+              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Email</span>
+            <input
+              className="input" type="email" value={editForm.email}
+              onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+            />
+            <span className="field-hint">This is the address they sign in with.</span>
+          </label>
+          <label className="field">
+            <span className="field-label">Plan</span>
+            <select
+              className="input" value={editForm.plan}
+              onChange={(e) => setEditForm({ ...editForm, plan: e.target.value })}
+            >
               <option value="free">Free</option>
               <option value="premium">Premium</option>
-              <option value="family">Family</option>
             </select>
-            <button type="submit" className="btn-primary w-full">Save</button>
-          </form>
-        </Modal>
-      )}
+          </label>
+          <button type="submit" className="btn-primary btn-block">Save changes</button>
+        </form>
+      </Modal>
 
-      {roleUser && (
-        <Modal title={`Role & Permissions — ${roleUser.name}`} onClose={() => setRoleUser(null)}>
-          <form onSubmit={handleRole} className="space-y-4">
+      {/* ── Role & permissions ─────────────────────────────────────────────── */}
+      <Modal
+        open={!!roleUser}
+        onClose={() => setRoleUser(null)}
+        title={roleUser ? `Role & permissions — ${roleUser.name}` : ''}
+        description="Changing a role signs that account out of every device."
+      >
+        <form onSubmit={handleRole} className="space-y-4">
+          <label className="field">
+            <span className="field-label">Role</span>
             <select
               className="input"
               value={roleForm.role}
@@ -437,31 +656,37 @@ export default function AdminUsers() {
                 <option key={role} value={role}>{roleLabel(role)}</option>
               ))}
             </select>
+          </label>
 
-            {isStaffRole(roleForm.role) && roleForm.role !== ROLES.SUPER_ADMIN && (
-              <div>
-                <p className="text-sm font-medium mb-2">Permissions</p>
-                <div className="space-y-2">
-                  {PERMISSION_KEYS.map((key) => (
-                    <label key={key} className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={roleForm.permissions.includes(key)} onChange={() => togglePermission(key)} />
-                      {PERMISSION_LABELS[key]}
-                    </label>
-                  ))}
-                </div>
+          {isStaffRole(roleForm.role) && roleForm.role !== ROLES.SUPER_ADMIN && (
+            <div>
+              <p className="field-label mb-2">Permissions</p>
+              <div className="space-y-1">
+                {PERMISSION_KEYS.map((key) => (
+                  <label key={key} className="flex items-center gap-3 min-h-[44px] text-sm cursor-pointer">
+                    <input
+                      type="checkbox" className="w-4 h-4"
+                      checked={roleForm.permissions.includes(key)}
+                      onChange={() => togglePermission(key)}
+                    />
+                    {PERMISSION_LABELS[key]}
+                  </label>
+                ))}
               </div>
-            )}
-            {roleForm.role === ROLES.SUPER_ADMIN && (
-              <p className="text-sm text-gray-500">A Super Admin holds every permission, including managing staff accounts.</p>
-            )}
-            {roleForm.role === ROLES.PARENT && (
-              <p className="text-sm text-gray-500">A parent is an ordinary customer and holds no staff permissions.</p>
-            )}
-            <p className="text-xs text-gray-400">Changing a role signs that account out.</p>
-            <button type="submit" className="btn-primary w-full">Save Role</button>
-          </form>
-        </Modal>
-      )}
+            </div>
+          )}
+          {roleForm.role === ROLES.SUPER_ADMIN && (
+            <p className="text-sm text-gray-500">
+              A Super Admin holds every permission, including managing staff accounts.
+            </p>
+          )}
+          {roleForm.role === ROLES.PARENT && (
+            <p className="text-sm text-gray-500">A parent is an ordinary customer and holds no staff permissions.</p>
+          )}
+
+          <button type="submit" className="btn-primary btn-block">Save role</button>
+        </form>
+      </Modal>
     </div>
   );
 }

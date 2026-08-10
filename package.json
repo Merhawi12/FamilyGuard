@@ -13,27 +13,39 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev:family": "npm run dev --workspace apps/family-app",
+    "build": "npm run build --workspace apps/family-app && npm run build --workspace apps/admin-dashboard",
+    "build:admin": "npm run build --workspace apps/admin-dashboard",
+    "build:family": "npm run build --workspace apps/family-app",
     "dev:admin": "npm run dev --workspace apps/admin-dashboard",
     "dev:api": "npm --prefix services/api run dev",
     "dev:child": "npm --prefix apps/child-app run start",
-    "build": "npm run build --workspace apps/family-app && npm run build --workspace apps/admin-dashboard",
-    "build:family": "npm run build --workspace apps/family-app",
-    "build:admin": "npm run build --workspace apps/admin-dashboard",
+    "dev:family": "npm run dev --workspace apps/family-app",
+    "apk:child": "scripts/build-apk.sh child",
+    "check:dns": "node scripts/check-dns.mjs",
+    "apk:family": "scripts/build-apk.sh family",
+    "infra:deploy": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} apply",
+    "infra:output": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} output",
+    "infra:plan": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} plan",
+    "install:all": "npm install && npm --prefix services/api ci && npm --prefix apps/child-app ci",
     "lint": "eslint apps/admin-dashboard/src apps/family-app/src apps/child-app/src apps/child-app/App.js packages/shared/src services/api/src",
     "test": "npm --prefix services/api test",
+    "test:all": "npm run lint && npm run build && npm test && npm run test:e2e && npm run test:browser",
     "test:api": "npm --prefix services/api test",
-    "install:all": "npm install && npm --prefix services/api ci && npm --prefix apps/child-app ci",
-    "infra:deploy": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} apply",
+    "test:browser": "node scripts/browser-e2e.mjs",
+    "pg:start": "node scripts/local-postgres.mjs start",
+    "pg:stop": "node scripts/local-postgres.mjs stop",
+    "pg:status": "node scripts/local-postgres.mjs status",
+    "pg:install": "node scripts/local-postgres.mjs install",
+    "test:pg": "node scripts/local-postgres.mjs test:api",
+    "test:browser:pg": "node scripts/local-postgres.mjs test:browser",
     "test:e2e": "npm --prefix services/api run test:e2e && npm --prefix apps/child-app run test:e2e",
     "test:e2e:api": "npm --prefix services/api run test:e2e",
-    "test:e2e:child": "npm --prefix apps/child-app run test:e2e",
-    "infra:plan": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} plan",
-    "infra:output": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} output"
+    "test:e2e:child": "npm --prefix apps/child-app run test:e2e"
   },
   "devDependencies": {
     "eslint": "^8.57.1",
     "eslint-plugin-react": "^7.37.5",
-    "eslint-plugin-react-hooks": "^4.6.2"
+    "eslint-plugin-react-hooks": "^4.6.2",
+    "playwright": "^1.62.1"
   }
 }

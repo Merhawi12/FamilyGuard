@@ -2,16 +2,18 @@ const { Notification, User } = require('../models');
 const { Op } = require('sequelize');
 const { auditLog } = require('../utils/auditLogger');
 const { STAFF_ROLES } = require('../config/roles');
+const { parsePagination } = require('../utils/pagination');
+const { isUuid } = require('../utils/ids');
 
 // GET /api/notifications — the current user's own notifications
 const listMine = async (req, res, next) => {
   try {
-    const { limit = 100, offset = 0 } = req.query;
+    const { limit, offset } = parsePagination(req.query, { max: 100, defaultLimit: 100 });
     const notifications = await Notification.findAll({
       where: { userId: req.user.id },
       order: [['createdAt', 'DESC']],
-      limit: Math.min(parseInt(limit), 100),
-      offset: parseInt(offset),
+      limit,
+      offset,
     });
     res.json(notifications);
   } catch (err) {
@@ -22,7 +24,10 @@ const listMine = async (req, res, next) => {
 // PATCH /api/notifications/:id/read
 const markRead = async (req, res, next) => {
   try {
-    const notification = await Notification.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    // A malformed id is "not found", not a database error — see utils/ids.js.
+    const notification = isUuid(req.params.id)
+      ? await Notification.findOne({ where: { id: req.params.id, userId: req.user.id } })
+      : null;
     if (!notification) return res.status(404).json({ error: 'Notification not found' });
 
     await notification.update({ isRead: true });
@@ -82,15 +87,15 @@ const send = async (req, res, next) => {
 // GET /api/notifications/sent — admin's view of what's been sent
 const listSent = async (req, res, next) => {
   try {
-    const { limit = 50, offset = 0 } = req.query;
+    const { limit, offset } = parsePagination(req.query, { max: 200, defaultLimit: 50 });
     // findAndCountAll so the console can page — a broadcast writes one row per
     // customer, so this table grows far faster than the others.
     const notifications = await Notification.findAndCountAll({
       where: { createdBy: { [Op.ne]: null } },
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email'] }],
       order: [['createdAt', 'DESC']],
-      limit: Math.min(parseInt(limit), 200),
-      offset: parseInt(offset),
+      limit,
+      offset,
     });
     res.json(notifications);
   } catch (err) {

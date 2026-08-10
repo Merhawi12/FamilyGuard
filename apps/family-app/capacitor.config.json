@@ -1,0 +1,12 @@
+{
+  "appId": "ca.parentix.family",
+  "appName": "Parentix",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https",
+    "hostname": "app.parentix.ca"
+  }
+}

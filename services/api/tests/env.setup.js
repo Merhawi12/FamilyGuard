@@ -16,7 +16,17 @@ process.env.DATABASE_URL = process.env.TEST_DATABASE_URL || '';
 if (process.env.TEST_DATABASE_URL) process.env.DB_SSL = 'false';
 process.env.SMTP_HOST = '';           // email utils no-op without a host
 process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'; // makes the (mocked) Stripe client non-null
+// Without a price the checkout route short-circuits to 503 before Stripe is
+// ever called, so the happy path could not be tested at all.
+process.env.STRIPE_PREMIUM_PRICE_ID = 'price_test_premium';
 process.env.CLIENT_URL = 'http://localhost:3000';
+
+// Sign in with Google is enabled in tests so the endpoint's real paths are
+// exercised. This is a public client ID, not a credential — what makes the flow
+// safe is that Google's signature over the ID token is checked against it, and
+// tests/googleSignIn.test.js replaces that verification rather than reaching
+// Google.
+process.env.GOOGLE_CLIENT_ID = 'test-web-client.apps.googleusercontent.com';
 process.env.ADMIN_URL = 'http://localhost:3001';
 
 // Object storage is exercised against the manual Cloud Storage mock in

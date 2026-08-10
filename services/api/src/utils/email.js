@@ -83,6 +83,55 @@ const sendPasswordResetEmail = ({ name, email, token }) => {
   });
 };
 
+/**
+ * The two account-security notices, and why they are not alert emails.
+ *
+ * `notificationPrefs` governs what a parent hears about their *child* — safe
+ * zones, screen time, flagged messages — and every entry there is optional
+ * because an inbox full of `blocked_app_attempt` is how people learn to ignore
+ * the rest. These two are about the parent's own account, and they are the
+ * mechanism by which someone finds out a stranger is in it. They are therefore
+ * deliberately not switchable: an attacker who reaches the settings screen would
+ * otherwise turn off the notice that reports them.
+ *
+ * Both address the account holder, so both are silent no-ops for a phone-only
+ * account with no email on file — `send` returns false on a missing recipient.
+ */
+const formatWhen = (date) =>
+  new Date(date).toLocaleString('en-CA', { timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short' }) + ' UTC';
+
+const sendNewSignInEmail = ({ name, email, ip, userAgent, when }) =>
+  send({
+    to: email,
+    subject: 'New sign-in to your Parentix account',
+    html: layout(`
+      <h2>Hi ${escapeHtml(name)},</h2>
+      <p>Your Parentix account was just signed in to from a device we haven't seen before.</p>
+      <ul style="line-height:1.7;color:#334155;">
+        <li><strong>When:</strong> ${escapeHtml(formatWhen(when || Date.now()))}</li>
+        <li><strong>IP address:</strong> ${escapeHtml(ip || 'unknown')}</li>
+        <li><strong>Device:</strong> ${escapeHtml(userAgent || 'unknown')}</li>
+      </ul>
+      <p>If this was you, no action is needed.</p>
+      <p><strong>If it wasn't</strong>, change your password immediately — that signs out every other
+      device — and turn on two-factor authentication in Settings.</p>
+    `),
+  });
+
+const sendPasswordChangedEmail = ({ name, email, when, viaReset }) =>
+  send({
+    to: email,
+    subject: 'Your Parentix password was changed',
+    html: layout(`
+      <h2>Hi ${escapeHtml(name)},</h2>
+      <p>The password on your Parentix account was ${viaReset ? 'reset' : 'changed'} on
+      ${escapeHtml(formatWhen(when || Date.now()))}.</p>
+      <p>Every other signed-in device has been signed out.</p>
+      <p><strong>If you didn't do this</strong>, use "Forgot password" to take the account back, then
+      contact us straight away.</p>
+    `),
+  });
+
 const ALERT_TYPE_LABELS = {
   left_safe_zone: 'Left Safe Zone',
   entered_safe_zone: 'Arrived at Safe Zone',
@@ -142,5 +191,7 @@ module.exports = {
   sendAlertEmail,
   sendContactFormEmail,
   sendPasswordResetEmail,
+  sendNewSignInEmail,
+  sendPasswordChangedEmail,
   ALERT_TYPE_LABELS,
 };

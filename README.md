@@ -4,7 +4,7 @@ Parental control and digital safety platform. Three applications share one API:
 
 | Application         | Path                     | What it is                                                            |
 | ------------------- | ------------------------ | --------------------------------------------------------------------- |
-| **Admin Dashboard** | `apps/admin-dashboard`   | Staff console — users, billing, sessions, settings, audit logs         |
+| **Admin Dashboard** | `apps/admin-dashboard`   | Staff console — users, devices, billing, sessions, settings, audit logs |
 | **Family App**      | `apps/family-app`        | Parent-facing dashboard plus the public marketing site                 |
 | **Child App**       | `apps/child-app`         | The monitored Android device agent (Expo + native modules)             |
 | API                 | `services/api`           | Express + Sequelize + Socket.IO backend, runs on Cloud Run             |
@@ -13,8 +13,8 @@ Parental control and digital safety platform. Three applications share one API:
 
 ```
 apps/
-  admin-dashboard/     React + Vite  → Cloud Storage + Cloud CDN
-  family-app/          React + Vite  → Cloud Storage + Cloud CDN
+  admin-dashboard/     React + Vite  → Firebase Hosting
+  family-app/          React + Vite  → Firebase Hosting
   child-app/           Expo (React Native) + Kotlin native modules
 services/
   api/                 Express, Sequelize, Socket.IO  → Artifact Registry → Cloud Run
@@ -22,6 +22,7 @@ packages/
   shared/              API client, auth/realtime contexts, UI primitives, Tailwind preset
 infrastructure/
   gcp/                 Terraform — Cloud Run, Cloud SQL, Memorystore, GCS, load balancer, Secret Manager
+firebase.json          Firebase Hosting: two sites, SPA rewrites, cache and security headers
 deploy/
   single-host/         Cheaper alternative: the whole stack in Docker on one Compute Engine VM
 scripts/               Deployment scripts
@@ -35,7 +36,8 @@ the child app because Metro does not cope well with hoisted dependencies.
 
 ## Getting started
 
-Requires Node 20+ and Docker (for local Postgres and Redis).
+Requires Node 20+. Docker is optional — `npm run pg:install` provides a local
+PostgreSQL without it.
 
 ```bash
 # 1. Backing services
@@ -69,7 +71,9 @@ npm run dev:child      # Expo dev server
 ```
 
 Both web dev servers proxy `/api` and `/socket.io` to the API, so
-`VITE_API_URL` stays empty locally.
+`VITE_API_URL` stays empty locally. In production it names the API host —
+Firebase Hosting serves the apps and Cloud Run serves the API, so the two are
+different origins and the value is compiled into the bundle.
 
 With `EMAIL_PROVIDER=none` no mail is sent — signup verification codes and
 password-reset links are written to the API log instead.
@@ -82,7 +86,11 @@ password-reset links are written to the API log instead.
 | `npm run lint`              | ESLint over both web apps, shared, and the API    |
 | `npm test`                  | API test suite (Jest + supertest), on in-memory SQLite |
 | `npm run test:pg`           | The same suite against PostgreSQL — see below     |
+| `npm run test:browser:pg`   | The Chromium suite against PostgreSQL             |
+| `npm run pg:start` / `pg:stop` | A local throwaway PostgreSQL 16 — no admin, no Docker |
 | `npm run test:e2e`          | Boots a real server and walks the full workflow   |
+| `npm run test:browser`      | Drives both web apps in Chromium — see below      |
+| `npm run test:all`          | Lint, build, and every suite above                |
 | `npm run infra:plan`        | Terraform plan for `$ENV_NAME` (default `dev`)     |
 | `npm run infra:deploy`      | Terraform apply for `$ENV_NAME`                   |
 | `npm run infra:output`      | Show the Terraform outputs                        |
@@ -111,16 +119,41 @@ E2E_DATABASE_URL=postgresql://parentix:parentix_secret@127.0.0.1:5432/parentix \
 
 Both wipe and recreate the schema, so point them at a throwaway database.
 
+### Testing the web apps
+
+Every other suite tests the API. `npm run test:browser` is the only one that runs
+the front ends: it boots the API, serves both `dist/` folders behind a proxy that
+reproduces how Firebase Hosting resolves a request — static file first, then the
+rewrites in `firebase.json` — and drives Chromium through sign-in, the
+alert bell, every dashboard and console route, and the console's role gating —
+failing on any console error, uncaught exception or 4xx response.
+
+```bash
+npm run build          # it serves dist/, so build first
+npm run test:browser
+```
+
+A passing `npm run build` only means the bundles compiled. A page that throws on
+mount builds perfectly and fails here.
+
+Point it at Postgres the same way as the other suites:
+
+```bash
+BROWSER_E2E_DATABASE_URL=postgresql://parentix:parentix_secret@127.0.0.1:5432/parentix \
+  npm run test:browser
+```
+
 ## Deployment
 
-The backend runs on Cloud Run; the web apps are static bundles in Cloud Storage
-served through Cloud CDN. One global load balancer fronts all three hostnames and
-routes `/api/*` and `/socket.io/*` to Cloud Run, so the browser sees one origin.
+The web apps are published to Firebase Hosting, which supplies the CDN, the
+certificates and an atomic release per deploy. The API runs on Cloud Run behind a
+global load balancer that fronts `api.parentix.ca` and nothing else, so the two
+tiers are separate origins and the API's CORS allowlist is what connects them.
 
 ```bash
 ./infrastructure/gcp/deploy.sh prod apply
 ENV_NAME=prod ./scripts/deploy-api.sh # build, push, roll the service
-ENV_NAME=prod ./scripts/deploy-web.sh # build, sync to GCS, invalidate the CDN
+ENV_NAME=prod ./scripts/deploy-web.sh # build both apps, publish to Firebase Hosting
 ```
 
 Full instructions, including the one-time Google Cloud setup, are in

@@ -1,6 +1,7 @@
 const { Device, Message, Child } = require('../models');
 const { createAlert } = require('../utils/alertHelper');
 const { detectCyberbullying } = require('../utils/cyberbullyingDetector');
+const { parseFix } = require('../utils/geo');
 const logger = require('../utils/logger');
 
 // NOTE: socket.data is populated by the io.use() handshake-auth middleware in app.js.
@@ -11,7 +12,16 @@ const initSocketHandlers = (io) => {
 
     // ── Auto-join the authenticated room(s) ──────────────────────────────────
     // A parent joins its own parent room; a child device joins its child room.
-    if (parentId) socket.join(`parent:${parentId}`);
+    //
+    // The role check on the parent room is load-bearing. A child socket also
+    // carries `parentId` — it is how the device's own events are routed to the
+    // family — so joining on that field alone put every child's phone in the
+    // room that receives `alert:new`, `location:update`, `activity:update` and
+    // `chat:message` for the whole household. A child could see a sibling's
+    // location and every alert raised about them. Nothing the child app
+    // subscribes to is delivered there: rules, contacts, screen time and its own
+    // chat thread all arrive on `child:<childId>`.
+    if (role === 'parent' && parentId) socket.join(`parent:${parentId}`);
     if (role === 'child' && childId) {
       socket.join(`child:${childId}`);
       if (deviceId) socket.join(`device:${deviceId}`);
@@ -19,7 +29,7 @@ const initSocketHandlers = (io) => {
 
     // Legacy join events are kept as no-ops for backward compatibility, but they
     // never trust the supplied id — membership is fixed at authentication time.
-    socket.on('join:parent', () => { if (parentId) socket.join(`parent:${parentId}`); });
+    socket.on('join:parent', () => { if (role === 'parent' && parentId) socket.join(`parent:${parentId}`); });
     socket.on('join:child', () => { if (role === 'child' && childId) socket.join(`child:${childId}`); });
 
     // ── Device heartbeat (child only) ────────────────────────────────────────
@@ -63,11 +73,17 @@ const initSocketHandlers = (io) => {
 
     // ── Real-time location (child only → its own parent) ─────────────────────
     // Mobile emits this for low-latency updates; the REST POST handles persistence.
-    socket.on('location:update', ({ latitude, longitude, accuracy, speed, heading, address, recordedAt }) => {
+    socket.on('location:update', (payload) => {
       if (role !== 'child' || !parentId) return;
+      // Same validation the REST route applies. This path skips the database
+      // entirely, so without it an unplottable fix would go straight to the
+      // parent's live map — and being the faster of the two, it is the one that
+      // wins the race to be displayed.
+      const fix = parseFix(payload);
+      if (!fix) return;
       io.to(`parent:${parentId}`).emit('location:update', {
-        childId, latitude, longitude, accuracy, speed, heading, address,
-        recordedAt: recordedAt || new Date().toISOString(),
+        childId, ...fix,
+        recordedAt: payload?.recordedAt || new Date().toISOString(),
       });
     });
 

@@ -1,5 +1,5 @@
-import * as SecureStore from 'expo-secure-store';
 import { chat as chatApi } from './api';
+import { getChildId } from './link';
 import { connectSocket, onSocket, emitSocket, isSocketConnected } from './socket';
 
 /**
@@ -31,7 +31,7 @@ export async function sendMessage(text, messageType = 'normal') {
     return { viaSocket: true };
   }
 
-  const childId = await SecureStore.getItemAsync('fg_child_id');
+  const childId = await getChildId();
   if (!childId) throw new Error('This device is not linked yet');
 
   await chatApi.sendFromChild(childId, { text: trimmed, messageType });

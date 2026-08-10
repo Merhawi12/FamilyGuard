@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  auth as authApi, useAuth, errorMessage,
+  auth as authApi, useAuth, errorMessage, Icon, TwoFactorSetup,
   roleLabel, isSuperAdmin, PERMISSION_LABELS, hasPermission, PERMISSION_KEYS,
 } from '@parentix/shared';
 
@@ -49,10 +49,12 @@ export default function Profile() {
 
     setSavingPassword(true);
     try {
-      await authApi.changePassword({ currentPassword: passwords.current, newPassword: passwords.next });
+      const res = await authApi.changePassword({ currentPassword: passwords.current, newPassword: passwords.next });
       setPasswords({ current: '', next: '', confirm: '' });
-      setPasswordMessage('Password changed');
-      setTimeout(() => setPasswordMessage(''), 3000);
+      // Reports how many other sessions the change evicted — see the family app's
+      // Settings screen for why that is worth saying rather than just "changed".
+      setPasswordMessage(res.data?.message || 'Password changed');
+      setTimeout(() => setPasswordMessage(''), 6000);
     } catch (err) {
       setPasswordError(errorMessage(err, 'Failed to change your password'));
     } finally {
@@ -63,22 +65,17 @@ export default function Profile() {
   const granted = PERMISSION_KEYS.filter((key) => hasPermission(user, key));
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-xl font-bold">My Profile</h1>
-        <p className="text-gray-500 text-sm mt-1">Your staff account details and sign-in credentials.</p>
-      </div>
+    <div className="space-y-5 max-w-2xl">
+      <p className="text-sm text-gray-500">Your staff account details and sign-in credentials.</p>
 
       <div className="card">
         <div className="flex items-start justify-between gap-4 mb-4">
-          <h2 className="font-semibold">Details</h2>
-          <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 shrink-0">
-            {roleLabel(user?.role)}
-          </span>
+          <h2 className="section-title">Details</h2>
+          <span className="badge-blue shrink-0">{roleLabel(user?.role)}</span>
         </div>
 
-        {profileError && <div className="p-3 mb-3 bg-red-50 text-red-700 rounded-xl text-sm">{profileError}</div>}
-        {profileMessage && <div className="p-3 mb-3 bg-green-50 text-green-700 rounded-xl text-sm">{profileMessage}</div>}
+        {profileError && <p className="notice-error mb-3">{profileError}</p>}
+        {profileMessage && <p className="notice-success mb-3">{profileMessage}</p>}
 
         <form onSubmit={saveProfile} className="space-y-3">
           <label className="block">
@@ -99,17 +96,17 @@ export default function Profile() {
             />
             <span className="text-xs text-gray-400 mt-1 block">You sign in with this address.</span>
           </label>
-          <button type="submit" className="btn-primary disabled:opacity-60" disabled={savingProfile}>
+          <button type="submit" className="btn-primary btn-block sm:w-auto" disabled={savingProfile}>
             {savingProfile ? 'Saving…' : 'Save changes'}
           </button>
         </form>
       </div>
 
       <div className="card">
-        <h2 className="font-semibold mb-4">Change password</h2>
+        <h2 className="section-title mb-4">Change password</h2>
 
-        {passwordError && <div className="p-3 mb-3 bg-red-50 text-red-700 rounded-xl text-sm">{passwordError}</div>}
-        {passwordMessage && <div className="p-3 mb-3 bg-green-50 text-green-700 rounded-xl text-sm">{passwordMessage}</div>}
+        {passwordError && <p className="notice-error mb-3">{passwordError}</p>}
+        {passwordMessage && <p className="notice-success mb-3">{passwordMessage}</p>}
 
         <form onSubmit={savePassword} className="space-y-3">
           <label className="block">
@@ -139,14 +136,16 @@ export default function Profile() {
               onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })}
             />
           </label>
-          <button type="submit" className="btn-primary disabled:opacity-60" disabled={savingPassword}>
+          <button type="submit" className="btn-primary btn-block sm:w-auto" disabled={savingPassword}>
             {savingPassword ? 'Changing…' : 'Change password'}
           </button>
         </form>
       </div>
 
+      <TwoFactorSetup />
+
       <div className="card">
-        <h2 className="font-semibold mb-1">What this account can do</h2>
+        <h2 className="section-title mb-1">What this account can do</h2>
         <p className="text-sm text-gray-500 mb-4">
           {isSuperAdmin(user)
             ? 'A Super Admin holds every permission and is the only role that can manage staff accounts.'
@@ -155,7 +154,8 @@ export default function Profile() {
         <ul className="space-y-2">
           {granted.map((key) => (
             <li key={key} className="flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-green-600">✔</span> {PERMISSION_LABELS[key]}
+              <Icon name="check" size={15} strokeWidth={2.4} className="text-green-600" />
+              {PERMISSION_LABELS[key]}
             </li>
           ))}
           {!granted.length && <li className="text-sm text-gray-400">No permissions granted yet.</li>}

@@ -146,7 +146,10 @@ const run = async () => {
       passwordHash: password, // hashed by the model hook
       role,
       permissions: defaultPermissionsFor(role),
-      plan: 'family',
+      // Staff bypass entitlement checks entirely (see middleware/featureGate),
+      // so this is only what the console displays. It named the retired top
+      // tier; the catalogue's paid plan is the honest stand-in.
+      plan: 'premium',
       isActive: true,
       emailVerified: true,
     });

@@ -15,6 +15,7 @@ const Session = require('./Session');
 const Transaction = require('./Transaction');
 const Notification = require('./Notification');
 const SystemSetting = require('./SystemSetting');
+const PushToken = require('./PushToken');
 
 // Associations
 User.hasMany(Child, { foreignKey: 'parentId', as: 'children' });
@@ -69,7 +70,13 @@ Transaction.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 User.hasMany(Notification, { foreignKey: 'userId', as: 'notifications' });
 Notification.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
+User.hasMany(PushToken, { foreignKey: 'userId', as: 'pushTokens' });
+PushToken.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+Device.hasMany(PushToken, { foreignKey: 'deviceId', as: 'pushTokens' });
+PushToken.belongsTo(Device, { foreignKey: 'deviceId', as: 'device' });
+
 module.exports = {
   User, Child, Device, ActivityLog, ScreenTimeRule, AppRule, WebsiteRule, Alert, AuditLog,
   Location, SafeZone, Message, Contact, Session, Transaction, Notification, SystemSetting,
+  PushToken,
 };

@@ -12,7 +12,12 @@ class VpnModule(private val ctx: ReactApplicationContext) :
 
     private var vpnPromise: Promise? = null
 
-    init { ctx.addActivityEventListener(this) }
+    init {
+        ctx.addActivityEventListener(this)
+        // The DNS worker runs on a service thread with no view of the bridge;
+        // this is what gives it somewhere to deliver web visits.
+        WebHistoryReporter.attach(ctx)
+    }
 
     override fun getName() = "VpnControl"
 
@@ -43,9 +48,26 @@ class VpnModule(private val ctx: ReactApplicationContext) :
 
     @ReactMethod
     fun stopVpn(promise: Promise) {
+        // Hand over whatever the last window collected before the tunnel — and
+        // with it the only thing that can observe DNS — goes away.
+        WebHistoryReporter.flush()
         ctx.startService(Intent(ctx, ParentixVpnService::class.java).apply { action = ParentixVpnService.ACTION_STOP })
         promise.resolve(true)
     }
+
+    /** Let JS pull the current window early, e.g. before a background sync. */
+    @ReactMethod
+    fun flushWebHistory(promise: Promise) {
+        WebHistoryReporter.flush()
+        promise.resolve(true)
+    }
+
+    // Required by RN's NativeEventEmitter for the "onWebVisits" event.
+    @ReactMethod
+    fun addListener(eventName: String) {}
+
+    @ReactMethod
+    fun removeListeners(count: Double) {}
 
     override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode != VPN_REQUEST_CODE) return

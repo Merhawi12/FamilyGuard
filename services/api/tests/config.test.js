@@ -24,6 +24,8 @@ const CONFIG_KEYS = [
   'DATABASE_URL',
   'JWT_SECRET',
   'FIELD_ENCRYPTION_KEY',
+  'SMS_ECHO_CODE',
+  'TWILIO_ACCOUNT_SID',
 ];
 
 /** Loads src/config/env.js fresh under exactly the variables given. */
@@ -56,6 +58,11 @@ const PRODUCTION_BASE = {
   DB_USER: 'parentix',
   JWT_SECRET: 'x'.repeat(64),
   FIELD_ENCRYPTION_KEY: 'a'.repeat(64),
+  // A relay is part of a viable production boot, not an extra: signup cannot
+  // complete without the emailed code, so an API that cannot send mail accepts
+  // registrations and strands every one of them. See the SMTP_HOST case in
+  // tests/signInHardening.test.js for the refusal itself.
+  SMTP_HOST: 'smtp.example.com',
 };
 
 describe('CORS origins', () => {
@@ -148,5 +155,46 @@ describe('assertProductionConfig', () => {
     const { assertProductionConfig } = loadConfig({ NODE_ENV: 'development' });
 
     expect(() => assertProductionConfig()).not.toThrow();
+  });
+
+  /**
+   * SMS_ECHO_CODE returns the sign-in code in the HTTP response. `env.sms.echoCode`
+   * already reads false in production whatever this is set to, so the boot could
+   * safely continue — and that is precisely why it must not. An operator who set
+   * it believes codes are being echoed and is wrong about the effect, not the
+   * intent; a refused boot is how they find out before it matters.
+   */
+  it('refuses to start when SMS_ECHO_CODE is set in production', () => {
+    const { assertProductionConfig } = loadConfig({
+      ...PRODUCTION_BASE,
+      CLIENT_URL: 'https://app.parentix.ca',
+      SMS_ECHO_CODE: 'true',
+    });
+
+    expect(() => assertProductionConfig()).toThrow(/SMS_ECHO_CODE/);
+  });
+});
+
+describe('SMS configuration', () => {
+  it('echoes the code by default in development, never in production', () => {
+    expect(loadConfig({ NODE_ENV: 'development' }).env.sms.echoCode).toBe(true);
+    expect(
+      loadConfig({ ...PRODUCTION_BASE, CLIENT_URL: 'https://app.parentix.ca' }).env.sms.echoCode
+    ).toBe(false);
+  });
+
+  /**
+   * Terraform seeds every supplied secret with a single space, because Secret
+   * Manager will not store an empty payload. That space is truthy: read
+   * directly, it selected the 'twilio' provider on a deployment that had been
+   * given no credentials at all — the same trap that made a blank SMTP host
+   * read as configured and turned "password reset does not work" into a silent
+   * failure.
+   */
+  it('reads an unsupplied Secret Manager placeholder as no provider at all', () => {
+    const { env: loaded } = loadConfig({ NODE_ENV: 'development', TWILIO_ACCOUNT_SID: ' ' });
+
+    expect(loaded.sms.provider).toBe('none');
+    expect(loaded.sms.accountSid).toBe('');
   });
 });

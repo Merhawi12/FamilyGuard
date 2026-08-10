@@ -12,20 +12,22 @@ const Children = lazy(() => import('./pages/Children'));
 const ScreenTime = lazy(() => import('./pages/ScreenTime'));
 const AppBlocking = lazy(() => import('./pages/AppBlocking'));
 const ActivityLog = lazy(() => import('./pages/ActivityLog'));
+const WebHistory = lazy(() => import('./pages/WebHistory'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Alerts = lazy(() => import('./pages/Alerts'));
 const LocationPage = lazy(() => import('./pages/Location'));
 const Messages = lazy(() => import('./pages/Messages'));
 const Contacts = lazy(() => import('./pages/Contacts'));
+const Profile = lazy(() => import('./pages/Profile'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const Terms = lazy(() => import('./pages/Terms'));
 
 /**
  * The marketing site is the static `public/landing.html`, not a React route.
- * The bucket's main_page_suffix (and the Vite dev middleware) rewrite `/` to it,
- * so this only runs
- * if the SPA is entered at `/` some other way — e.g. the catch-all below.
+ * Firebase Hosting rewrites `/` to it (and the Vite dev middleware does the same
+ * locally), so this only runs if the SPA is entered at `/` some other way — e.g.
+ * the catch-all below.
  */
 function GoToLanding() {
   useEffect(() => {
@@ -33,6 +35,18 @@ function GoToLanding() {
   }, []);
   return null;
 }
+
+/**
+ * `/` inside the Android build.
+ *
+ * There is no marketing page in the app — it is not shipped, and someone who
+ * installed Parentix has already been sold it. Redirecting to landing.html there
+ * would open a file that does not exist. `PrivateRoute` sends a signed-out
+ * visitor on to /login, so this lands on the dashboard or the sign-in screen
+ * depending on whether there is a session, which is what launching an app should
+ * do. `__NATIVE__` is set by vite.config.js.
+ */
+const Home = () => (__NATIVE__ ? <Navigate to="/dashboard" replace /> : <GoToLanding />);
 
 const PrivateRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -47,7 +61,7 @@ export default function App() {
         <BrowserRouter>
           <Suspense fallback={<Spinner full />}>
             <Routes>
-              <Route path="/" element={<GoToLanding />} />
+              <Route path="/" element={<Home />} />
               <Route path="/login" element={<Login />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/privacy-policy" element={<PrivacyPolicy />} />
@@ -68,11 +82,13 @@ export default function App() {
                 <Route path="screen-time" element={<ScreenTime />} />
                 <Route path="blocking" element={<AppBlocking />} />
                 <Route path="activity" element={<ActivityLog />} />
+                <Route path="web-history" element={<WebHistory />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="alerts" element={<Alerts />} />
                 <Route path="location" element={<LocationPage />} />
                 <Route path="messages" element={<Messages />} />
                 <Route path="contacts" element={<Contacts />} />
+                <Route path="profile" element={<Profile />} />
                 <Route path="settings" element={<Settings />} />
               </Route>
 

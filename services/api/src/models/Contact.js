@@ -11,6 +11,13 @@ const Contact = sequelize.define('Contact', {
   relationship: { type: DataTypes.STRING, defaultValue: 'other' },
   isApproved: { type: DataTypes.BOOLEAN, defaultValue: true },
   notes: { type: DataTypes.TEXT },
-}, { underscored: true });
+}, {
+  underscored: true,
+  indexes: [
+    // The parent's list, and the device's "my approved contacts" sync.
+    { fields: ['parent_id'] },
+    { fields: ['child_id', 'is_approved'] },
+  ],
+});
 
 module.exports = Contact;

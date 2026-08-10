@@ -12,8 +12,13 @@ const {
   listActiveSessions, listUserSessions, forceLogoutSession, forceLogoutUser,
 } = require('../controllers/adminSessionController');
 const { listTransactions, listUserTransactions } = require('../controllers/adminBillingController');
+const { listDevices } = require('../controllers/adminDeviceController');
 const { getSettings, updateSettings } = require('../controllers/settingsController');
+const { getContentFiltering, updateContentFiltering } = require('../controllers/adminContentController');
 const { getAnalytics } = require('../controllers/adminAnalyticsController');
+const {
+  getPlatformHealth, acknowledgeCritical, updateAlertDelivery,
+} = require('../controllers/adminHealthController');
 
 router.use(authenticate, requireStaff);
 
@@ -46,6 +51,11 @@ router.get('/users/:id/sessions', requirePermission('manage_sessions'), listUser
 router.delete('/sessions/:sessionId', requirePermission('manage_sessions'), forceLogoutSession);
 router.delete('/users/:id/sessions', requirePermission('manage_sessions'), forceLogoutUser);
 
+// Devices — a device belongs to a customer account, so the directory permission
+// is the one that governs reading it. Read-only: enrolling and removing a device
+// stays with the parent who owns it.
+router.get('/devices', requirePermission('manage_users'), listDevices);
+
 // Billing
 router.get('/transactions', requirePermission('manage_billing'), listTransactions);
 router.get('/users/:id/transactions', requirePermission('manage_billing'), listUserTransactions);
@@ -54,7 +64,22 @@ router.get('/users/:id/transactions', requirePermission('manage_billing'), listU
 router.get('/settings', requirePermission('manage_settings'), getSettings);
 router.put('/settings', requirePermission('manage_settings'), updateSettings);
 
+// Content filtering — the platform-wide policy every device is subject to. It
+// configures the platform, so it is gated by the settings permission rather
+// than by the directory one that opens a customer's own rules.
+router.get('/content-filtering', requirePermission('manage_settings'), getContentFiltering);
+router.put('/content-filtering', requirePermission('manage_settings'), updateContentFiltering);
+
 // Analytics
 router.get('/analytics', getAnalytics);
+
+// Platform health — the Overview's alert summary. It reads the audit stream, so
+// it is gated by the same permission that opens System Logs; an account without
+// it gets the Overview's analytics and no alert panel.
+router.get('/platform-health', requirePermission('view_audit_logs'), getPlatformHealth);
+router.post('/platform-health/acknowledge', requirePermission('view_audit_logs'), acknowledgeCritical);
+// Holding an alert type back from email and push changes how the platform
+// behaves for every family on it, which is a settings decision.
+router.put('/platform-health/alert-delivery', requirePermission('manage_settings'), updateAlertDelivery);
 
 module.exports = router;

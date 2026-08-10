@@ -1,18 +1,22 @@
-# Global external Application Load Balancer — the CloudFront + ALB replacement.
+# Global external Application Load Balancer, fronting the API and nothing else.
 #
-# One anycast IP fronts all three hostnames:
+#   api.<domain>  → Cloud Run
 #
-#   app.<domain>    → family bucket   (+ /api, /socket.io → Cloud Run)
-#   admin.<domain>  → admin bucket    (+ /api, /socket.io → Cloud Run)
-#   api.<domain>    → Cloud Run
+# The two web apps are served by Firebase Hosting, which has its own anycast
+# addresses, its own managed certificates and its own CDN. So the only hostname
+# that resolves here is the API's, and this file no longer carries backend
+# buckets, host rules or path matchers — there is one backend and everything
+# arriving is for it.
 #
-# Serving the API on the same origin as each SPA is what lets the front-end
-# builds leave VITE_API_URL empty: no CORS preflight on every call, and no
-# third-party cookie handling.
+# Because the apps and the API are now separate origins, every browser call is a
+# genuine cross-origin request. That is answered by the CORS allowlist the API is
+# configured with in run.tf, not by routing.
 #
-# None of this is created without a domain — a managed certificate needs one.
+# None of this is created without a domain — a managed certificate needs one. In
+# a domainless environment the API is reached on its .run.app URL instead, which
+# already has a certificate of Google's.
 
-# ── Backends ─────────────────────────────────────────────────────────────────
+# ── Backend ──────────────────────────────────────────────────────────────────
 
 resource "google_compute_region_network_endpoint_group" "api" {
   count = local.use_domain ? 1 : 0
@@ -39,6 +43,11 @@ resource "google_compute_backend_service" "api" {
   # does not impose its own limit on this path. What a Socket.IO connection
   # actually lives under is the Cloud Run request timeout, set to 3600s in
   # run.tf; that is the only timeout in play.
+  #
+  # Socket.IO reaching Cloud Run directly, rather than through Firebase Hosting,
+  # is not incidental: Firebase Hosting does not proxy a websocket upgrade, so a
+  # rewrite from the app's own origin would hold the realtime layer down to
+  # long-polling. The client connects to this hostname for that reason.
 
   backend {
     group = google_compute_region_network_endpoint_group.api[0].id
@@ -53,35 +62,6 @@ resource "google_compute_backend_service" "api" {
   }
 }
 
-resource "google_compute_backend_bucket" "family" {
-  count = local.use_domain ? 1 : 0
-
-  name        = "${local.prefix}-family-backend"
-  bucket_name = google_storage_bucket.family_app.name
-  enable_cdn  = true
-
-  cdn_policy {
-    # Honour the Cache-Control headers deploy-web.sh sets at upload time:
-    # one year for hashed assets, no-cache for the HTML entry points. Getting
-    # that wrong means browsers keep loading the previous build's script tags.
-    cache_mode       = "USE_ORIGIN_HEADERS"
-    negative_caching = true
-  }
-}
-
-resource "google_compute_backend_bucket" "admin" {
-  count = local.use_domain ? 1 : 0
-
-  name        = "${local.prefix}-admin-backend"
-  bucket_name = google_storage_bucket.admin_app.name
-  enable_cdn  = true
-
-  cdn_policy {
-    cache_mode       = "USE_ORIGIN_HEADERS"
-    negative_caching = true
-  }
-}
-
 # ── Routing ──────────────────────────────────────────────────────────────────
 
 resource "google_compute_url_map" "main" {
@@ -89,72 +69,10 @@ resource "google_compute_url_map" "main" {
 
   name = "${local.prefix}-urlmap"
 
-  # Anything that matches no host rule lands on the marketing site.
-  default_service = google_compute_backend_bucket.family[0].id
-
-  host_rule {
-    hosts        = [local.app_host]
-    path_matcher = "family"
-  }
-
-  host_rule {
-    hosts        = [local.admin_host]
-    path_matcher = "admin"
-  }
-
-  host_rule {
-    hosts        = [local.api_host]
-    path_matcher = "api"
-  }
-
-  path_matcher {
-    name            = "family"
-    default_service = google_compute_backend_bucket.family[0].id
-
-    path_rule {
-      paths   = ["/api", "/api/*"]
-      service = google_compute_backend_service.api[0].id
-    }
-
-    path_rule {
-      paths   = ["/socket.io", "/socket.io/*"]
-      service = google_compute_backend_service.api[0].id
-    }
-
-    # `/` is handled by the bucket's main_page_suffix (landing.html), but
-    # `/contact` has no such hook — it needs an explicit rewrite to the static
-    # file, matching what apps/family-app/vite.config.js does in development.
-    path_rule {
-      paths   = ["/contact"]
-      service = google_compute_backend_bucket.family[0].id
-
-      route_action {
-        url_rewrite {
-          path_prefix_rewrite = "/contact.html"
-        }
-      }
-    }
-  }
-
-  path_matcher {
-    name            = "admin"
-    default_service = google_compute_backend_bucket.admin[0].id
-
-    path_rule {
-      paths   = ["/api", "/api/*"]
-      service = google_compute_backend_service.api[0].id
-    }
-
-    path_rule {
-      paths   = ["/socket.io", "/socket.io/*"]
-      service = google_compute_backend_service.api[0].id
-    }
-  }
-
-  path_matcher {
-    name            = "api"
-    default_service = google_compute_backend_service.api[0].id
-  }
+  # One backend, so no host rules: whatever reaches this address is API traffic,
+  # and a request for a hostname that no longer points here gets the API's own
+  # 404 rather than somebody else's page.
+  default_service = google_compute_backend_service.api[0].id
 }
 
 # ── TLS and front end ────────────────────────────────────────────────────────
@@ -162,19 +80,20 @@ resource "google_compute_url_map" "main" {
 resource "google_compute_managed_ssl_certificate" "main" {
   count = local.use_domain ? 1 : 0
 
-  name = "${local.prefix}-cert"
+  # The domain list is part of the name. A managed certificate's `domains` field
+  # forces replacement, and a replacement whose name collides with the resource
+  # being replaced cannot be created first — which is exactly what
+  # create_before_destroy needs to do. Deriving the suffix from the list means
+  # the new certificate always has a free name.
+  name = "${local.prefix}-cert-${substr(sha256(join(",", local.certificate_domains)), 0, 8)}"
 
-  # The bare domain is included because it is what people type. The URL map's
-  # default_service is already the family bucket, so parentix.ca serves the
-  # marketing site without a host rule of its own — it only ever needed a
-  # certificate that covers it.
-  #
-  # Every name here must resolve to the load balancer before Google will issue:
-  # one unvalidated domain holds up the whole certificate, not just itself. So
-  # the apex A record has to exist first. Adding a name here also REPLACES the
-  # certificate and restarts provisioning for all of them.
+  # The API alone. The apex and the app hostnames are Firebase Hosting's now, and
+  # each one left on this certificate would be a domain Google re-validates
+  # against this load balancer and cannot reach — a validation failure blocks
+  # renewal for every name on the certificate, not just the unreachable one, so
+  # leaving them here would eventually take HTTPS down on the API too.
   managed {
-    domains = [var.domain, local.app_host, local.admin_host, local.api_host]
+    domains = local.certificate_domains
   }
 
   # Google will not issue until each name resolves to the address below, so the
@@ -199,9 +118,19 @@ resource "google_compute_global_address" "lb" {
 resource "google_compute_target_https_proxy" "main" {
   count = local.use_domain ? 1 : 0
 
-  name             = "${local.prefix}-https-proxy"
-  url_map          = google_compute_url_map.main[0].id
-  ssl_certificates = [google_compute_managed_ssl_certificate.main[0].id]
+  name    = "${local.prefix}-https-proxy"
+  url_map = google_compute_url_map.main[0].id
+
+  # Normally one certificate. `retained_ssl_certificate` attaches a second for
+  # the duration of a certificate change, so the proxy keeps serving from the
+  # outgoing one while the incoming one provisions — see the variable's
+  # description for the two-apply procedure.
+  ssl_certificates = compact([
+    google_compute_managed_ssl_certificate.main[0].id,
+    var.retained_ssl_certificate != ""
+    ? "projects/${var.project_id}/global/sslCertificates/${var.retained_ssl_certificate}"
+    : "",
+  ])
 }
 
 resource "google_compute_global_forwarding_rule" "https" {
@@ -215,7 +144,7 @@ resource "google_compute_global_forwarding_rule" "https" {
 }
 
 # Plain HTTP exists only to redirect. Serving anything over it would let a
-# session cookie travel in the clear once.
+# bearer token travel in the clear once.
 resource "google_compute_url_map" "redirect" {
   count = local.use_domain ? 1 : 0
 

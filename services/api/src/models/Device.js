@@ -13,6 +13,11 @@ const Device = sequelize.define('Device', {
   lastSeen: { type: DataTypes.DATE },
   isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
   pushToken: { type: DataTypes.STRING },
-}, { underscored: true });
+}, {
+  underscored: true,
+  // Every device read is "the active devices of these children" — the parent's
+  // device list, the plan's allowance count, and the rules the child app pulls.
+  indexes: [{ fields: ['child_id', 'is_active'] }],
+});
 
 module.exports = Device;

@@ -36,3 +36,14 @@ email_from = "Parentix Dev <no-reply@parentix.ca>"
 labels = {
   cost-center = "engineering"
 }
+
+# ── Firebase Hosting ─────────────────────────────────────────────────────────
+# Development shares the Hosting sites and uses preview channels rather than
+# sites of its own:
+#   firebase hosting:channel:deploy dev --only family --expires 30d
+# Those channel URLs are minted per deploy and cannot be derived here, so add the
+# one you are using to extra_cors_origins while you need it.
+firebase_family_site = "parentix-4be0d"
+firebase_admin_site  = "parentix-admin"
+
+extra_cors_origins = []

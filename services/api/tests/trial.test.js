@@ -44,8 +44,10 @@ describe('trial entitlements', () => {
     expect(res.status).toBe(403);
   });
 
-  it('does not grant a trial-only feature that the trial tier lacks', async () => {
-    // ai_safety belongs to `family`, not to the `premium` trial tier.
+  it('grants the whole Premium set during the trial, ai_safety included', async () => {
+    // ai_safety used to belong to `family` and so was withheld from the trial.
+    // Premium absorbed that tier, and the welcome email promises full access for
+    // seven days — so the trial has to reach every Premium feature, not most.
     const parent = await createUser({ plan: 'free', trialEndsAt: new Date(Date.now() + 3 * DAY) });
 
     const res = await request(app)
@@ -53,12 +55,24 @@ describe('trial entitlements', () => {
       .set('Authorization', `Bearer ${tokenFor(parent)}`)
       .send({});
 
+    expect(res.status).not.toBe(403);
+  });
+
+  it('withholds every paid feature once the trial has lapsed', async () => {
+    const parent = await createUser({ plan: 'free', trialEndsAt: new Date(Date.now() - DAY) });
+
+    const res = await request(app)
+      .post('/api/safety/analyze')
+      .set('Authorization', `Bearer ${tokenFor(parent)}`)
+      .send({});
+
     expect(res.status).toBe(403);
+    expect(res.body.upgradeRequired).toBe(true);
   });
 
   it('never downgrades a paid plan to the trial tier', async () => {
     // An expired trial marker must not strip entitlements from a paying account.
-    const parent = await createUser({ plan: 'family', trialEndsAt: new Date(Date.now() - DAY) });
+    const parent = await createUser({ plan: 'premium', trialEndsAt: new Date(Date.now() - DAY) });
 
     const res = await request(app)
       .post('/api/safety/analyze')

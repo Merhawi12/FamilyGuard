@@ -1,34 +1,8 @@
-import { Link } from 'react-router-dom';
+import LegalPage from '../components/LegalPage';
 
 export default function PrivacyPolicy() {
   return (
-    <div className="min-h-screen bg-white font-sans">
-      {/* Navbar */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur border-b border-gray-100">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link to="/"><img src="/logo.png" alt="Parentix" className="h-16 w-auto" /></Link>
-          <div className="flex items-center gap-4">
-            <Link to="/login" className="text-sm font-medium text-gray-600 hover:text-blue-600 transition">Sign In</Link>
-            <Link to="/login" className="text-sm font-medium bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
-              Get Started Free
-            </Link>
-          </div>
-        </div>
-      </nav>
-
-      {/* Content */}
-      <div className="pt-28 md:pt-36 pb-16 md:pb-24 px-4 md:px-6">
-        <div className="max-w-3xl mx-auto">
-          <div className="mb-10">
-            <span className="inline-block bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full mb-4 uppercase tracking-wide">
-              Legal
-            </span>
-            <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Privacy Policy</h1>
-            <p className="text-gray-500 text-sm">Last updated: June 11, 2026</p>
-          </div>
-
-          <div className="prose prose-gray max-w-none space-y-10 text-gray-600 leading-relaxed">
-
+    <LegalPage title="Privacy Policy" updated="June 11, 2026">
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-3">1. Introduction</h2>
               <p>
@@ -143,20 +117,6 @@ export default function PrivacyPolicy() {
                 <p>Email: privacy@parentix.ca</p>
               </div>
             </section>
-
-          </div>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <footer className="py-10 px-6 bg-gray-900 text-center">
-        <Link to="/"><img src="/logo.png" alt="Parentix" className="h-10 w-auto mx-auto mb-4 opacity-80" /></Link>
-        <div className="flex justify-center gap-6 mb-4">
-          <Link to="/privacy-policy" className="text-gray-400 hover:text-white text-sm transition">Privacy Policy</Link>
-          <Link to="/terms" className="text-gray-400 hover:text-white text-sm transition">Terms of Service</Link>
-        </div>
-        <p className="text-gray-400 text-sm">&copy; {new Date().getFullYear()} Parentix. Parental Control & Digital Safety.</p>
-      </footer>
-    </div>
+    </LegalPage>
   );
 }

@@ -153,7 +153,7 @@ describe('Child-emitted alerts reach the parent (feature: block/limit notificati
 
   it('a parent socket CANNOT forge a child alert (role guard)', async () => {
     const parent = await createUser();
-    const child = await createChild(parent.id);
+    await createChild(parent.id);
     const parentSocket = await connect({ token: tokenFor(parent) });
 
     parentSocket.emit('alert:blocked_app', { appName: 'Forged' });

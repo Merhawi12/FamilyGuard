@@ -11,6 +11,15 @@ const Transaction = sequelize.define('Transaction', {
   plan: { type: DataTypes.STRING },
   status: { type: DataTypes.STRING, allowNull: false },
   metadata: { type: DataTypes.JSON },
-}, { underscored: true, updatedAt: false });
+}, {
+  underscored: true,
+  updatedAt: false,
+  // The billing screen reads one customer's history newest-first, and derives
+  // MRR and the revenue trend from billed rows over a window.
+  indexes: [
+    { fields: ['user_id', 'created_at'] },
+    { fields: ['status', 'created_at'] },
+  ],
+});
 
 module.exports = Transaction;

@@ -1,5 +1,5 @@
-import * as SecureStore from 'expo-secure-store';
 import { io } from 'socket.io-client';
+import { getDeviceToken, handleAuthFailure, handleUnlinked } from './link';
 
 const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.parentix.ca';
 
@@ -21,7 +21,7 @@ const _pending = [];
 export async function connectSocket() {
   if (_socket) return _socket;
 
-  const token = await SecureStore.getItemAsync('fg_device_token');
+  const token = await getDeviceToken();
   if (!token) return null;
 
   _socket = io(SOCKET_URL, {
@@ -33,6 +33,22 @@ export async function connectSocket() {
     reconnectionDelay: 2000,
     reconnectionDelayMax: 30000,
   });
+
+  /**
+   * The parent removed this device while it was connected.
+   *
+   * Sent by the server immediately before it hangs up, so the phone learns the
+   * reason rather than seeing an ordinary disconnect and reconnecting forever.
+   */
+  _socket.on('device:unlinked', () => handleUnlinked());
+
+  /**
+   * And the same news for a phone that was offline when it happened: the
+   * handshake refuses the reconnect and carries the reason in `err.data.code`.
+   * Without this the client would retry that refusal every 30 seconds for the
+   * life of the install.
+   */
+  _socket.on('connect_error', (err) => handleAuthFailure(err?.data?.code));
 
   for (const [event, handler] of _pending) _socket.on(event, handler);
 
