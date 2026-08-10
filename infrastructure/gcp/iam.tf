@@ -64,7 +64,7 @@ resource "google_service_account_iam_member" "api_self_sign" {
 # you turn FCM off.
 resource "google_project_iam_member" "api_fcm" {
   project = var.project_id
-  role    = "roles/firebasemessaging.admin"
+  role    = "roles/firebasecloudmessaging.admin"
   member  = "serviceAccount:${google_service_account.api.email}"
 }
 

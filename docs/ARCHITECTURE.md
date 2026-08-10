@@ -238,7 +238,7 @@ which can only be reached one way:
 | Client | Transport | Configured by |
 |---|---|---|
 | Parent, in a browser | Web Push (VAPID) | `vapid-public-key` / `vapid-private-key` secrets |
-| Parent, Android app | FCM HTTP v1 | `roles/firebasemessaging.admin` on the API service account |
+| Parent, Android app | FCM HTTP v1 | `roles/firebasecloudmessaging.admin` on the API service account |
 | Child device | Expo push *(which relays to FCM)* | FCM credentials uploaded to the Expo project |
 
 The parent's Android app cannot use the browser transport even though it renders

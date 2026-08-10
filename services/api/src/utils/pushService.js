@@ -50,7 +50,7 @@ const getPublicKey = () => (webPushAvailable() ? env.push.vapidPublicKey : '');
  *
  * On Cloud Run both come for free: the project is in the environment and the
  * service account is the Application Default Credential, so there is no key file
- * and no secret to rotate — the `roles/firebasemessaging.admin` grant in iam.tf
+ * and no secret to rotate — the `roles/firebasecloudmessaging.admin` grant in iam.tf
  * is the whole of the authorisation. Off the platform there are no default
  * credentials, so this reports unavailable and the transport is skipped rather
  * than failing once per notification.

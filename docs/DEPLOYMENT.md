@@ -570,7 +570,7 @@ as with the child app a missing file builds cleanly and delivers nothing;
 `npm run apk:family` warns.
 
 Nothing is needed on the server: the API authenticates to FCM with its own Cloud
-Run service account (`roles/firebasemessaging.admin`, granted in `iam.tf`), so
+Run service account (`roles/firebasecloudmessaging.admin`, granted in `iam.tf`), so
 there is no server key and no secret to add.
 
 To confirm the whole chain on a device: sign in, open Settings → Notifications,

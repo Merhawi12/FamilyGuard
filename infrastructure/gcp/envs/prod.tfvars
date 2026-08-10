@@ -89,4 +89,16 @@ firebase_admin_site  = "parentix-admin"
 # Set to the outgoing certificate's name for one apply when the certificate's
 # domain list changes, so api.parentix.ca keeps serving TLS while the
 # replacement provisions. Empty in steady state — see variables.tf.
-retained_ssl_certificate = ""
+#
+# 2026-08-10: in use. The live certificate is named `parentix-prod-cert`, from
+# before the domain list became part of the name, so the current config renames
+# it to `parentix-prod-cert-0f27875d` and that forces a replacement. Without this
+# line the proxy would be left holding only the replacement while it provisions,
+# and api.parentix.ca would serve no HTTPS at all for anywhere from fifteen
+# minutes to several hours.
+#
+# Clear this back to "" and apply a second time once
+#   gcloud compute ssl-certificates describe parentix-prod-cert-0f27875d --global
+# reports ACTIVE. Leaving it set is not harmful, but it keeps a certificate alive
+# that nothing needs.
+retained_ssl_certificate = "parentix-prod-cert"
