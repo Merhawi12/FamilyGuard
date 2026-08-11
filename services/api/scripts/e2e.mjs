@@ -369,11 +369,39 @@ const run = async () => {
   check('the session list reports a total for paging', (sessions.data?.count ?? 0) > 0, JSON.stringify(sessions.data?.count));
 
   // ── 12. Contact form ───────────────────────────────────────────────────────
+  //
+  // This harness runs with EMAIL_PROVIDER=none, so a submission genuinely cannot
+  // be delivered — and the behaviour worth pinning is that the API says so.
+  //
+  // It used to assert a 2xx here, which is the one answer that would be a bug:
+  // the endpoint was changed precisely because reporting success with no relay
+  // configured meant a prospective customer read "message sent", closed the tab,
+  // and waited for a reply to something that existed only in a log line. The
+  // test asserting the old behaviour survived the fix and failed ever since.
   step('Marketing contact form');
   const contact = await call('POST', '/contact', {
     body: { name: 'Visitor', email: 'visitor@example.test', message: 'How does Parentix work?' },
   });
-  check('the contact form accepts a submission', [200, 201].includes(contact.status), JSON.stringify(contact.data));
+  check(
+    'an undeliverable submission is reported as undeliverable, not as sent',
+    contact.status === 502 && contact.data?.delivered === false,
+    JSON.stringify(contact.data),
+  );
+  check(
+    'the failure tells the visitor what to do instead',
+    typeof contact.data?.error === 'string' && /email us directly/i.test(contact.data.error),
+    JSON.stringify(contact.data?.error),
+  );
+
+  // Validation runs before delivery is attempted, so these answer the same way
+  // with or without a relay.
+  const contactBad = await call('POST', '/contact', {
+    body: { name: 'Visitor', email: 'not-an-address', message: 'hello' },
+  });
+  check('a malformed address is rejected', contactBad.status === 400, JSON.stringify(contactBad.data));
+
+  const contactEmpty = await call('POST', '/contact', { body: { name: 'Visitor' } });
+  check('a missing message is rejected', contactEmpty.status === 400, JSON.stringify(contactEmpty.data));
 
   // ── 13. Sign-out ───────────────────────────────────────────────────────────
   step('Sign-out');

@@ -270,10 +270,10 @@ describe('deleting a staff account', () => {
  */
 describe('department permissions', () => {
   const CASES = [
-    { role: ROLES.OPERATIONS, allowed: ['/api/admin/users', '/api/admin/settings', '/api/audit'], denied: ['/api/admin/transactions'] },
-    { role: ROLES.SUPPORT, allowed: ['/api/admin/users', '/api/admin/sessions/active'], denied: ['/api/admin/transactions', '/api/admin/settings', '/api/audit'] },
-    { role: ROLES.FINANCE, allowed: ['/api/admin/transactions'], denied: ['/api/admin/users', '/api/admin/settings', '/api/audit'] },
-    { role: ROLES.MARKETING, allowed: [], denied: ['/api/admin/users', '/api/admin/transactions', '/api/admin/settings', '/api/audit'] },
+    { role: ROLES.OPERATIONS, allowed: ['/api/admin/users', '/api/admin/clients', '/api/admin/settings', '/api/audit'], denied: ['/api/admin/transactions'] },
+    { role: ROLES.SUPPORT, allowed: ['/api/admin/users', '/api/admin/clients', '/api/admin/sessions/active'], denied: ['/api/admin/transactions', '/api/admin/settings', '/api/audit'] },
+    { role: ROLES.FINANCE, allowed: ['/api/admin/transactions'], denied: ['/api/admin/users', '/api/admin/clients', '/api/admin/settings', '/api/audit'] },
+    { role: ROLES.MARKETING, allowed: [], denied: ['/api/admin/users', '/api/admin/clients', '/api/admin/transactions', '/api/admin/settings', '/api/audit'] },
   ];
 
   it.each(CASES)('$role reaches only what its role grants', async ({ role, allowed, denied }) => {
@@ -287,6 +287,50 @@ describe('department permissions', () => {
       expect({ path, status: (await request(app).get(path).set(bearer(staff))).status })
         .toEqual({ path, status: 403 });
     }
+  });
+
+  /**
+   * The rule, rather than a list of examples.
+   *
+   * `GET /api/admin/clients` returns every customer's name, email, plan and
+   * status in one unpaginated array, and it was the one route in routes/admin.js
+   * declared with no permission beyond `requireStaff`. Marketing cannot open the
+   * Users screen and is shown no link to it, so nothing pointed at the hole —
+   * but the endpoint answered a direct call from any staff account, and the
+   * console does not call it at all, so no test exercised it either.
+   *
+   * This reads the route table and asserts the invariant across every GET in it,
+   * so the next route added without a guard fails here rather than in an audit.
+   * `/analytics` is the deliberate exception: it is aggregate counts with no
+   * personal data, and the Overview screen is the one thing every department is
+   * meant to see.
+   */
+  const OPEN_TO_ALL_STAFF = ['/api/admin/analytics'];
+
+  it('no admin GET is reachable by a department that was granted nothing for it', async () => {
+    const routeFile = require('node:fs').readFileSync(
+      require('node:path').join(__dirname, '../src/routes/admin.js'), 'utf8'
+    );
+
+    // Only routes with no `:param`, so each can be called as-is.
+    const paths = [...routeFile.matchAll(/router\.get\(\s*'(\/[^']*)'/g)]
+      .map(([, p]) => `/api/admin${p === '/' ? '' : p}`)
+      .filter((p) => !p.includes(':'));
+
+    expect(paths.length).toBeGreaterThan(4);
+
+    // Marketing holds send_notifications and nothing else, so every one of these
+    // must refuse it apart from the documented exception.
+    const marketing = await staffOf(ROLES.MARKETING);
+
+    const reachable = [];
+    for (const path of paths) {
+      if (OPEN_TO_ALL_STAFF.includes(path)) continue;
+      const { status } = await request(app).get(path).set(bearer(marketing));
+      if (status !== 403) reachable.push({ path, status });
+    }
+
+    expect(reachable).toEqual([]);
   });
 
   it('a Super Admin reaches everything even with an empty permissions column', async () => {

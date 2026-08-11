@@ -32,7 +32,19 @@ router.post('/staff/:id/reset-password', requireSuperAdmin, resetStaffPassword);
 router.delete('/staff/:id', requireSuperAdmin, deleteStaff);
 
 // Users
-router.get('/clients', listClients);
+//
+// `/clients` is the unpaginated ancestor of `/users` and returns every customer's
+// name, email, plan and status in one array. It was the only route in this file
+// carrying no permission beyond `requireStaff`, which meant a Marketing or
+// Finance account — neither of which can open the Users screen, and neither of
+// which is shown a link to this — could still enumerate the entire customer base
+// by calling it directly. Its own siblings just below all require manage_users,
+// and so does the paginated `/users` that replaced it.
+//
+// Gated rather than deleted: nothing in this repo calls it, but an older console
+// build still in someone's browser tab might, and a 403 is a better answer to
+// that than a 404.
+router.get('/clients', requirePermission('manage_users'), listClients);
 router.get('/users', requirePermission('manage_users'), listUsers);
 router.post('/users', requirePermission('manage_users'), createUser);
 router.put('/users/:id', requirePermission('manage_users'), updateUser);
