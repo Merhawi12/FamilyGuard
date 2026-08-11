@@ -73,6 +73,19 @@ redis_memory_size_gb = 1
 # /dashboard all answer 200 — so the canonical hostname is back in front.
 client_link_origin = ""
 
+# Sign in with Google. Not a secret — it ships inside the browser bundle and is
+# sent to Google in the clear, which is why it lives here rather than in Secret
+# Manager. It is still load-bearing: it is the audience an incoming Google ID
+# token is checked against, so a wrong value refuses every sign-in rather than
+# accepting one meant for another application.
+#
+# The client's "Authorised JavaScript origins" must list every hostname serving
+# the Family App — app., the apex, www. and the *.web.app name. The Android
+# wrapper needs no client of its own: Capacitor serves the WebView from
+# https://app.parentix.ca (see capacitor.config.json), which is already on that
+# list, so the same web client covers it.
+google_client_id = "648085611770-bv1nd07ujrl0g2nk65oo6ig4vanaf5sd.apps.googleusercontent.com"
+
 email_from = "Parentix <no-reply@parentix.ca>"
 
 # Where monitoring alerts go. Set this before the first production apply — an
