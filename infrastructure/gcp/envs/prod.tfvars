@@ -63,17 +63,15 @@ db_deletion_protection   = true
 redis_enabled        = true
 redis_memory_size_gb = 1
 
-# 2026-08-10: app.parentix.ca has no DNS record at all — the A/CNAME records for
-# it and admin. were never created at GoDaddy when the web tier moved to Firebase
-# Hosting. It is still first in CLIENT_URL, and that entry is the one the API
-# builds links from, so the password-reset email pointed at a hostname that does
-# not resolve and Stripe returned paying customers to the same. The apex is the
-# same Firebase site and already serves /reset-password and /dashboard, so it is
-# a complete substitute rather than a workaround.
+# Empty in steady state: app.parentix.ca leads CLIENT_URL on its own, and that
+# entry is the one the API builds password-reset links and Stripe return URLs
+# from.
 #
-# Clear this once app.parentix.ca resolves — see docs/DEPLOYMENT.md §1.5. Leaving
-# it set is not broken, only less canonical.
-client_link_origin = "https://parentix.ca"
+# Pointed at the apex for one day on 2026-08-10, when app.parentix.ca had no DNS
+# record at all and every emailed link went nowhere. The CNAME now exists and
+# Firebase has issued a certificate for it — /, /login, /reset-password and
+# /dashboard all answer 200 — so the canonical hostname is back in front.
+client_link_origin = ""
 
 email_from = "Parentix <no-reply@parentix.ca>"
 
