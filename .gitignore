@@ -59,6 +59,17 @@ keystore.properties
 parentix-release.keystore
 *.jks
 
+# Firebase per-app config. Downloaded from the console into each android/app/
+# directory — docs/DEPLOYMENT.md §2.3a and §2.3b. Not committed: it belongs to
+# whichever Firebase project the build targets, not to the repository, and both
+# Gradle projects apply the google-services plugin only when it is present.
+#
+# The API key inside is not a secret in the cryptographic sense — it ships in
+# every APK — but it is only safe once restricted to the app's package name and
+# signing certificate, and a public repository is a great deal easier to scrape
+# than an APK.
+google-services.json
+
 # Capacitor — the Android project is committed (it holds signing and manifest
 # configuration), its build output is not.
 apps/family-app/android/.gradle/
