@@ -39,13 +39,22 @@ locals {
   # password-reset email and Stripe's return URL both do. In an environment with
   # no custom domain that job falls to the site's own web.app address, which is
   # the only name it has.
-  client_origins = local.use_domain ? [
-    "https://${local.app_host}",
-    "https://${var.domain}",
-    "https://www.${var.domain}",
-    ] : compact([
+  #
+  # `client_link_origin` overrides which name gets that job, for when the
+  # canonical one is not yet usable. It is prepended and the list deduplicated,
+  # so naming a hostname already present merely promotes it. See the variable:
+  # the failure it exists to prevent is silent, because a dead origin still
+  # allows CORS from every other name and only the emailed links are broken.
+  client_origins = distinct(compact(concat(
+    [var.client_link_origin],
+    local.use_domain ? [
+      "https://${local.app_host}",
+      "https://${var.domain}",
+      "https://www.${var.domain}",
+      ] : [
       var.firebase_family_site != "" ? "https://${var.firebase_family_site}.web.app" : "",
-  ])
+    ],
+  )))
 
   admin_origins = local.use_domain ? ["https://${local.admin_host}"] : compact([
     var.firebase_admin_site != "" ? "https://${var.firebase_admin_site}.web.app" : "",

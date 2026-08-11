@@ -145,6 +145,31 @@ variable "extra_cors_origins" {
   default     = []
 }
 
+variable "client_link_origin" {
+  description = <<-EOT
+    Origin the API builds links against, when it should not simply be the first
+    of the Family App's hostnames.
+
+    The API reads `CLIENT_URL`'s first entry as more than a CORS allowance: it is
+    the origin it writes into the password-reset email, and the one it hands
+    Stripe as the success, cancel and billing-portal return URL. Four places
+    where a hostname that does not resolve is not a cosmetic problem — the reset
+    link goes nowhere, and a parent who has just paid is redirected to nothing.
+
+    Normally leave this empty and app.<domain> leads, which is the intent: it is
+    the app's canonical home. Set it when that hostname is not yet usable — an
+    apex that already serves the same Firebase site is a fine substitute, since
+    the app is one deployment answering on several names.
+
+    Whatever is named here is prepended to the origin list and deduplicated, so
+    setting it to a hostname already in the list only promotes it. It does not
+    have to be a name the list would otherwise contain, but it does have to be
+    one the Family App actually answers on, or every link is broken differently.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "retained_ssl_certificate" {
   description = <<-EOT
     Name of an existing managed certificate to keep attached to the HTTPS proxy

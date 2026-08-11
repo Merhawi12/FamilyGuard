@@ -63,6 +63,18 @@ db_deletion_protection   = true
 redis_enabled        = true
 redis_memory_size_gb = 1
 
+# 2026-08-10: app.parentix.ca has no DNS record at all — the A/CNAME records for
+# it and admin. were never created at GoDaddy when the web tier moved to Firebase
+# Hosting. It is still first in CLIENT_URL, and that entry is the one the API
+# builds links from, so the password-reset email pointed at a hostname that does
+# not resolve and Stripe returned paying customers to the same. The apex is the
+# same Firebase site and already serves /reset-password and /dashboard, so it is
+# a complete substitute rather than a workaround.
+#
+# Clear this once app.parentix.ca resolves — see docs/DEPLOYMENT.md §1.5. Leaving
+# it set is not broken, only less canonical.
+client_link_origin = "https://parentix.ca"
+
 email_from = "Parentix <no-reply@parentix.ca>"
 
 # Where monitoring alerts go. Set this before the first production apply — an
