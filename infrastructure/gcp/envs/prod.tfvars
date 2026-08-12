@@ -79,12 +79,28 @@ client_link_origin = ""
 # token is checked against, so a wrong value refuses every sign-in rather than
 # accepting one meant for another application.
 #
-# The client's "Authorised JavaScript origins" must list every hostname serving
-# the Family App — app., the apex, www. and the *.web.app name. The Android
-# wrapper needs no client of its own: Capacitor serves the WebView from
-# https://app.parentix.ca (see capacitor.config.json), which is already on that
-# list, so the same web client covers it.
-google_client_id = "648085611770-bv1nd07ujrl0g2nk65oo6ig4vanaf5sd.apps.googleusercontent.com"
+# This is the project's Firebase-managed web client, not a client made for this
+# app. The hand-made one (…bv1nd07…) sat here first and refused every sign-in
+# with "invalid_client: no registered origin": its Authorised JavaScript origins
+# list was empty, and the console would not commit an edit to it — the Save
+# button stayed disabled. The Firebase client already carries every hostname
+# that serves the Family App, because Firebase registers the custom domains
+# attached to Hosting: app., the apex, www. and the *.web.app name. Each was
+# checked from a browser at that origin, not assumed.
+#
+# What that borrowing costs: the origin list belongs to Firebase. Removing a
+# domain from Firebase Auth's authorised domains would stop sign-in here, with
+# nothing in this repo changing. Going back to a dedicated client is this one
+# line, once that client's origins actually exist.
+#
+# The Android wrapper needs no client of its own — Capacitor serves the WebView
+# from https://app.parentix.ca (see capacitor.config.json), which is on the
+# list — but Google refuses OAuth inside embedded WebViews anyway, so the button
+# is a browser and PWA feature. See docs/DEPLOYMENT.md.
+#
+# localhost:3000 is deliberately not covered: local builds leave
+# VITE_GOOGLE_CLIENT_ID empty, which renders no button rather than a broken one.
+google_client_id = "648085611770-iqb08gu4omr6nkk049bj2dsgrc3166jd.apps.googleusercontent.com"
 
 email_from = "Parentix <no-reply@parentix.ca>"
 
