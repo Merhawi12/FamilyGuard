@@ -125,6 +125,14 @@
   }
   .badge-green { @apply badge bg-green-100 text-green-800; }
   .badge-red   { @apply badge bg-red-100 text-red-800; }
+  /* `badge-blue` is literally blue; `badge-primary` is whichever colour the app
+     including this file calls primary — teal in the family app, blue in the
+     console. Reach for `badge-primary` when the chip is decorative ("Age 11",
+     "This device", a plan name) and for a named colour only when the colour
+     itself carries the meaning, the way Contacts distinguishes a relationship
+     or Location a zone type. Getting that the wrong way round is what left a
+     teal app sprinkled with blue chips. */
+  .badge-primary { @apply badge bg-primary-50 text-primary-700; }
   .badge-blue  { @apply badge bg-blue-100 text-blue-800; }
   .badge-amber { @apply badge bg-amber-100 text-amber-800; }
   .badge-gray  { @apply badge bg-gray-100 text-gray-700; }

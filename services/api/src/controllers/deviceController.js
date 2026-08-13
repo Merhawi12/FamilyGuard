@@ -391,6 +391,31 @@ const deviceHeartbeat = async (req, res, next) => {
   }
 };
 
+/**
+ * The usage day a reported `startTime` belongs to, as a half-open interval.
+ *
+ * Which day a batch of app usage counts towards is the phone's question, not the
+ * server's: `UsageStatsModule` measures `totalTimeInForeground` from the
+ * *device's* local midnight, and the device is the only party that knows when
+ * that was. So the bucket is derived from the instant the device reported rather
+ * than from this process's clock — which, on Cloud Run, is UTC while the
+ * families are in Canada.
+ *
+ * Anchoring it to `new Date()` instead is what made every evening's syncs
+ * duplicate. From about 20:00 local the server's day has already rolled over, so
+ * the device's reported start is "yesterday" here, the lookup for today's row
+ * misses, and each fifteen-minute sync appends another row carrying the whole
+ * day's cumulative total. `getDailySummary` adds those up, so the screen-time
+ * figure grew without bound over the exact hours it matters most.
+ */
+const usageDayWindow = (reported) => {
+  const start = new Date(reported);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start, end };
+};
+
 // POST /api/devices/me/activity — log app usage without requiring parent auth
 // App-usage stats arrive as the running cumulative total for the day, so we
 // upsert a single row per (child, app, day) instead of creating a duplicate
@@ -400,15 +425,20 @@ const deviceLogActivity = async (req, res, next) => {
     const { appName, appPackage, category, startTime, endTime, durationMinutes, url } = req.body;
 
     if (category === 'app_usage' && appPackage) {
-      const dayStart = new Date();
-      dayStart.setHours(0, 0, 0, 0);
+      // A malformed `startTime` falls back to now rather than poisoning the
+      // window with an Invalid Date, which would match nothing and append for
+      // ever — the failure mode this whole function exists to prevent.
+      const reported = new Date(startTime ?? NaN);
+      const { start: dayStart, end: dayEnd } = usageDayWindow(
+        Number.isNaN(reported.getTime()) ? new Date() : reported,
+      );
 
       const existing = await ActivityLog.findOne({
         where: {
           childId: req.childId,
           appPackage,
           category: 'app_usage',
-          startTime: { [Op.gte]: dayStart },
+          startTime: { [Op.gte]: dayStart, [Op.lt]: dayEnd },
         },
         order: [['startTime', 'ASC']],
       });

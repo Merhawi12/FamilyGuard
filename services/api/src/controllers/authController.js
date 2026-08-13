@@ -665,6 +665,23 @@ const authProviders = async (req, res, next) => {
        * the opposite of a notice.
        */
       maintenance: await maintenanceModeOn(),
+
+      /**
+       * Whether this deployment can actually take money, by the same rule as
+       * `phone` above — a control must not promise what the platform cannot do.
+       *
+       * With no STRIPE_SECRET_KEY every checkout answers 503, and the plan
+       * screen offered "Upgrade to Premium" regardless. That button is worst
+       * exactly where it matters most: an expired trial drops the account to
+       * `free`, featureGate starts refusing devices, and the notice tells the
+       * parent to upgrade to keep monitoring their family — pointing them at
+       * the one button in the product guaranteed not to work.
+       *
+       * Reported unauthenticated alongside the rest because it describes the
+       * deployment, not the account, and it discloses nothing a failed checkout
+       * would not. It flips back on its own the moment a key is configured.
+       */
+      billing: !!env.stripe.secretKey,
     });
   } catch (err) {
     next(err);
@@ -812,6 +829,22 @@ const PHONE_CODE_TTL_MS = 15 * 60 * 1000;
 
 const requestPhoneCode = async (req, res, next) => {
   try {
+    /**
+     * The same 503 `googleAuth` gives, and for the stronger reason.
+     *
+     * `/auth/providers` already reports `phone: canVerifyByPhone()` and the
+     * sign-in screen hides the tab on it — but the endpoint did not ask, so a
+     * deployment that advertises no phone sign-in still answered `mode:
+     * "register"` by *creating a user row* and granting it a trial, then
+     * discovering it had no way to send the code. An account nobody can sign in
+     * to, holding a number nobody proved, made by a feature the deployment says
+     * it does not have. Advertising a capability and enforcing it have to be the
+     * same predicate, or the quieter of the two is decorative.
+     */
+    if (!canVerifyByPhone()) {
+      return res.status(503).json({ error: 'Phone sign-in is not configured for this deployment' });
+    }
+
     const { name, mode } = req.body;
     const phone = normalizePhone(req.body.phone);
     if (!phone) {

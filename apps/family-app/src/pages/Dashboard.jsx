@@ -6,6 +6,7 @@ import {
   alertLabel, Avatar, EmptyState, Icon, StatsCard, useSocket,
 } from '@parentix/shared';
 import PageIntro from '../components/PageIntro';
+import { PRIMARY } from '../brand';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -94,7 +95,7 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <Link to="/dashboard/children" className="block">
-          <StatsCard icon="children" title="Children" value={childList.length} color="blue" />
+          <StatsCard icon="children" title="Children" value={childList.length} color="primary" />
         </Link>
         <Link to="/dashboard/children" className="block">
           <StatsCard icon="phone" title="Devices" value={totalDevices} color="green" />
@@ -133,7 +134,7 @@ export default function Dashboard() {
                   formatter={(v) => [`${v} min`, 'Screen time']}
                   contentStyle={{ borderRadius: 12, border: '1px solid #f3f4f6', fontSize: 12 }}
                 />
-                <Bar dataKey="minutes" fill="#2563eb" radius={[6, 6, 0, 0]} maxBarSize={40} />
+                <Bar dataKey="minutes" fill={PRIMARY} radius={[6, 6, 0, 0]} maxBarSize={40} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -170,7 +171,7 @@ export default function Dashboard() {
                       {child.devices?.length || 0} device{child.devices?.length === 1 ? '' : 's'}
                     </span>
                   </span>
-                  {child.age ? <span className="badge-blue">Age {child.age}</span> : null}
+                  {child.age ? <span className="badge-primary">Age {child.age}</span> : null}
                   <Icon name="chevronRight" size={16} className="text-gray-300" />
                 </Link>
               ))}

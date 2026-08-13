@@ -69,7 +69,7 @@ export default function Terms() {
               <h2 className="text-xl font-bold text-gray-900 mb-3">7. Privacy & Data</h2>
               <p>
                 Your use of the Service is also governed by our{' '}
-                <Link to="/privacy-policy" className="text-blue-600 hover:underline">Privacy Policy</Link>,
+                <Link to="/privacy-policy" className="text-primary-600 hover:underline">Privacy Policy</Link>,
                 which is incorporated into these Terms by reference. By using the Service, you consent to the
                 collection and use of data as described in our Privacy Policy.
               </p>

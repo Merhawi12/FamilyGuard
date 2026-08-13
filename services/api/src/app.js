@@ -32,11 +32,9 @@ app.disable('x-powered-by');
  * rather than work by accident. `env.corsOrigins` is built from CLIENT_URL,
  * ADMIN_URL and CORS_ORIGINS; Terraform sets all three.
  *
- * A request with no Origin at all is a non-browser caller — the child app,
- * Stripe's webhook, an uptime probe — which carries no ambient credentials for
- * CORS to protect. Those are allowed and authenticated the usual way. Express
- * and Socket.IO answer from this one function so a handshake and a REST call
- * can never disagree about who is allowed in.
+ * A request with no Origin at all is a non-browser caller — Stripe's webhook, an
+ * uptime probe — which carries no ambient credentials for CORS to protect. Those
+ * are allowed and authenticated the usual way.
  */
 const isAllowedOrigin = (origin) =>
   !origin || env.corsOrigins.includes(origin.replace(/\/$/, ''));
@@ -47,15 +45,59 @@ const corsDelegate = (req, callback) => {
   callback(null, { origin: false });
 };
 
-const io = new Server(httpServer, {
-  cors: {
-    origin(origin, callback) {
-      if (isAllowedOrigin(origin)) return callback(null, true);
-      callback(new Error(`Origin ${origin} is not allowed by CORS`));
-    },
-    credentials: true,
-  },
-});
+/**
+ * The handshake needs one thing REST must not have: an origin naming this host.
+ *
+ * The child app was assumed to be an origin-less caller and is not. React
+ * Native's Android WebSocket sends one whether or not anyone asked:
+ * WebSocketModule.java fills in `getDefaultOrigin(url)` when the caller supplies
+ * no origin header, which for `wss://api.parentix.ca` is
+ * `https://api.parentix.ca` — this API's own name, which no allowlist would
+ * think to carry. engine.io refused with a bare `400 {"code":3}`, the client
+ * retried at its 30s backoff ceiling, and across 14 days of production all 401
+ * attempts from okhttp failed while every browser upgraded cleanly. Nothing
+ * surfaced it: rules still arrived on the 60-second polling tick, so the app
+ * looked alive while the realtime channel — heartbeats, blocked-app and
+ * screen-time alerts, immediate unlink — was dead.
+ *
+ * Scoped to the socket deliberately. cors.test.js pins that REST refuses an
+ * origin merely because it matches the request Host, which is the right call for
+ * a browser-facing surface and is left exactly as it was. It is safe here for a
+ * reason that does not hold there: this admits no one who was not already
+ * admitted. A non-browser client can simply send no Origin and connect today, so
+ * nothing is gained by spoofing a Host; and a browser cannot reach this branch
+ * at all, because it sets Origin and Host itself and the two are equal only when
+ * the page really was served from this API — which serves no HTML.
+ */
+const isSelfOrigin = (origin, host) =>
+  !!host && origin.replace(/^https?:\/\//, '') === host;
+
+/**
+ * Socket.IO gets a `(req, callback)` delegate rather than the
+ * `origin(origin, callback)` form, because that form is handed the origin alone
+ * and the check above needs the Host to compare it against. The `cors` package
+ * accepts a delegate in place of an options object, so the request stays
+ * attached.
+ *
+ * It must *error* on a refusal rather than answer `{ origin: false }` the way
+ * the Express delegate does, and the difference is not cosmetic. A REST refusal
+ * only omits the CORS headers and leaves the browser to enforce it — correct
+ * there, because the response never reaches the page. A handshake has no such
+ * second line of defence: omit the headers and the upgrade still completes, and
+ * a socket that has completed is connected whatever a browser makes of it.
+ * Erroring is what makes engine.io abort. Both directions are pinned by
+ * socketOrigin.test.js — the first draft of this fix answered `{ origin: false }`
+ * and handed a third-party origin a working socket.
+ */
+const socketCorsDelegate = (req, callback) => {
+  const origin = req.headers?.origin;
+  if (isAllowedOrigin(origin) || isSelfOrigin(origin, req.headers?.host)) {
+    return callback(null, { origin: origin || true, credentials: true });
+  }
+  callback(new Error(`Origin ${origin} is not allowed by CORS`));
+};
+
+const io = new Server(httpServer, { cors: socketCorsDelegate });
 attachSocketAuth(io);
 
 app.use(helmet());

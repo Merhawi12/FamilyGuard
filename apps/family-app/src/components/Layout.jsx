@@ -61,7 +61,10 @@ export default function Layout() {
 
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-gray-100">
-          <div className="h-16 flex items-center gap-1 px-2 sm:px-4 lg:px-8">
+          {/* Tracks the sidebar's header height exactly. The two bottom borders
+              meet at the sidebar edge and read as a single rule, so if one grows
+              the other has to. See the note in Sidebar.jsx. */}
+          <div className="h-16 lg:h-20 flex items-center gap-1 px-2 sm:px-4 lg:px-8">
             <button
               onClick={() => setMenuOpen(true)}
               className="icon-btn lg:hidden"

@@ -422,6 +422,65 @@ const run = async () => {
   );
   check('the device picked up the new block over the socket', spy.blockedApps.includes('com.example.chat'));
 
+  /*
+   * ── Rules survive going offline ──────────────────────────────────────────
+   *
+   * The bypass this pins was airplane mode plus a restart.
+   *
+   * Rules lived only in memory, so a device that came up with no network held
+   * the empty default. `refreshBlocking` runs on a one-minute tick whether a
+   * sync succeeded or not, and it reads that empty set as "nothing is blocked"
+   * and hands it to the native blocker — which persists whatever it is given.
+   * Every app block and the whole bedtime window came off, and stayed off until
+   * the network returned, while the parent's dashboard went on reporting them as
+   * applied.
+   *
+   * Contacts were already cached against exactly this. Rules were not, which is
+   * why the test is written the same way as the contacts one below: restart the
+   * service while the transport is refusing everything, and read what the device
+   * would actually enforce.
+   */
+  step('Rules survive going offline and a restart');
+  {
+    const apiModule = await import(src('services/api.js'));
+    const rulesModule = await import(src('services/rules.js'));
+
+    const blockedBefore = [...spy.blockedApps];
+    // Reject at the transport layer: requests never leave the device, which is
+    // what "no network" looks like to everything above axios.
+    const cut = apiModule.default.interceptors.request.use(() => {
+      throw new Error('Network Error');
+    });
+
+    await rulesModule.fetchRules();
+    check('a failed sync keeps the rules the device already had',
+      JSON.stringify(rulesModule.getRules().appRules.map((r) => r.appPackage).sort())
+        === JSON.stringify(blockedBefore.slice().sort()),
+      JSON.stringify(rulesModule.getRules().appRules.map((r) => r.appPackage)));
+    check('the failure is recorded rather than swallowed', !!rulesModule.getSyncStatus().lastError);
+
+    // Restart the service while still offline — a rebooted phone in airplane
+    // mode. A fresh module instance must come up holding the cached rules.
+    const restarted = await import(`${src('services/rules.js')}?restart=offline`);
+    const appliedOnRestart = [];
+    await restarted.startRulesSync(async (rules) => {
+      appliedOnRestart.push(...(rules.appRules || []).map((r) => r.appPackage));
+    });
+
+    check('an app restarted while offline still holds the parent\'s rules',
+      appliedOnRestart.includes('com.example.chat'), JSON.stringify(appliedOnRestart));
+    check('it still holds the screen-time rule, so bedtime is not lifted',
+      !!restarted.getRules().screenTimeRule);
+    check('and the website rules, so filtering is not lifted offline',
+      (restarted.getRules().websiteRules || []).length > 0);
+    restarted.stopRulesSync();
+
+    // Back online.
+    apiModule.default.interceptors.request.eject(cut);
+    await rulesModule.fetchRules();
+    check('reconnecting clears the recorded error', rulesModule.getSyncStatus().lastError === null);
+  }
+
   // ── Approved contacts reach the device ─────────────────────────────────────
   // The whole point of this block is that "the parent UI says Approved" proves
   // nothing on its own. Every assertion below reads the device's own list —

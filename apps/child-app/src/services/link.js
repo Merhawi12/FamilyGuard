@@ -31,7 +31,7 @@ const CHILD_KEY = 'fg_child_id';
  * too.
  */
 const CHILD_DATA_KEYS = ['fg_child_name'];
-const CHILD_CACHE_KEYS = ['fg_approved_contacts', 'fg_web_history_queue', 'fg_push_token'];
+const CHILD_CACHE_KEYS = ['fg_approved_contacts', 'fg_web_history_queue', 'fg_push_token', 'fg_device_rules'];
 
 /**
  * Why the server refused, as sent by the API.

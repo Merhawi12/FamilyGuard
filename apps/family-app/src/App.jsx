@@ -1,9 +1,11 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, SocketProvider, useAuth, ErrorBoundary, Spinner } from '@parentix/shared';
+import { AuthProvider, SocketProvider, useAuth, ErrorBoundary, Spinner, getToken } from '@parentix/shared';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
+import Welcome from './pages/Welcome';
+import { welcomeSeen } from './services/welcome';
 
 // Everything behind the login is split out of the entry chunk — a visitor on
 // /login should not download the charting and mapping libraries.
@@ -45,8 +47,20 @@ function GoToLanding() {
  * visitor on to /login, so this lands on the dashboard or the sign-in screen
  * depending on whether there is a session, which is what launching an app should
  * do. `__NATIVE__` is set by vite.config.js.
+ *
+ * The introduction comes before all of that, and only on a launch that has both
+ * never seen it *and* has no session. The token check is what stops it appearing
+ * for parents who installed the app before this screen existed: they have used
+ * Parentix for months and do not need telling what it is. `getToken` rather than
+ * `useAuth` because this decision has to be made before the session is
+ * revalidated — waiting on the network to find out whether to show a splash is
+ * how a splash becomes a spinner.
  */
-const Home = () => (__NATIVE__ ? <Navigate to="/dashboard" replace /> : <GoToLanding />);
+const Home = () => {
+  if (!__NATIVE__) return <GoToLanding />;
+  if (!welcomeSeen() && !getToken()) return <Navigate to="/welcome" replace />;
+  return <Navigate to="/dashboard" replace />;
+};
 
 const PrivateRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -62,6 +76,10 @@ export default function App() {
           <Suspense fallback={<Spinner full />}>
             <Routes>
               <Route path="/" element={<Home />} />
+              {/* Routed rather than only reachable from `/` so it can be linked
+                  to, screenshotted and driven by the browser harness — and so a
+                  parent who wants to see it again can. */}
+              <Route path="/welcome" element={<Welcome />} />
               <Route path="/login" element={<Login />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/privacy-policy" element={<PrivacyPolicy />} />

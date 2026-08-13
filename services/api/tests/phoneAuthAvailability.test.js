@@ -112,9 +112,20 @@ describe('the code, when there is no provider to send it with', () => {
         .post('/api/auth/phone/request')
         .send({ mode: 'register', name: 'Dev Parent', phone: PHONE });
 
-      expect(res.status).toBe(200);
-      expect(res.body.smsDelivered).toBe(false);
+      /*
+       * This used to answer 200 with `smsDelivered: false`, which is how
+       * production — where exactly this configuration is live — accepted phone
+       * registrations for a feature `/auth/providers` reports as absent, and
+       * created a user and a trial for each one before finding it had no way to
+       * send the code. The route now asks the same question the sign-in page
+       * asks before drawing the tab.
+       *
+       * The original property is still pinned, and by a stronger statement: no
+       * code comes back because no code is issued.
+       */
+      expect(res.status).toBe(503);
       expect(res.body.devCode).toBeUndefined();
+      expect(await User.findByPhone(PHONE)).toBeFalsy();
     });
   });
 });

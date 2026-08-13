@@ -5,8 +5,9 @@ import {
 import { children as childrenApi, reports as reportsApi, EmptyState, errorMessage } from '@parentix/shared';
 import ChildTabs from '../components/ChildTabs';
 import PageIntro from '../components/PageIntro';
+import { PRIMARY, SERIES } from '../brand';
 
-const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+const COLORS = SERIES;
 
 const TOOLTIP_STYLE = { borderRadius: 12, border: '1px solid #f3f4f6', fontSize: 12 };
 
@@ -144,7 +145,7 @@ export default function Reports() {
                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} />
                 <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} width={48} />
                 <Tooltip cursor={{ fill: '#f3f4f6' }} contentStyle={TOOLTIP_STYLE} />
-                <Bar dataKey="minutes" fill="#2563eb" radius={[6, 6, 0, 0]} maxBarSize={40} />
+                <Bar dataKey="minutes" fill={PRIMARY} radius={[6, 6, 0, 0]} maxBarSize={40} />
               </BarChart>
             </ResponsiveContainer>
           </div>

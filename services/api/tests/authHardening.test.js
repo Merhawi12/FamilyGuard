@@ -7,6 +7,7 @@
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const { app } = require('../src/app');
+const { env } = require('../src/config/env');
 const { User, Session, Device } = require('../src/models');
 const { createUser, createChild, createDevice, deviceToken, tokenFor, uniqueEmail, DEFAULT_PASSWORD } = require('./helpers');
 
@@ -58,6 +59,19 @@ describe('Every signup path grants the trial', () => {
    * Free account from its first request — no GPS, no geofencing, no website
    * filtering — while the welcome copy promised full access.
    */
+
+  /*
+   * The phone cases below need phone sign-in to be *reachable*, which is now a
+   * precondition of the route rather than an assumption: `requestPhoneCode`
+   * refuses with 503 where `canVerifyByPhone()` is false, so under the test
+   * environment's defaults (no provider, echo off) these would be asserting the
+   * trial on a request that never got as far as creating anyone. Echo rather
+   * than a fake Twilio, because it is the honest way to make the flow finishable
+   * without pretending a provider exists.
+   */
+  const savedEcho = env.sms.echoCode;
+  beforeAll(() => { env.sms.echoCode = true; });
+  afterAll(() => { env.sms.echoCode = savedEcho; });
   it('email registration sets a trial', async () => {
     const email = uniqueEmail('trial-email');
     await request(app).post('/api/auth/register').send({ name: 'E', email, password: 'Str0ngPassw0rd!' });

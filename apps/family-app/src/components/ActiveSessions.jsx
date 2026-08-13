@@ -139,7 +139,7 @@ export default function ActiveSessions() {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900 truncate">
                   {describeAgent(s.userAgent)}
-                  {s.current && <span className="badge-blue ml-2">This device</span>}
+                  {s.current && <span className="badge-primary ml-2">This device</span>}
                 </p>
                 <p className="text-xs text-gray-500 truncate">
                   {s.ipAddress || 'Unknown address'} · Active {when(s.lastActiveAt)}

@@ -83,7 +83,11 @@ const initSocketHandlers = (io) => {
       if (!fix) return;
       io.to(`parent:${parentId}`).emit('location:update', {
         childId, ...fix,
-        recordedAt: payload?.recordedAt || new Date().toISOString(),
+        // `parseFix` has already refused a timestamp it cannot vouch for, so
+        // this no longer forwards whatever the payload claimed. The live map
+        // sorts by it, and a fix stamped an hour ahead would sit at the top of
+        // it until the clock caught up.
+        recordedAt: (fix.recordedAt || new Date()).toISOString(),
       });
     });
 

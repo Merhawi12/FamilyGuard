@@ -89,6 +89,30 @@ api.interceptors.response.use(
  */
 export const errorMessage = (error, fallback = 'Something went wrong. Please try again.') => {
   if (error?.response?.status === 404) return fallback;
+
+  /**
+   * A request that never reached the API has no `response`, and axios describes
+   * those in its own vocabulary: `Network Error`, or `timeout of 15000ms
+   * exceeded`. Both were being printed verbatim under a form field. Neither
+   * tells a parent the one thing that is true and actionable — the phone or the
+   * laptop is not currently talking to us, and nothing they typed was wrong.
+   *
+   * This is the single place all 87 call sites funnel through, so the offline
+   * wording belongs here rather than in each screen's catch block.
+   */
+  if (!error?.response) {
+    const timedOut = error?.code === 'ECONNABORTED' || error?.code === 'ETIMEDOUT';
+    if (timedOut) return 'The server is taking too long to respond. Please try again in a moment.';
+
+    // `navigator.onLine` is only trustworthy when it says *false* — a captive
+    // portal reports itself online — so it is used to sharpen the message, never
+    // to decide whether the request failed.
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (offline) return 'You appear to be offline. Reconnect and try again.';
+
+    if (error?.request) return 'Cannot reach Parentix right now. Check your connection and try again.';
+  }
+
   return error?.response?.data?.error || error?.message || fallback;
 };
 

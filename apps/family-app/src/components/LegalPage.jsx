@@ -24,7 +24,7 @@ export default function LegalPage({ title, updated, children }) {
 
       <main className="flex-1 px-4 sm:px-6 py-10 sm:py-16">
         <div className="max-w-3xl mx-auto">
-          <span className="badge-blue uppercase tracking-wide">Legal</span>
+          <span className="badge-primary uppercase tracking-wide">Legal</span>
           <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mt-4 mb-2 tracking-tight">
             {title}
           </h1>

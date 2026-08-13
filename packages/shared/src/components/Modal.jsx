@@ -19,17 +19,39 @@ export default function Modal({ open, onClose, title, description, children, foo
 
   useBodyScrollLock(open);
 
+  // Escape closes. Re-subscribing when `onClose` changes identity is both cheap
+  // and necessary — the listener has to call the current one.
   useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = (e) => { if (e.key === 'Escape') onClose?.(); };
     document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
+  /**
+   * Focus moves inside when the dialog opens — and only then.
+   *
+   * This used to share the effect above, so it re-ran whenever `onClose` changed
+   * identity too. Every caller passes an inline arrow or a function declared in
+   * its own body, so that is *every render of the parent* — and the parent
+   * re-renders on every keystroke, because the fields inside are controlled by
+   * its state. Typing a device name went: first character lands, focus is pulled
+   * back to the first focusable element, every character after it goes nowhere,
+   * and the first space activates that element. Which is the ✕ in the header,
+   * because it precedes the content in DOM order. So the dialog closed itself
+   * part-way through the word and threw away what had been typed.
+   *
+   * Depending on `open` alone is the whole fix: opening is the event that should
+   * move focus, and nothing else here is.
+   */
+  useEffect(() => {
+    if (!open) return;
     // The first focusable control inside, falling back to the panel itself.
     const first = panelRef.current?.querySelector(
       'input:not([type="hidden"]), select, textarea, button, [href], [tabindex]:not([tabindex="-1"])'
     );
     (first || panelRef.current)?.focus?.({ preventScroll: true });
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

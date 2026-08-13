@@ -198,6 +198,19 @@ async function syncUsageStats() {
   // blocked after the usage window has rolled over.
   const appMinutes = {};
 
+  /**
+   * When this phone's usage day opened — the same local midnight
+   * `UsageStatsModule` measures `totalTimeInForeground` from.
+   *
+   * Sent as the start of every sample so the server can tell which day a sample
+   * belongs to, which is a question only the device can answer. It also has to
+   * be *stable*: this used to be `now - minutes`, which drifts later every time
+   * the child puts the phone down, so one usage day could report starts either
+   * side of a date boundary and be filed as two.
+   */
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+
   for (const [packageName, data] of Object.entries(stats)) {
     if (data.minutes < 1) continue;
     if (isExcludedPackage(packageName)) continue;
@@ -209,7 +222,7 @@ async function syncUsageStats() {
         appPackage: packageName,
         appName: data.appName || packageName,
         category: 'app_usage',
-        startTime: data.startTime || new Date(Date.now() - data.minutes * 60000).toISOString(),
+        startTime: data.startTime || dayStart.toISOString(),
         endTime: new Date().toISOString(),
         durationMinutes: Math.round(data.minutes),
       });
@@ -253,7 +266,17 @@ async function startLocationTracking() {
   if (!TaskManager.isTaskDefined(LOCATION_TASK)) {
     TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
       if (error || !data?.locations?.length) return;
-      const loc = data.locations[0];
+      /**
+       * The newest fix in the batch, and the time it was actually taken.
+       *
+       * Android holds background location while the phone dozes and releases
+       * the whole run at once, oldest first. This read `locations[0]`, so the
+       * one fix that got reported was the *stalest* one the OS had been sitting
+       * on — and it arrived with no timestamp, so the server stamped it "now".
+       * A phone that woke after half an hour told the parent, as a current
+       * position, where the child had been when it went to sleep.
+       */
+      const loc = data.locations[data.locations.length - 1];
       try {
         // The server derives childId and deviceId from the device token and
         // rejects them in the body, so only the fix itself is sent.
@@ -263,6 +286,7 @@ async function startLocationTracking() {
           accuracy: loc.coords.accuracy,
           speed: loc.coords.speed,
           heading: loc.coords.heading,
+          recordedAt: loc.timestamp ? new Date(loc.timestamp).toISOString() : undefined,
         });
       } catch (err) {
         // Background task: the device is often mid-handover between networks.

@@ -90,8 +90,21 @@ export default function Settings() {
       .catch((err) => setNotifLoadError(errorMessage(err, 'Could not load your notification preferences.')));
   }, []);
 
+  /**
+   * Whether this deployment can take money at all.
+   *
+   * Defaults to `true` and only ever goes false on an explicit answer, so an
+   * older API that does not report the field — or a request that simply fails —
+   * leaves the plan screen exactly as it was. Hiding the way to pay is the more
+   * expensive mistake of the two, so it is never done on a guess.
+   */
+  const [billingAvailable, setBillingAvailable] = useState(true);
+
   useEffect(() => {
     payments.getSubscription().then((r) => setSubscription(r.data)).catch(() => {});
+    authApi.providers()
+      .then((r) => { if (r.data?.billing === false) setBillingAvailable(false); })
+      .catch(() => {});
     loadNotifPrefs();
   }, [loadNotifPrefs]);
 
@@ -382,7 +395,7 @@ export default function Settings() {
                     </p>
                   )}
                 </div>
-                {isPaid && (
+                {isPaid && billingAvailable && (
                   <button onClick={handlePortal} disabled={portalLoading} className="btn-secondary btn-sm shrink-0">
                     {portalLoading ? 'Opening…' : 'Manage billing'}
                   </button>
@@ -393,12 +406,25 @@ export default function Settings() {
                 <p className={`notice mt-4 ${user.trialExpired ? 'notice-error' : 'notice-warning'}`}>
                   <Icon name="warning" size={16} className="mt-0.5" />
                   <span>
+                    {/* Telling a parent to upgrade is only fair when upgrading is
+                        possible. With billing off the sentence would name a button
+                        that is not on the page. */}
                     {user.trialExpired
-                      ? 'Your free trial has expired. Upgrade to keep monitoring your family.'
+                      ? `Your free trial has expired.${billingAvailable ? ' Upgrade to keep monitoring your family.' : ''}`
                       : `Your trial ends ${new Date(user.trialEndsAt).toLocaleDateString()} — ${Math.max(
                         0,
                         Math.ceil((new Date(user.trialEndsAt) - Date.now()) / 86400000)
                       )} days left.`}
+                  </span>
+                </p>
+              )}
+
+              {!billingAvailable && (
+                <p className="notice notice-info mt-4">
+                  <Icon name="info" size={16} className="mt-0.5" />
+                  <span>
+                    Online payment is not available on this deployment yet, so plans
+                    cannot be changed here. Please contact support to change your plan.
                   </span>
                 </p>
               )}
@@ -423,7 +449,7 @@ export default function Settings() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold">{label}</p>
                       {badge && <span className="badge-amber">{badge}</span>}
-                      {isCurrent && <span className="badge-blue ml-auto">Active</span>}
+                      {isCurrent && <span className="badge-primary ml-auto">Active</span>}
                     </div>
 
                     <p className="text-2xl font-bold text-primary-600 mt-2 mb-4">
@@ -446,7 +472,7 @@ export default function Settings() {
                       )}
                     </ul>
 
-                    {!isCurrent && plan !== 'free' && (
+                    {!isCurrent && plan !== 'free' && billingAvailable && (
                       <button
                         onClick={() => handleUpgrade(plan)}
                         disabled={loadingPlan === plan}
@@ -455,7 +481,7 @@ export default function Settings() {
                         {loadingPlan === plan ? 'Redirecting…' : `Upgrade to ${label}`}
                       </button>
                     )}
-                    {isCurrent && isPaid && (
+                    {isCurrent && isPaid && billingAvailable && (
                       <button onClick={handlePortal} disabled={portalLoading} className="btn-secondary btn-block">
                         {portalLoading ? 'Opening…' : 'Manage or cancel'}
                       </button>

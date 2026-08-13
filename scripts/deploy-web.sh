@@ -56,11 +56,29 @@ if [ -z "${VITE_GOOGLE_MAPS_KEY:-}" ]; then
 fi
 # A blank placeholder version reads as a single space.
 VITE_GOOGLE_MAPS_KEY="$(printf '%s' "${VITE_GOOGLE_MAPS_KEY:-}" | tr -d '[:space:]')"
+
+# A placeholder is not a key, and it is worse than no key at all: the page sees a
+# truthy value, loads Google's script, and Google refuses it during
+# authentication — a failure that only `gm_authFailure` reports and that costs a
+# doomed round trip on every visit to Location. An absent key is caught before
+# any of that and states the case plainly.
+#
+# This is not hypothetical. The warning below says `printf 'AIza…'`, and the prod
+# secret held exactly that — the instruction pasted literally, ellipsis and all.
+# Shape rather than a blocklist: a Maps browser key is `AIza` and 35 more from
+# the URL-safe alphabet, so anything else was never going to authenticate.
+if [ -n "$VITE_GOOGLE_MAPS_KEY" ] \
+  && ! printf '%s' "$VITE_GOOGLE_MAPS_KEY" | grep -Eq '^AIza[0-9A-Za-z_-]{35}$'; then
+  warn "Ignoring VITE_GOOGLE_MAPS_KEY — '${VITE_GOOGLE_MAPS_KEY}' is not a Maps browser key (expected AIza + 35 chars)."
+  warn "Fix the value in ${MAPS_SECRET}; the build continues with the map disabled."
+  VITE_GOOGLE_MAPS_KEY=""
+fi
+
 export VITE_GOOGLE_MAPS_KEY
 
 if [ -z "$VITE_GOOGLE_MAPS_KEY" ]; then
   warn "No Google Maps key — the Location page will show 'Map unavailable'."
-  warn "Set one with: printf 'AIza…' | gcloud secrets versions add ${MAPS_SECRET} --data-file=-"
+  warn "Set one with: printf 'AIzaSyEXAMPLE…' | gcloud secrets versions add ${MAPS_SECRET} --data-file=-"
 fi
 
 # The Google OAuth Web client ID, read from the same Terraform run that told the

@@ -35,7 +35,10 @@ const recordLocation = async (req, { childId, deviceId, parentId, fix, touchDevi
 
   const location = await Location.create({
     childId, deviceId, latitude, longitude, accuracy, speed, heading, address,
-    recordedAt: new Date(),
+    // When the phone took the fix, where it credibly said so — a batch released
+    // after a doze can be much older than its arrival. `parseFix` bounds the
+    // claim; anything it will not vouch for falls back to now.
+    recordedAt: fix.recordedAt || new Date(),
   });
 
   if (touchDevice) await Device.update({ lastSeen: new Date() }, { where: { id: deviceId } });
@@ -109,8 +112,10 @@ const setManualLocation = async (req, res, next) => {
       childId: child.id,
       deviceId: device.id,
       parentId: req.user.id,
-      // A position typed in by a parent carries no motion, whatever was sent.
-      fix: { ...fix, speed: null, heading: null },
+      // A position typed in by a parent carries no motion, whatever was sent,
+      // and is true as of now — it is a correction, not an observation the
+      // phone made earlier, so it must not be backdated either.
+      fix: { ...fix, speed: null, heading: null, recordedAt: null },
       touchDevice: false,
     });
 

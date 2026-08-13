@@ -254,8 +254,16 @@ describe('what the sign-in page is told', () => {
     expect(res.status).toBe(200);
     // `maintenance` joined this payload when the console's maintenance toggle
     // was made real — the sign-in page has to know before anyone types a
-    // password. Still an exact match, so a field cannot appear here unnoticed.
-    expect(res.body).toEqual({ password: true, google: true, phone: false, maintenance: false });
+    // password. `billing` joined it so a deployment with no Stripe key does not
+    // draw an Upgrade button; it reads true here because env.setup.js pins a
+    // dummy key to make the mocked Stripe client non-null. Both halves are
+    // asserted against real configuration in billingAvailability.test.js.
+    //
+    // Still an exact match, so a field cannot appear here unnoticed — which is
+    // how both of those arrived deliberately rather than by accident.
+    expect(res.body).toEqual({
+      password: true, google: true, phone: false, maintenance: false, billing: true,
+    });
   });
 
   /**

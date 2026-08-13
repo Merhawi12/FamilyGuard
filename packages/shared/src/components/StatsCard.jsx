@@ -1,6 +1,14 @@
 import Icon from './Icon.jsx';
 
+/**
+ * `primary` follows the app's brand; the rest are the literal colours they name.
+ *
+ * A tile whose icon is only there to be looked at wants `primary`, so it moves
+ * when the brand does. Use a named colour when the colour is the message —
+ * alerts are red because they are alerts, not because red was next in the list.
+ */
 const COLORS = {
+  primary: 'bg-primary-50 text-primary-600',
   blue: 'bg-blue-50 text-blue-600',
   green: 'bg-green-50 text-green-600',
   red: 'bg-red-50 text-red-600',

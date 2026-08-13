@@ -502,6 +502,97 @@ describe('Usage-stats ingestion is idempotent per app/day (batch A regression)',
     expect(rows[0].durationMinutes).toBe(25);
   });
 
+  /**
+   * The case the test above cannot see, because it posts no `startTime` at all.
+   *
+   * The device always sends one. `UsageStatsModule.getUsageStats` measures from
+   * the *phone's* local midnight and reports only a running total — no start
+   * instant — so `monitoring.js` synthesises `startTime` as `now - minutes`.
+   * The server then looked for today's row using *its own* midnight, and Cloud
+   * Run keeps UTC while the families are in Canada. From roughly 20:00 local
+   * the server's day has already rolled over, so that synthesised instant is
+   * yesterday by the server's clock, the lookup misses, and every sync from
+   * then until the child stops using the phone appends another row.
+   *
+   * `getDailySummary` sums `durationMinutes` over the rows it finds, so the
+   * parent's screen-time report grew by the whole day's total every fifteen
+   * minutes, every evening — the one number the product exists to report.
+   */
+  it('folds the evening syncs onto one row when the server day has already rolled over', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+    const device = await createDevice(child.id);
+    const token = deviceToken(device);
+
+    // Anchored to the server's own midnight so this is the same test whatever
+    // time of day it runs at: the phone's usage window opened before it.
+    const deviceDayStart = new Date();
+    deviceDayStart.setHours(0, 0, 0, 0);
+    deviceDayStart.setMinutes(deviceDayStart.getMinutes() - 90);
+
+    const post = (durationMinutes, startTime) =>
+      request(app)
+        .post('/api/devices/me/activity')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          appPackage: 'com.tiktok',
+          appName: 'TikTok',
+          category: 'app_usage',
+          durationMinutes,
+          startTime: startTime.toISOString(),
+          endTime: new Date().toISOString(),
+        });
+
+    // Three background syncs of one usage day. The synthesised start drifts
+    // later whenever the child puts the phone down, which is why it cannot be
+    // matched exactly and has to be bucketed.
+    await post(140, deviceDayStart);
+    await post(155, new Date(deviceDayStart.getTime() + 4 * 60000));
+    await post(150, new Date(deviceDayStart.getTime() + 9 * 60000));
+
+    const rows = await ActivityLog.findAll({
+      where: { childId: child.id, appPackage: 'com.tiktok', category: 'app_usage' },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].durationMinutes).toBe(155);
+  });
+
+  it('starts a new row when the phone rolls over into its next usage day', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+    const device = await createDevice(child.id);
+    const token = deviceToken(device);
+
+    const post = (durationMinutes, startTime) =>
+      request(app)
+        .post('/api/devices/me/activity')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          appPackage: 'com.tiktok',
+          appName: 'TikTok',
+          category: 'app_usage',
+          durationMinutes,
+          startTime: startTime.toISOString(),
+        });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    await post(220, yesterday);
+    await post(6, today);
+
+    // Two days, two rows — and yesterday's total is not carried into today by
+    // the `Math.max` that stops a partial sync shrinking the current day.
+    const rows = await ActivityLog.findAll({
+      where: { childId: child.id, appPackage: 'com.tiktok', category: 'app_usage' },
+      order: [['startTime', 'ASC']],
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.durationMinutes)).toEqual([220, 6]);
+  });
+
   it('still appends discrete non-usage events (e.g. web visits)', async () => {
     const parent = await createUser();
     const child = await createChild(parent.id);

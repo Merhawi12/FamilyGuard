@@ -70,6 +70,40 @@ describe('an unsupplied secret reads as unconfigured', () => {
     expect(env.email.smtp.pass).toBe('');
   });
 
+  /*
+   * The second time this happened, the space was not the problem — the secret
+   * had a real version, holding the template's own words. Production ran for
+   * over a week with SMTP_USER set to `your-smtp-username`: the host was real,
+   * every check passed, and the relay answered `535 Authentication failed` to
+   * every verification and reset email. A value nobody supplied is unsupplied
+   * whether it arrives as a space or as a sentence telling you to replace it.
+   */
+  it('treats a template placeholder username as no username at all', () => {
+    const { env } = load({
+      EMAIL_PROVIDER: 'smtp',
+      SMTP_HOST: 'smtp-relay.brevo.com',
+      SMTP_USER: 'your-smtp-username',
+      SMTP_PASS: 'your-smtp-password',
+    });
+
+    expect(env.email.smtp.user).toBe('');
+    expect(env.email.smtp.pass).toBe('');
+  });
+
+  it('leaves a credential that merely starts with a word alone', () => {
+    // The placeholder pattern anchors on `your-` / `your_`, so an ordinary
+    // credential is not blanked by looking vaguely like one.
+    const { env } = load({
+      EMAIL_PROVIDER: 'smtp',
+      SMTP_HOST: 'smtp-relay.brevo.com',
+      SMTP_USER: 'yourcompany@parentix.ca',
+      SMTP_PASS: 'xsmtpsib-abc123',
+    });
+
+    expect(env.email.smtp.user).toBe('yourcompany@parentix.ca');
+    expect(env.email.smtp.pass).toBe('xsmtpsib-abc123');
+  });
+
   it('treats whitespace-only VAPID keys as absent, so push reports itself unavailable', () => {
     const { env } = load({ VAPID_PUBLIC_KEY: ' ', VAPID_PRIVATE_KEY: ' ' });
 

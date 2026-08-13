@@ -64,6 +64,43 @@ describe('POST /api/locations — coordinate validation', () => {
     expect(res.body.accuracy).toBeNull();
   });
 
+  /**
+   * When the fix was taken, not when it happened to arrive.
+   *
+   * Android buffers background location while the phone is dozing and hands the
+   * whole batch over when it next wakes the app, which can be many minutes
+   * later. Stamping those with the moment the request landed makes the map claim
+   * a child is somewhere they left half an hour ago, and dates every point of a
+   * recovered backlog to the same instant — the one case where the timestamp is
+   * the whole value of the record.
+   */
+  it('records when the fix was taken, not when it arrived', async () => {
+    const takenAt = new Date(Date.now() - 12 * 60 * 1000);
+    const res = await post({ latitude: 45, longitude: -75, recordedAt: takenAt.toISOString() });
+
+    expect(res.status).toBe(201);
+    expect(new Date(res.body.recordedAt).getTime()).toBe(takenAt.getTime());
+  });
+
+  it.each([
+    ['a time in the future', new Date(Date.now() + 60 * 60 * 1000).toISOString()],
+    ['a fix older than a day', new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString()],
+    ['a date it cannot parse', 'last tuesday'],
+    ['a number', 17],
+  ])('falls back to arrival time for %s', async (_label, recordedAt) => {
+    // A device clock is not evidence. Anything outside the window a genuinely
+    // delayed fix could occupy is treated as absent rather than trusted, so a
+    // wrong clock cannot reorder a child's history or park a point in the
+    // future where the map would keep showing it as the latest one.
+    const before = Date.now();
+    const res = await post({ latitude: 45, longitude: -75, recordedAt });
+
+    expect(res.status).toBe(201);
+    const stored = new Date(res.body.recordedAt).getTime();
+    expect(stored).toBeGreaterThanOrEqual(before - 1000);
+    expect(stored).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
   it('keeps the geofence working, which NaN silently disabled', async () => {
     const parent = await premiumParent();
     const kid = await createChild(parent.id);

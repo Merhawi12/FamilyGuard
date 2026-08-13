@@ -48,7 +48,13 @@ const devOrigin = (fallback) => (isProduction ? '' : fallback);
 const configured = (value) => {
   const raw = String(value || '').trim();
   if (!raw) return '';
-  return /REPLACE_WITH|YOUR_[A-Z_]*(KEY|SECRET|ID)|^changeme$|^xxx+$/i.test(raw) ? '' : raw;
+  // `^your[-_]` is here because the shape a placeholder takes is whatever the
+  // template happened to write, not a convention: production ran for over a week
+  // with SMTP_USER literally `your-smtp-username`, which the underscore-and-
+  // SECRET/KEY/ID form above does not match. Every verification and reset email
+  // failed 535 at send time, one field away from a boot check that exists to
+  // catch exactly this.
+  return /REPLACE_WITH|YOUR_[A-Z_]*(KEY|SECRET|ID)|^your[-_]|^changeme$|^xxx+$/i.test(raw) ? '' : raw;
 };
 
 /**
@@ -68,8 +74,12 @@ const configured = (value) => {
  * arrives, and nothing says so.
  *
  * Trimming restores the distinction between "not set up" and "set up wrong".
+ *
+ * It runs `configured` for the same reason rather than trimming alone: a secret
+ * that was created but never filled in carries the template's placeholder, and
+ * a placeholder is no more a credential than a space is. Both are "not set up".
  */
-const secret = (value) => String(value ?? '').trim();
+const secret = (value) => configured(String(value ?? '').trim());
 
 /** Normalises a VAPID contact to the `mailto:`/`https:` form push services require. */
 const pushSubject = (value) => {
@@ -423,6 +433,28 @@ const assertProductionConfig = () => {
    * makes this check able to see it.
    */
   if (!env.email.smtp.host) missing.push('SMTP_HOST (production cannot deliver verification or reset email without it)');
+
+  /**
+   * And the credentials, for the same reason — checking only the host is what
+   * let this happen a second time.
+   *
+   * A host on its own passes every check in this file and then fails at the
+   * relay with `535 Authentication failed`, once per email, forever. That is
+   * indistinguishable from working: `/api/health` is green, registration
+   * answers 201, and the parent waits for a code that was refused at the door.
+   * The first check caught an empty host; this one catches an empty login,
+   * which is the same outage with a different error string.
+   *
+   * A relay that authenticates by IP rather than by password does exist — an
+   * internal Postfix, a Workspace restricted relay — and would be failed
+   * wrongly here. That is the trade taken deliberately: this platform sends
+   * through Brevo, and a deployment that genuinely needs anonymous relay can
+   * say so by setting EMAIL_PROVIDER to something other than 'smtp'.
+   */
+  if (env.email.provider === 'smtp') {
+    if (!env.email.smtp.user) missing.push('SMTP_USER (the relay refuses every message without it)');
+    if (!env.email.smtp.pass) missing.push('SMTP_PASS (the relay refuses every message without it)');
+  }
 
   if (missing.length) {
     throw new Error(`Refusing to start: missing or invalid configuration → ${missing.join(', ')}`);

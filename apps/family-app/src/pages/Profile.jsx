@@ -144,7 +144,7 @@ export default function Profile() {
           <p className="text-lg font-semibold text-gray-900 truncate">{user?.name}</p>
           <p className="text-sm text-gray-500 truncate">{user?.email}</p>
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-2.5">
-            <span className="badge-blue">{planLabel(user?.plan)}</span>
+            <span className="badge-primary">{planLabel(user?.plan)}</span>
             {user?.mfaEnabled && (
               <span className="badge-green inline-flex items-center gap-1">
                 <Icon name="shieldCheck" size={12} strokeWidth={2.2} /> Protected

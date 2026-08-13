@@ -582,18 +582,32 @@ export default function Children() {
                 required
               />
             </label>
-            <label className="field">
-              <span className="field-label">Device type</span>
-              <select
-                className="input"
-                value={deviceForm.type}
-                onChange={(e) => setDeviceForm({ ...deviceForm, type: e.target.value })}
-              >
-                {DEVICE_TYPES.map(({ value, label }) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </label>
+            {/* A dropdown holding one option is not a choice, and reads as a
+                broken control: it opens, shows the thing already selected, and
+                closes having changed nothing. The sign-in screen hides its
+                method tabs on the same rule. Only Android can be linked today,
+                so the form says so instead of offering to pick it. The
+                condition, rather than deleting the field, is what makes the
+                dropdown come back on its own the day a second type is added. */}
+            {DEVICE_TYPES.length > 1 ? (
+              <label className="field">
+                <span className="field-label">Device type</span>
+                <select
+                  className="input"
+                  value={deviceForm.type}
+                  onChange={(e) => setDeviceForm({ ...deviceForm, type: e.target.value })}
+                >
+                  {DEVICE_TYPES.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <p className="text-sm text-gray-500">
+                Device type:{' '}
+                <span className="font-medium text-gray-700">{DEVICE_TYPES[0].label}</span>
+              </p>
+            )}
             <button
               type="submit"
               className="btn-primary btn-block"

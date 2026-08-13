@@ -80,9 +80,18 @@ export default function Sidebar({ open, onClose, badges = {} }) {
     if (!open) return undefined;
     const onKeyDown = (e) => { if (e.key === 'Escape') onClose?.(); };
     document.addEventListener('keydown', onKeyDown);
-    panelRef.current?.focus({ preventScroll: true });
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [open, onClose]);
+
+  // Separate from the listener above for the reason described in Modal: `onClose`
+  // is an inline arrow at the call site, so a shared effect re-ran on every
+  // render of the parent and dragged focus back to the panel each time. There
+  // are no text fields in a nav drawer, so this never ate a keystroke — it
+  // interrupted keyboard navigation instead, which is the same bug being quieter.
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.focus({ preventScroll: true });
+  }, [open]);
 
   // The drawer is always full width. `collapsed` is a desktop preference, and
   // applying it below `lg` would render an overlay of unlabelled icons.
@@ -160,12 +169,30 @@ export default function Sidebar({ open, onClose, badges = {} }) {
                     ${open ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
                     ${railCollapsed ? 'lg:w-[4.75rem]' : 'lg:w-64'}`}
       >
-        <div className={`flex items-center gap-2 px-4 h-16 shrink-0 border-b border-gray-100 ${
+        {/*
+          `lg:h-20`, and Layout's header matches it.
+
+          The two bars sit side by side above the fold and their bottom borders
+          read as one rule across the app, so the height of this one is not a
+          local decision — grow it alone and the line steps down at the sidebar
+          edge. Below `lg` there is no such pair: this is a drawer floating over
+          the page, so it keeps the shorter header and gives the space back to
+          the content on the screen that has least of it.
+        */}
+        <div className={`flex items-center gap-2 px-4 h-16 lg:h-20 shrink-0 border-b border-gray-100 ${
           railCollapsed ? 'lg:px-0 lg:justify-center' : 'justify-between'
         }`}
         >
           <NavLink to="/dashboard" end onClick={onClose} className="flex items-center min-w-0" aria-label="Parentix dashboard">
-            <img src="/logo.png" alt="Parentix" className="h-9 w-auto shrink-0" />
+            {/*
+              The logo is a square stacked lockup — shield over wordmark — with
+              roughly a fifth of its height as transparent margin baked into the
+              PNG. At `h-9` that left the word "Parentix" about six pixels tall:
+              present, unreadable, and the first thing anyone sees. Height has to
+              buy the whole lockup, not just the mark, which is why this is a
+              large jump rather than a nudge.
+            */}
+            <img src="/logo.png" alt="Parentix" className="h-12 lg:h-16 w-auto shrink-0" />
           </NavLink>
           <button onClick={onClose} className="icon-btn lg:hidden -mr-2" aria-label="Close menu">
             <Icon name="close" />

@@ -37,7 +37,7 @@ export default function ProfileMenu() {
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 truncate">{user?.name}</p>
               <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-              <span className="badge-blue mt-1.5">{planLabel(user?.plan)}</span>
+              <span className="badge-primary mt-1.5">{planLabel(user?.plan)}</span>
             </div>
           </div>
 

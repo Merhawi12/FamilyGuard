@@ -259,10 +259,53 @@ const api = async (method, p, { token, body } = {}) => {
   return { status: res.status, data };
 };
 
+/**
+ * Console noise that is about this machine rather than about the page.
+ *
+ * A Google Maps *browser* key is public by design — it ships in the bundle — so
+ * the only thing protecting it is an HTTP-referrer allowlist naming the
+ * production hostnames. A correctly restricted key therefore refuses
+ * `http://127.0.0.1:5312` with `RefererNotAllowedMapError`, which made the
+ * Location page fail here for three checks on every developer who had a real
+ * key in `apps/family-app/.env` and pass for everyone who did not. That is the
+ * harness grading the key's restrictions, not the product, and it graded the
+ * *safer* configuration as broken.
+ *
+ * Only these two are forgiven, and only these two: the page's own behaviour
+ * without a usable key — the `mapsKeyMissing` notice in Location.jsx — is still
+ * rendered and still asserted.
+ */
+const ENVIRONMENTAL_CONSOLE_NOISE = [
+  'RefererNotAllowedMapError',
+  'InvalidKeyMapError',
+];
+
+/**
+ * How a page says *it* fell over, as opposed to something on it.
+ *
+ * This used to test for "Something went wrong", which is the first line of the
+ * shared ErrorBoundary — and also, word for word, the first line of the overlay
+ * Google paints inside the map container when it refuses a key. So the Location
+ * page failed here with nothing wrong: the sidebar, the current-position card,
+ * the safe-zone panel and the empty-state notice all rendered, and one third of
+ * one card said "Oops! Something went wrong." because a browser key restricted
+ * to production hostnames will not serve a map to 127.0.0.1.
+ *
+ * The second sentence of the boundary is ours alone, so matching that asks the
+ * question the check meant to ask: did the app replace this page with the
+ * failure panel?
+ */
+const CRASHED = 'An unexpected error occurred';
+
 /** Everything a page did wrong, collected so a silent failure cannot pass. */
 const watch = (page, label) => {
   const problems = [];
-  page.on('console', (m) => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    const text = m.text();
+    if (ENVIRONMENTAL_CONSOLE_NOISE.some((n) => text.includes(n))) return;
+    problems.push(`console: ${text}`);
+  });
   page.on('pageerror', (e) => problems.push(`exception: ${e.message}`));
   page.on('requestfailed', (r) => {
     const why = r.failure()?.errorText || '';
@@ -519,11 +562,114 @@ try {
         });
       }
       const text = await page.locator('body').innerText();
-      const rendered = text.length > 40 && !text.includes('Something went wrong');
+      const rendered = text.length > 40 && !text.includes(CRASHED);
       check(`${label} renders`, rendered, text.slice(0, 90).replace(/\n/g, ' '));
       check(`${label} has no runtime errors`, w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
       await page.close();
     }
+  }
+
+  /*
+   * The introduction that runs before sign-in on a fresh install.
+   *
+   * Two things make it worth checking rather than eyeballing: it is the first
+   * thing an installed app shows, so a throw here is a blank launch with no way
+   * past it; and its whole contract is that it appears *once*. A splash that
+   * forgets it has been seen is worse than no splash.
+   */
+  step('Family app — the introduction shows once and lets you out of it');
+  {
+    // Its own phone-sized page rather than the shared `phone` context, which is
+    // not built until much later in this file — and a splash is a phone screen,
+    // so checking it at 1280px wide would measure the wrong thing.
+    const page = await browser.newPage({
+      viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
+    });
+    await page.goto(`${FAMILY}/welcome`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(400);
+
+    const w = watch(page, 'Welcome');
+    const first = (await page.locator('h1').innerText()).trim();
+    check('it opens on the brand card', first === 'Parentix', first);
+
+    if (process.env.BROWSER_E2E_SHOTS) {
+      mkdirSync(process.env.BROWSER_E2E_SHOTS, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.BROWSER_E2E_SHOTS, 'welcome.png'), fullPage: true });
+    }
+
+    // Every dot has to be reachable by a finger, which is the reason the 8px
+    // indicator sits inside a 44px button rather than being one.
+    const dots = page.locator('[role="tab"]');
+    check('there is one dot per card', await dots.count() === 3, String(await dots.count()));
+    const tooSmall = [];
+    for (let i = 0; i < await dots.count(); i += 1) {
+      const box = await dots.nth(i).boundingBox();
+      if (!box || box.width < 44 || box.height < 44) tooSmall.push(`${Math.round(box?.width || 0)}x${Math.round(box?.height || 0)}`);
+    }
+    check('every dot is a 44px target', tooSmall.length === 0, tooSmall.join(', '));
+
+    await dots.nth(2).click();
+    await page.waitForTimeout(250);
+    const third = (await page.locator('h1').innerText()).trim();
+    check('the dots page the carousel', third !== 'Parentix' && third.length > 0, third);
+
+    // The point of the screen: it must not be a toll gate.
+    check('Get Started is offered from every card, not only the last',
+      await page.locator('button:has-text("Get Started")').isVisible());
+    await page.locator('button:has-text("Get Started")').click();
+    await page.waitForURL(/\/login/, { timeout: 5000 }).catch(() => {});
+    check('Get Started reaches sign-in', /\/login/.test(page.url()), page.url());
+
+    // And having been through it once, a relaunch must not show it again.
+    const seen = await page.evaluate(() => localStorage.getItem('px_welcome_seen'));
+    check('finishing it is remembered, so it does not greet the parent twice', seen === '1', String(seen));
+
+    check('the introduction has no runtime errors', w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
+    await page.close();
+  }
+
+  /*
+   * The third way the map can fail, which the page used to have no state for.
+   *
+   * A missing key is caught before loading, and a script that never arrives
+   * shows up as `loadError`. But a key that is present, well-formed and live and
+   * is then refused during authentication — the ordinary result of a browser key
+   * whose referrer allowlist names the production hostnames, exactly as it
+   * should — leaves `loadError` null and `isLoaded` true. The page believed the
+   * map was fine while Google painted "Oops! Something went wrong." inside it,
+   * and went on offering "Safe zone", which drops the parent into a mode whose
+   * only instruction is to tap a map that is not there.
+   *
+   * Driven through `gm_authFailure` because that is exactly how Google reports
+   * it, so no key is needed to exercise the behaviour and the check runs the
+   * same whether or not this machine has one.
+   */
+  step('Family app — the Location page owns the failure when Google refuses the key');
+  {
+    const page = await browser.newPage();
+    await page.goto(`${FAMILY}/login`);
+    await page.evaluate((t) => localStorage.setItem('fg_token', t), parentToken);
+    await page.goto(`${FAMILY}/dashboard/location`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(700);
+
+    const hookInstalled = await page.evaluate(() => typeof window.gm_authFailure === 'function');
+    check('the page registers Google’s auth-failure hook', hookInstalled);
+
+    await page.evaluate(() => window.gm_authFailure());
+    await page.waitForTimeout(300);
+
+    const body = await page.locator('body').innerText();
+    check(
+      'it names the refusal itself rather than leaving Google’s overlay to explain it',
+      /Google rejected the map key/i.test(body),
+      body.slice(0, 120).replace(/\s+/g, ' '),
+    );
+
+    const zoneButton = page.locator('button:has-text("Safe zone")');
+    const closedOff = (await zoneButton.count()) === 0 || await zoneButton.first().isDisabled();
+    check('it stops offering to place a zone on a map that is not there', closedOff);
+
+    await page.close();
   }
 
   // ── The two dashboards built on the new pipelines ─────────────────────────
@@ -805,12 +951,35 @@ try {
     const stillLinked = await api('GET', '/devices/me/rules', { token: controlDeviceToken });
     check('the linked device is untouched by the rename', stillLinked.status === 200);
 
-    // Only the platform that has a client is offered for a new link.
+    // Only the platform that has a client can be linked — and because that is
+    // exactly one, the sheet states it rather than offering a dropdown whose
+    // only option is the one already selected.
     await page.click('button:has-text("Link device")');
     await page.waitForTimeout(400);
-    const types = await page.locator('label:has-text("Device type") select option').allInnerTexts();
-    check('only Android is offered, because it is the only child app that exists',
-      types.length === 1 && /android/i.test(types[0]), types.join(', '));
+    const typeSelects = await page.locator('label:has-text("Device type") select').count();
+    const linkForm = (await page.locator('form:has(button:has-text("Generate code"))').innerText()).replace(/\s+/g, ' ');
+    check('the one supported platform is stated, not offered as a single-option dropdown',
+      typeSelects === 0 && /android phone or tablet/i.test(linkForm), `selects=${typeSelects} · ${linkForm.slice(0, 90)}`);
+
+    /*
+     * Typed rather than filled, which is the entire point of these four lines.
+     *
+     * `fill()` sets the value in one assignment and would have gone on passing
+     * throughout: the bug only appears between keystrokes. Modal's focus effect
+     * listed `onClose` in its dependency array, and every caller passes a fresh
+     * function identity on each render — so each character re-ran it and pulled
+     * focus to the first focusable element, the ✕ in the header. The first
+     * character landed, the rest went nowhere, and the space in a name like
+     * "Sarah's Phone" activated that button and closed the sheet with the work
+     * inside it.
+     */
+    const deviceNameField = page.locator('label:has-text("Device name") input');
+    await deviceNameField.click();
+    await page.keyboard.type("Sarah's Phone", { delay: 15 });
+    const typedValue = await deviceNameField.inputValue();
+    check('every character of a typed device name reaches the field', typedValue === "Sarah's Phone", typedValue);
+    check('a name containing a space does not close the sheet',
+      await page.locator('[role="dialog"]').count() > 0);
 
     /*
      * The sheet has to notice the phone.
@@ -1331,7 +1500,7 @@ try {
         });
       }
       const text = await page.locator('body').innerText();
-      check(`${label} renders`, text.length > 30 && !text.includes('Something went wrong'), text.slice(0, 80).replace(/\n/g, ' '));
+      check(`${label} renders`, text.length > 30 && !text.includes(CRASHED), text.slice(0, 80).replace(/\n/g, ' '));
       check(`${label} has no runtime errors`, w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
       await page.close();
     }

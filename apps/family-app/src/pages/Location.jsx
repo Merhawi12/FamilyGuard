@@ -7,9 +7,14 @@ import {
 } from '@parentix/shared';
 import ChildTabs from '../components/ChildTabs';
 import PageIntro from '../components/PageIntro';
+import { PRIMARY } from '../brand';
+import { mapsAuthFailed, onMapsAuthFailure } from '../services/mapsAuth';
 
+/* Home is the brand teal because it is the zone every family has and the one
+   the map is usually centred on; the other two only have to stay clearly
+   distinct from it and from each other. */
 const ZONE_COLORS = {
-  home: '#2563eb',
+  home: PRIMARY,
   school: '#10b981',
   custom: '#8b5cf6',
 };
@@ -57,6 +62,12 @@ export default function Location() {
   const mapsKeyMissing = !MAPS_API_KEY;
   const { isLoaded, loadError } = useLoadScript({ googleMapsApiKey: MAPS_API_KEY });
 
+  // A key that is present and still refused — the usual cause being a referrer
+  // allowlist that does not cover this host. Neither flag above sees it; see
+  // services/mapsAuth.js.
+  const [mapsRefused, setMapsRefused] = useState(mapsAuthFailed);
+  useEffect(() => onMapsAuthFailure(setMapsRefused), []);
+
   const [childList, setChildList] = useState([]);
   const [selected, setSelected] = useState(null);
   const [currentLoc, setCurrentLoc] = useState(null);
@@ -74,6 +85,11 @@ export default function Location() {
   const [simulating, setSimulating] = useState(false);
   const [simForm, setSimForm] = useState({ address: '', lat: '', lng: '' });
   const [error, setError] = useState('');
+
+  // Google can refuse the key after the parent has already tapped "Safe zone",
+  // which leaves them in a mode whose only instruction is to tap a map that is
+  // no longer there. Drop out of it rather than let the banner keep asking.
+  useEffect(() => { if (mapsRefused) setPickingOnMap(false); }, [mapsRefused]);
 
   const mapRef = useRef(null);
   const { socket } = useSocket();
@@ -321,7 +337,7 @@ export default function Location() {
     );
   }
 
-  const mapUnavailable = mapsKeyMissing || loadError;
+  const mapUnavailable = mapsKeyMissing || loadError || mapsRefused;
 
   return (
     <div className="space-y-5">
@@ -373,6 +389,12 @@ export default function Location() {
                     title="Map unavailable"
                     description="No Google Maps key is configured for this deployment. Everything below still works."
                   />
+                ) : mapsRefused ? (
+                  <EmptyState
+                    icon="warning"
+                    title="Google rejected the map key"
+                    description={`The key is configured but not accepted for ${window.location.host}. Its allowed referrers, the Maps JavaScript API, or billing need attention in the Google Cloud console. Safe zones still work by address or coordinates.`}
+                  />
                 ) : loadError ? (
                   <EmptyState
                     icon="warning"
@@ -408,7 +430,7 @@ export default function Location() {
                           icon={{
                             url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
                               <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
-                                <circle cx="20" cy="20" r="17" fill="#2563eb" stroke="white" stroke-width="3"/>
+                                <circle cx="20" cy="20" r="17" fill="${PRIMARY}" stroke="white" stroke-width="3"/>
                                 <text x="20" y="26" text-anchor="middle" font-family="sans-serif" font-size="17" fill="white">${selected.name[0].toUpperCase()}</text>
                               </svg>`)}`,
                             scaledSize: { width: 40, height: 40 },
@@ -713,17 +735,23 @@ export default function Location() {
                 onChange={(e) => setSimForm({ ...simForm, address: e.target.value })}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); geocodeAddress(); } }}
               />
+              {/* Geocoding runs on the same key, so a key Google refused cannot
+                  look an address up either. */}
               <button
                 type="button"
                 onClick={geocodeAddress}
-                disabled={simulating || !simForm.address.trim() || !isLoaded || mapsKeyMissing}
+                disabled={simulating || !simForm.address.trim() || !isLoaded || mapsKeyMissing || mapsRefused}
                 className="btn-primary px-4 shrink-0"
               >
                 {simulating ? '…' : 'Find'}
               </button>
             </div>
-            {mapsKeyMissing && (
-              <span className="field-hint">Address lookup needs a Google Maps key; use coordinates instead.</span>
+            {(mapsKeyMissing || mapsRefused) && (
+              <span className="field-hint">
+                {mapsRefused
+                  ? 'Address lookup uses the same key Google refused; use coordinates instead.'
+                  : 'Address lookup needs a Google Maps key; use coordinates instead.'}
+              </span>
             )}
           </label>
 
