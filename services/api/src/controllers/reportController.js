@@ -23,8 +23,22 @@ const getDailySummary = async (req, res) => {
   if (Number.isNaN(target.getTime())) {
     return res.status(400).json({ error: 'date must be a valid date, for example 2026-08-09' });
   }
-  const start = new Date(target); start.setHours(0, 0, 0, 0);
-  const end = new Date(target); end.setHours(23, 59, 59, 999);
+  /**
+   * The day is bounded in UTC, which is the clock every other report is keyed
+   * on: `getWeeklySummary` buckets by `startTime.toISOString()`, and the device
+   * files a usage day under the UTC instant of its own local midnight.
+   *
+   * `setHours` is the server's *local* clock. On Cloud Run that is UTC and the
+   * two agree, but on any other machine they do not — a developer asking for
+   * 12 August got the window their own timezone puts around midnight UTC, which
+   * is a different day's rows from the one the weekly chart shows under the
+   * same label. Two reports of one day disagreeing is worse than either being
+   * wrong, so both are stated on the same clock.
+   */
+  const start = new Date(Date.UTC(
+    target.getUTCFullYear(), target.getUTCMonth(), target.getUTCDate(),
+  ));
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
 
   const logs = await ActivityLog.findAll({
     where: { childId: child.id, startTime: { [Op.between]: [start, end] } },

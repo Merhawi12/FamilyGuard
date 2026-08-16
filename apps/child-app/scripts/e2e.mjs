@@ -206,7 +206,21 @@ const run = async () => {
   step('Usage is reported to the parent');
   platformState.usageStats = {
     'com.example.game': { appName: 'Example Game', minutes: 25 },
-    'com.parentix': { appName: 'Parentix', minutes: 99 }, // must be excluded
+    /*
+     * `com.parentix.child` is this app's real `applicationId` — see
+     * android/app/build.gradle. The exclusion list said `com.parentix`, which is
+     * the *Kotlin package* the native modules live in and is not any installed
+     * app, so it never matched anything and Parentix counted itself: every
+     * minute a child spent on the screen that tells them how much time they have
+     * left was charged against that time, and the Permissions and Settings
+     * screens the app sends them to pushed them towards a lock.
+     *
+     * This check could not see it, because it asserted on the one package name
+     * the phone never reports. Both are exercised now — the real id, and the
+     * prefix a future sibling build would carry.
+     */
+    'com.parentix.child': { appName: 'Parentix', minutes: 99 },
+    'com.parentix': { appName: 'Parentix (legacy id)', minutes: 40 },
   };
   await stubs.taskManagerStub.__run('fg-monitoring-task');
 
@@ -214,9 +228,58 @@ const run = async () => {
   const games = activity.data.rows.filter((r) => r.appPackage === 'com.example.game');
   check('the parent sees the reported app usage', games.length === 1, JSON.stringify(activity.data.count));
   check('the monitoring app excludes itself from the totals',
-    !activity.data.rows.some((r) => r.appPackage === 'com.parentix'));
+    !activity.data.rows.some((r) => String(r.appPackage || '').startsWith('com.parentix')),
+    JSON.stringify(activity.data.rows.map((r) => r.appPackage)));
   check('the device reports its own screen-time total', monitoring.getMonitoringStatus().todayMinutes === 25,
     String(monitoring.getMonitoringStatus().todayMinutes));
+
+  // ── A new app on the phone ─────────────────────────────────────────────────
+  /*
+   * `app_installed` was in the platform's alert catalogue with nothing behind
+   * it: the server listened for an `alert:app_installed` the device had no way
+   * to send, because detecting an install meant a PACKAGE_ADDED receiver nobody
+   * had written. It is answered from the usage sync instead — the one thing on
+   * this device that already knows which apps the child opens — and the alert is
+   * labelled for what that really detects.
+   *
+   * The first sync above is the baseline and must have said nothing; a phone
+   * that has just been linked would otherwise greet its parent with an alert per
+   * app in its first quarter of an hour.
+   */
+  step('A new app on the phone reaches the parent, and the first sync does not');
+  check('the baseline sync announced nothing',
+    parentEvents.alerts.filter((a) => a.type === 'app_installed').length === 0,
+    JSON.stringify(parentEvents.alerts.map((a) => a.type)));
+
+  platformState.usageStats = {
+    'com.example.game': { appName: 'Example Game', minutes: 30 },
+    'com.example.newthing': { appName: 'New Thing', minutes: 4 },
+  };
+  await stubs.taskManagerStub.__run('fg-monitoring-task');
+
+  const newApp = await waitFor(
+    () => parentEvents.alerts.find((a) => a.type === 'app_installed'),
+    'the new-app alert'
+  );
+  check('the parent is told about an app the phone has not seen before', !!newApp);
+  check('the alert names the app rather than its package',
+    newApp.message.includes('New Thing'), newApp.message);
+
+  // An app already in the baseline is not news, however much it is used.
+  const seenBefore = parentEvents.alerts.filter((a) => a.type === 'app_installed').length;
+  platformState.usageStats = {
+    'com.example.game': { appName: 'Example Game', minutes: 45 },
+    'com.example.newthing': { appName: 'New Thing', minutes: 20 },
+  };
+  await stubs.taskManagerStub.__run('fg-monitoring-task');
+  await new Promise((r) => setTimeout(r, 400));
+  check('an app already seen is not announced again',
+    parentEvents.alerts.filter((a) => a.type === 'app_installed').length === seenBefore,
+    String(parentEvents.alerts.filter((a) => a.type === 'app_installed').length));
+
+  // Restore the fixture the sections below expect.
+  platformState.usageStats = { 'com.example.game': { appName: 'Example Game', minutes: 25 } };
+  await stubs.taskManagerStub.__run('fg-monitoring-task');
 
   // ── Screen-time limit: apply and release ───────────────────────────────────
   step('The screen-time limit applies, and releases the next day');
@@ -514,20 +577,21 @@ const run = async () => {
   check('a number in another format still matches', contactsSvc.isApprovedNumber('+1-555-010-0199') === true);
   check('an unapproved number is not recognised', contactsSvc.isApprovedNumber('5559999999') === false);
 
-  {
-    const before = parentEvents.alerts.filter((a) => a.type === 'unknown_contact').length;
-    check('the policy allows an approved caller', contactsSvc.checkIncomingContact('5550100199') === true);
-    await new Promise((r) => setTimeout(r, 300));
-    check('an approved caller raises no alert',
-      parentEvents.alerts.filter((a) => a.type === 'unknown_contact').length === before);
-
-    check('the policy rejects an unknown caller', contactsSvc.checkIncomingContact('5557654321') === false);
-    const unknown = await waitFor(
-      () => parentEvents.alerts.find((a) => a.type === 'unknown_contact'),
-      'the unknown-contact alert'
-    );
-    check('an unknown caller alerts the parent', !!unknown);
-  }
+  /*
+   * There is no caller check any more, and this is where it used to be asserted.
+   *
+   * `checkIncomingContact` matched a number against the list and raised
+   * `unknown_contact`. It passed here — because this harness called it directly —
+   * and in the product nothing ever did: seeing a caller's number needs
+   * READ_CALL_LOG, and seeing a text needs RECEIVE_SMS, both Play-restricted and
+   * both refused on this product. So the suite was proving a policy the phone had
+   * no way to apply, on a screen that promised parents it was applied.
+   *
+   * What is left below is what the list is really for: the parent's record, kept
+   * in step on the device, and shown to the child.
+   */
+  check('no caller-matching entry point survives for a caller nothing supplies',
+    typeof contactsSvc.checkIncomingContact === 'undefined');
 
   // Un-approving must take the contact off the device, not merely grey it out
   // in the dashboard.

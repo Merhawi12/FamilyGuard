@@ -56,7 +56,9 @@ value narrows rather than dumping the table. This covers `/admin/users`,
 
 **Rate limits.** 300 requests/minute per IP across `/api`, with tighter limits on
 login (10 / 15 min), registration (5 / hour), code resend and password reset
-(5 / 15 min), and upload signing (30 / 15 min).
+(5 / 15 min), code submission (10 / 15 min), SMS code requests (3 / hour) and
+upload signing (30 / 15 min). One-time codes carry a second set of limits counted
+against the *account* rather than the IP — see "One-time codes" below.
 
 ---
 
@@ -64,16 +66,17 @@ login (10 / 15 min), registration (5 / hour), code resend and password reset
 
 | Method | Path                  | Auth   | Notes                                                    |
 | ------ | --------------------- | ------ | -------------------------------------------------------- |
-| POST   | `/register`           | —      | `{name,email,password}`. Sends a 6-digit code. No token yet. |
-| POST   | `/verify-email`       | —      | `{email,code}` → `{token,user}`                           |
-| POST   | `/resend-code`        | —      | `{email}`                                                 |
+| POST   | `/register`           | —      | `{name,email,password}`. Creates the account unactivated and mails a 6-digit code. No token yet. |
+| POST   | `/verify-email`       | —      | `{email,code}` → `{token,user}`. Activates the account. A wrong code counts against both the code's own budget and the account lockout. |
+| POST   | `/resend-code`        | —      | `{email}`. 429 with `retryAfter` (seconds) inside the per-account cooldown or over the hourly quota. |
 | POST   | `/login`              | —      | `{email,password}` → `{token,user}`, or `{mfaRequired,preAuthToken}` |
 | GET    | `/providers`          | —      | → `{password,google,phone}`. Which identifiers this deployment can prove. |
 | POST   | `/google`             | —      | `{credential}` (a Google ID token) → `{token,user,created}` |
-| POST   | `/phone/request`      | —      | `{phone,mode,name?}` → `{phone,message,smsDelivered}`. Sends a 6-digit code. |
+| POST   | `/phone/request`      | —      | `{phone,mode,name?}` → `{phone,message,smsDelivered}`. Sends a 6-digit code; 429 with `retryAfter` when limited. |
 | POST   | `/phone/verify`       | —      | `{phone,code}` → `{token,user}`, or `{mfaRequired,preAuthToken}` |
-| POST   | `/forgot-password`    | —      | `{email}`. Always 200, whether or not the account exists. |
-| POST   | `/reset-password`     | —      | `{token,newPassword}`. Revokes all sessions.              |
+| POST   | `/forgot-password`    | —      | `{email}`. Mails a 6-digit code. Always 200 with the same body, whether or not the account exists and whether or not a code was actually sent. |
+| POST   | `/verify-reset-code`  | —      | `{email,code}` → `{resetToken,expiresIn}`. Single use, 15 minutes. Every refusal is the same 400. |
+| POST   | `/reset-password`     | —      | `{token,newPassword}` — the `resetToken` from the step above. Revokes all sessions. |
 | GET    | `/me`                 | user   | The current user                                          |
 | POST   | `/logout`             | user   | Revokes the calling session                               |
 | PUT    | `/profile`            | user   | `{name,email}`                                            |
@@ -87,6 +90,33 @@ login (10 / 15 min), registration (5 / hour), code resend and password reset
 
 Passwords must be at least 10 characters (`MIN_PASSWORD_LENGTH`) and contain a
 letter and a digit. Five failed logins lock the account for 15 minutes.
+
+### One-time codes
+
+Signup verification, phone sign-in and password reset all run on the same
+engine (`utils/otp.js`), so the rules below hold for every 6-digit code the
+service issues:
+
+- **Stored as a keyed HMAC, never as digits.** The key is derived from
+  `JWT_SECRET`, which is not in the database — so a dump yields nothing usable,
+  and the hash cannot be presented in place of the code. Codes are readable only
+  from the message, or from the log when `EMAIL_PROVIDER=none`.
+- **15 minutes**, then the code is dead.
+- **Five wrong guesses** destroy the code itself, on top of the per-IP limiter.
+  Ask for a new one; a new code gets a fresh budget.
+- **One code a minute, five an hour, per account** — counted against the
+  recipient rather than the caller, because the per-IP limiters do nothing about
+  requests spread across machines at one stranger's inbox. `resend-code` and
+  `phone/request` say so with 429 and `retryAfter`; `forgot-password` refuses
+  silently, because a 429 there would confirm the address has an account.
+- **A completed verification clears the send budget**, so signing out and back
+  in within the minute is not refused.
+- Every issue, failure, throttle and success is written to the audit log.
+
+Verification and phone codes additionally count a failure towards the account
+lockout. The reset code deliberately does **not** — locking the recovery path
+from an unauthenticated endpoint would let anyone who knows an address shut its
+owner out of the only way back in.
 
 A deactivated account (a blocked customer, or staff switched off by a Super
 Admin) is refused at login with 403 rather than being handed a token that every

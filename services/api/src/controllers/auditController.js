@@ -2,6 +2,7 @@ const { Op } = require('sequelize');
 const { AuditLog, User } = require('../models');
 const { parsePagination } = require('../utils/pagination');
 const { likeOperator } = require('../utils/queryOperators');
+const { dateRangeWhere } = require('../utils/dateRange');
 const { LEVELS, levelFor, serviceFor, levelCondition } = require('../utils/logSeverity');
 
 /**
@@ -52,11 +53,10 @@ const getLogs = async (req, res, next) => {
     }
 
     if (userId) where.userId = userId;
-    if (from || to) {
-      where.createdAt = {};
-      if (from) where.createdAt[Op.gte] = new Date(from);
-      if (to) where.createdAt[Op.lte] = new Date(to);
-    }
+    // The console's time windows send full ISO instants and are used as given; a
+    // date-only bound covers that whole day — see utils/dateRange.js.
+    const range = dateRangeWhere(from, to, { Op });
+    if (range) where.createdAt = range;
     if (and.length) where[Op.and] = and;
 
     const logs = await AuditLog.findAndCountAll({

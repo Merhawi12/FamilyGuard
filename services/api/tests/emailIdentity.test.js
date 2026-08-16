@@ -60,7 +60,8 @@ describe('email identity is case-insensitive', () => {
       .expect(200);
 
     await user.reload();
-    expect(user.passwordResetToken).toBeTruthy();
+    // The code goes to the account the differently-cased address resolves to.
+    expect(user.passwordResetCode).toBeTruthy();
   });
 
   it('treats re-saving your own address in a different case as a no-op, not a clash', async () => {

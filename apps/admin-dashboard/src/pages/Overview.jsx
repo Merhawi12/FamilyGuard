@@ -163,10 +163,14 @@ function AlertDetails({ health, mayMute, onToggleMute }) {
               cell: (type) => (
                 <span className="flex items-center gap-2 min-w-0">
                   <span
-                    className={`w-2 h-2 rounded-full shrink-0 ${type.muted ? 'bg-gray-300' : 'bg-danger'}`}
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      !type.available ? 'bg-gray-200' : type.muted ? 'bg-gray-300' : 'bg-danger'
+                    }`}
                     aria-hidden="true"
                   />
-                  <span className="text-sm font-medium text-gray-900 truncate">{type.label}</span>
+                  <span className={`text-sm font-medium truncate ${type.available ? 'text-gray-900' : 'text-gray-400'}`}>
+                    {type.label}
+                  </span>
                 </span>
               ),
             },
@@ -188,7 +192,18 @@ function AlertDetails({ health, mayMute, onToggleMute }) {
               key: 'delivery',
               header: 'Delivery',
               align: 'right',
-              cell: (type) => (
+              /**
+               * A rule with no producer gets no switch.
+               *
+               * Three of these describe a condition nothing in the product can
+               * currently detect — the device has no call or SMS visibility, no
+               * content classifier and no package-added receiver — so their rows
+               * offered an operator a control over an alert that cannot be
+               * raised. Saying so beats a toggle that does nothing, and it is
+               * the honest answer to "what can this platform actually tell me?".
+               * See config/alertTypes.js.
+               */
+              cell: (type) => (type.available ? (
                 <span className="inline-flex items-center justify-end gap-2">
                   <span className="text-xs text-gray-500 whitespace-nowrap">
                     {type.muted ? 'Muted' : 'Email · push'}
@@ -201,7 +216,14 @@ function AlertDetails({ health, mayMute, onToggleMute }) {
                     aria-label={`${type.muted ? 'Resume' : 'Hold back'} email and push for ${type.label}`}
                   />
                 </span>
-              ),
+              ) : (
+                <span
+                  className="badge-gray whitespace-nowrap"
+                  title="No part of the product raises this yet, so there is nothing to hold back."
+                >
+                  Not raised yet
+                </span>
+              )),
             },
           ]}
           rows={health.alertTypes}

@@ -57,7 +57,10 @@ const server = spawn(process.execPath, ['src/server.js'], {
     ...process.env,
     NODE_ENV: 'development',
     PORT: String(API_PORT),
-    LOG_LEVEL: 'warn',
+    // `info`, not `warn`, because the verification code is only obtainable from
+    // the log now — see `codeFromLog`. With no mail relay the API prints it at
+    // info level, which is the same route services/api/scripts/e2e.mjs takes.
+    LOG_LEVEL: 'info',
     DATABASE_URL: process.env.BROWSER_E2E_DATABASE_URL || '',
     DB_PATH: path.join(dataDir, 'browser.sqlite'),
     JWT_SECRET: 'browser-e2e-secret-that-is-long-enough',
@@ -73,6 +76,31 @@ const server = spawn(process.execPath, ['src/server.js'], {
 });
 server.stdout.on('data', (c) => { serverOutput += c; });
 server.stderr.on('data', (c) => { serverOutput += c; });
+
+/**
+ * The verification code an account was just sent.
+ *
+ * Read out of the server's log rather than out of `users.email_verification_code`,
+ * because that column holds a keyed HMAC now — a harness that could still read a
+ * code from the database would be a harness proving the codes are in plain text.
+ * With `EMAIL_PROVIDER=none` the API prints the code instead of mailing it,
+ * which is the only way to finish a signup with no relay and is what
+ * services/api/scripts/e2e.mjs already relies on.
+ */
+const codeFromLog = async (email, kind = 'Verification code') => {
+  const escaped = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Keyed on the message as well as the address, because one account gets both
+  // a signup code and a reset code and they must not be confused for each
+  // other. The last match wins for the same reason — an earlier code for the
+  // same address is still sitting in the buffer.
+  const pattern = new RegExp(`${kind}[^\\n]*"email":"${escaped}","code":"(\\d{6})"`, 'gi');
+  for (let i = 0; i < 100; i += 1) {
+    const found = [...serverOutput.matchAll(pattern)];
+    if (found.length) return found.at(-1)[1];
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`No ${kind.toLowerCase()} was logged for ${email}`);
+};
 
 const waitForPort = async (port, label) => {
   for (let i = 0; i < 200; i += 1) {
@@ -362,10 +390,11 @@ try {
   });
   if (reg.status !== 201) throw new Error(`register failed: ${JSON.stringify(reg)}`);
 
-  // Verification codes are emailed; with EMAIL_PROVIDER=none, read it from the DB.
   // Resolved from the API's own node_modules — the harness reads fixtures
-  // (verification codes, seeded alerts) directly, and the root workspace does
-  // not depend on Sequelize.
+  // (seeded alerts, device rows) straight from the database, and the root
+  // workspace does not depend on Sequelize. Verification codes are *not* among
+  // them any more: the column holds a keyed hash, so they come from the log via
+  // `codeFromLog`.
   const { createRequire } = await import('node:module');
   const require = createRequire(path.join(REPO, 'services/api/package.json'));
   const { Sequelize } = require('sequelize');
@@ -381,8 +410,11 @@ try {
 
   step('Account setup');
   check('the registered address is stored lower-cased', row.email === PARENT_EMAIL.trim().toLowerCase(), row.email);
+  check('the verification code is stored hashed, not as digits', /^[a-f0-9]{64}$/.test(row.code || ''), row.code);
 
-  const verified = await api('POST', '/auth/verify-email', { body: { email: PARENT_EMAIL, code: row.code } });
+  const verified = await api('POST', '/auth/verify-email', {
+    body: { email: PARENT_EMAIL, code: await codeFromLog(PARENT_EMAIL) },
+  });
   check('email verification succeeds', verified.status === 200, JSON.stringify(verified.data));
   const parentToken = verified.data.token;
 
@@ -414,6 +446,76 @@ try {
     const title = await page.title();
     check('the landing page renders', (await page.locator('body').innerText()).length > 200, title);
     check('the landing page is clean', w.problems.length === 0, w.problems.join(' | '));
+    await page.close();
+  }
+
+  step('Family app — the contact form is received, stored and confirmed');
+  {
+    /*
+     * The one form on the site a stranger uses to reach a human, driven the way
+     * a person drives it. It used to hand the message straight to a mailer and
+     * answer "sent" — so a deployment with no ADMIN_EMAIL (the default) lost
+     * every submission while telling each sender it had gone. It is stored first
+     * now, and this checks the page and the API agree about that.
+     *
+     * EMAIL_PROVIDER is 'none' for this run, so nothing leaves the building;
+     * what is proved here is receipt, storage and the wording shown back.
+     */
+    const page = await browser.newPage();
+    const w = watch(page, 'contact');
+    await page.goto(`${FAMILY}/contact`, { waitUntil: 'networkidle' });
+
+    check('the contact page renders', (await page.locator('#contactForm').count()) === 1);
+
+    // The honeypot must be unreachable to a person: off-screen, out of the tab
+    // order, and hidden from assistive technology. Visible to a bot, invisible
+    // to everyone else — if it were merely visually hidden, a screen-reader user
+    // would be offered a real field and then refused for answering it.
+    const honeypot = page.locator('#cf-company');
+    check('the honeypot is present for a bot to fall into', (await honeypot.count()) === 1);
+    /*
+     * Off-screen, not `display:none`.
+     *
+     * `isVisible()` is the wrong question and answers true here: to Playwright a
+     * field parked at `left:-9999px` still has a box and is not CSS-hidden. What
+     * matters is that no person can see it, which is a statement about the
+     * viewport — so the box is what gets asserted.
+     *
+     * The positioning is deliberate. `display:none` and `visibility:hidden` are
+     * the two tells a bot checks for before deciding whether to fill a field, so
+     * the technique that actually catches anything is the one that leaves the
+     * field rendered and simply puts it where nobody is looking.
+     */
+    const box = await honeypot.boundingBox();
+    const viewport = page.viewportSize();
+    check('the honeypot sits outside the viewport, where no person can see it',
+      !!box && (box.x + box.width < 0 || box.x > viewport.width),
+      JSON.stringify(box));
+    check('the honeypot is out of the tab order',
+      (await honeypot.getAttribute('tabindex')) === '-1');
+    check('the honeypot is hidden from assistive technology',
+      (await page.locator('.hp-field[aria-hidden="true"]').count()) === 1);
+
+    const unique = `Browser harness message ${randomUUID()}`;
+    await page.fill('#cf-name', 'Harness Visitor');
+    await page.fill('#cf-email', 'harness.visitor@example.com');
+    await page.fill('#cf-message', unique);
+    // The timing check refuses a form filled faster than a person could type.
+    await page.waitForTimeout(3500);
+    await page.click('.contact-submit');
+
+    await page.locator('#cfStatus.success').waitFor({ timeout: 10000 }).catch(() => {});
+    const status = await page.locator('#cfStatus').innerText();
+
+    check('the sender is told the message was received', /got your message/i.test(status), status);
+    // "Received", not "sent": the API stores before it mails, and the page
+    // should not claim more than actually happened.
+    check('the confirmation does not overclaim delivery', !/\bhas been sent\b/i.test(status), status);
+    check('the sender is given a reference to quote', /Reference\s+\w{6,}/i.test(status), status);
+    check('the form is cleared for the next message',
+      (await page.locator('#cf-message').inputValue()) === '');
+    check('the contact page is clean', w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
+
     await page.close();
   }
 
@@ -514,6 +616,71 @@ try {
     check('signing in again with the same number reaches the dashboard',
       page.url().includes('/dashboard'), page.url());
     check('the phone sign-in screens are clean', w.problems.length === 0, w.problems.join(' | '));
+    await page.close();
+  }
+
+  /**
+   * Forgotten password, in the browser.
+   *
+   * The API tests cover the three endpoints. What only this can see is that the
+   * three screens actually chain — that the code screen carries the address
+   * forward, that the ticket the middle step returns is held long enough to be
+   * spent by the third, and that a parent ends up somewhere they can sign in
+   * from. It runs on its own throwaway account because it ends by changing a
+   * password and revoking every session.
+   */
+  step('Family app — a forgotten password is reset with a code');
+  {
+    const email = `forgetful${stamp}@example.com`;
+    const newPassword = 'reset-in-browser-2';
+    const page = await browser.newPage();
+    const w = watch(page, 'password reset');
+
+    await api('POST', '/auth/register', { body: { name: 'Forgetful Parent', email, password: PARENT_PASSWORD } });
+    await api('POST', '/auth/verify-email', { body: { email, code: await codeFromLog(email) } });
+
+    await page.goto(`${FAMILY}/login`, { waitUntil: 'networkidle' });
+    await page.fill('input[type="email"]', email);
+    await page.getByRole('button', { name: 'Forgot Password?' }).click();
+
+    // The address typed on the sign-in screen comes with it, so nobody types it
+    // twice.
+    check('the reset screen carries the address forward',
+      (await page.inputValue('input[type="email"]')) === email);
+
+    await page.click('button[type="submit"]');
+
+    const reached = await page.locator('#code-0')
+      .waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+    check('asking for a code reaches the code screen', reached);
+
+    const code = await codeFromLog(email, 'Password reset code');
+    check('a reset code was issued', /^\d{6}$/.test(code), code);
+
+    for (let i = 0; i < 6; i += 1) await page.fill(`#code-${i}`, code[i]);
+    await page.click('button[type="submit"]');
+
+    const atPassword = await page.getByText('Choose a new password')
+      .waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+    check('the right code reaches the new-password screen', atPassword);
+
+    const fields = page.locator('input[autocomplete="new-password"]');
+    await fields.nth(0).fill(newPassword);
+    await fields.nth(1).fill(newPassword);
+    await page.click('button[type="submit"]');
+
+    const told = await page.getByText('Your password has been reset', { exact: false })
+      .waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+    check('the parent is returned to sign in and told it worked', told);
+
+    // And the new password is the one that works, through the front door.
+    await page.fill('input[type="email"]', email);
+    await page.fill('input[type="password"]', newPassword);
+    await page.click('button[type="submit"]');
+    await page.waitForURL('**/dashboard**', { timeout: 15000 }).catch(() => {});
+    check('the new password signs in', page.url().includes('/dashboard'), page.url());
+
+    check('the password reset screens are clean', w.problems.length === 0, w.problems.join(' | '));
     await page.close();
   }
 
@@ -1073,6 +1240,44 @@ try {
     await page.close();
   }
 
+  step('Family app — the calendar screens open on the parent\'s day, not UTC\'s');
+  {
+    /*
+     * `new Date().toISOString().split('T')[0]` is not "today" — it is today in
+     * UTC. Parentix runs on Cloud Run, which is UTC, and its families are in
+     * Canada, so from about 20:00 local the two disagree and every screen keyed
+     * off the wrong one silently moved a day ahead of the data: the Reports date
+     * picker opened on *tomorrow* and the panel under it read "Nothing recorded
+     * that day" every evening, and the dashboard's "Screen time — Today" tile
+     * looked up a bucket that could not exist yet and reported 0.
+     *
+     * Two extreme zones rather than one, because the bug only shows when local
+     * and UTC fall on different dates — and which of the two is ahead depends on
+     * the hour this suite happens to run. UTC+14 and UTC-11 cannot both agree
+     * with UTC at the same moment, so at least one of these is always a real
+     * test of the difference, whatever time it is.
+     */
+    for (const timezoneId of ['Pacific/Kiritimati', 'Pacific/Niue']) {
+      const context = await browser.newContext({ timezoneId });
+      const page = await context.newPage();
+      await page.goto(`${FAMILY}/login`);
+      await page.evaluate((t) => localStorage.setItem('fg_token', t), parentToken);
+      await page.goto(`${FAMILY}/dashboard/reports`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(700);
+
+      // Asked of the browser itself: `en-CA` formats as YYYY-MM-DD, which is
+      // exactly the value a date input holds.
+      const expected = await page.evaluate(
+        (tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date()),
+        timezoneId,
+      );
+      const actual = await page.locator('input[type="date"]').first().inputValue();
+
+      check(`Reports opens on today in ${timezoneId}`, actual === expected, `${actual} ≠ ${expected}`);
+      await context.close();
+    }
+  }
+
   step('Family app — signed-in devices can be seen and signed out');
   {
     // A second session for this account, so there is something to evict.
@@ -1118,11 +1323,9 @@ try {
      */
     const email = `Leaving.Parent${stamp}@Example.COM`;
     await api('POST', '/auth/register', { body: { name: 'Leaving Parent', email, password: PARENT_PASSWORD } });
-    const [[leaving]] = await db.query(
-      'SELECT email, email_verification_code AS code FROM users WHERE email = ?',
-      { replacements: [email.trim().toLowerCase()] },
-    );
-    const verified2 = await api('POST', '/auth/verify-email', { body: { email, code: leaving.code } });
+    const verified2 = await api('POST', '/auth/verify-email', {
+      body: { email, code: await codeFromLog(email) },
+    });
     const leavingToken = verified2.data.token;
     const leavingChild = await api('POST', '/children', {
       token: leavingToken, body: { name: 'Leaving Kid', age: 9 },
@@ -2293,13 +2496,15 @@ try {
 
   step('Admin dashboard — a parent token cannot mount the console');
   {
+    const plainEmail = `plain${stamp}@example.com`;
     const plain = await api('POST', '/auth/register', {
-      body: { name: 'Plain Parent', email: `plain${stamp}@example.com`, password: PARENT_PASSWORD },
+      body: { name: 'Plain Parent', email: plainEmail, password: PARENT_PASSWORD },
     });
     check('a second account registers', plain.status === 201);
 
-    const [[r2]] = await db.query('SELECT email, email_verification_code AS code FROM users ORDER BY created_at DESC LIMIT 1');
-    const v2 = await api('POST', '/auth/verify-email', { body: { email: r2.email, code: r2.code } });
+    const v2 = await api('POST', '/auth/verify-email', {
+      body: { email: plainEmail, code: await codeFromLog(plainEmail) },
+    });
 
     const page = await browser.newPage();
     await page.goto(`${ADMIN}/login`);

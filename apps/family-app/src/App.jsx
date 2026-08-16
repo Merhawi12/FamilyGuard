@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, SocketProvider, useAuth, ErrorBoundary, Spinner, getToken } from '@parentix/shared';
 import Layout from './components/Layout';
 import Login from './pages/Login';
-import ResetPassword from './pages/ResetPassword';
 import Welcome from './pages/Welcome';
 import { welcomeSeen } from './services/welcome';
 
@@ -81,7 +80,13 @@ export default function App() {
                   parent who wants to see it again can. */}
               <Route path="/welcome" element={<Welcome />} />
               <Route path="/login" element={<Login />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
+              {/* Kept as a redirect, not a page. Resetting a password is three
+                  steps inside /login now, because the email carries a 6-digit
+                  code rather than a link — so nothing arrives at this URL any
+                  more, and the form that used to live here could only ever have
+                  told a visitor their link was invalid. Old bookmarks and any
+                  link still sitting in an inbox land on the flow that works. */}
+              <Route path="/reset-password" element={<Navigate to="/login" replace />} />
               <Route path="/privacy-policy" element={<PrivacyPolicy />} />
               <Route path="/terms" element={<Terms />} />
 

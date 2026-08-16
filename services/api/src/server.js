@@ -32,14 +32,38 @@ const start = async () => {
     db: env.db.socketPath ? `socket ${env.db.socketPath}` : env.db.usePostgres ? 'postgres (tcp)' : 'sqlite',
     redis: env.redisUrl ? 'enabled' : 'disabled',
     // Stated at boot because the alternative is finding out from a customer.
-    // Without a relay the API still answers "a reset link has been sent" — it
-    // has to, or the endpoint would enumerate accounts — so a missing SMTP host
-    // is invisible from the outside and password reset simply never completes.
+    // Without a relay the API still answers "if an account exists … we have sent
+    // a code" — it has to, or the endpoint would enumerate accounts — so a
+    // missing SMTP host is invisible from the outside and password reset simply
+    // never completes.
     mail: mailIsEnabled() ? `smtp ${env.email.smtp.host}` : 'DISABLED — password reset and email verification cannot complete',
   });
 
   if (env.isProduction && !mailIsEnabled()) {
     logger.error('No SMTP relay configured. Set the smtp-host secret and redeploy — see docs/DEPLOYMENT.md §1.7.');
+  }
+
+  /**
+   * The contact form has a destination, or nobody is reading it.
+   *
+   * Loud, and deliberately not fatal. The landing page offers a contact form to
+   * every visitor unconditionally, and `ADMIN_EMAIL` is what decides whether a
+   * human is told about a submission — so an unset value means a public form
+   * that silently fills a table nobody looks at. That is worth shouting about on
+   * every boot.
+   *
+   * It is not worth refusing to start over, and the reason is the change that
+   * makes this line possible: submissions are stored before they are mailed
+   * (see contactFormController), so an unconfigured mailbox delays messages
+   * rather than destroying them. Blocking a deploy over a recoverable
+   * misconfiguration would be the more expensive mistake — SMTP above is fatal
+   * precisely because signup genuinely cannot complete without it.
+   */
+  if (env.isProduction && !env.email.adminAddress) {
+    logger.error(
+      'ADMIN_EMAIL is not set. Contact-form messages will be stored but nobody will be notified — '
+      + 'set the admin_email Terraform variable and redeploy.',
+    );
   }
 
   assertProductionConfig();

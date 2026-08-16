@@ -15,9 +15,19 @@ import { colors, radius, space, type } from '../theme';
  * It has no menu and no tab bar on purpose — nothing here is a place to go, and
  * offering navigation before the device is linked only leads to dead ends.
  */
-export default function LinkScreen({ navigation }) {
+export default function LinkScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const [code, setCode] = useState('');
+  /**
+   * Prefilled when the screen was opened by a deep link carrying the code —
+   * `com.parentix.child://link/ABC12345`, which is what a parent can send
+   * instead of reading eight characters down the phone.
+   *
+   * Only the initial value: it is deliberately not an effect that keeps the box
+   * in step with the URL, because that would overwrite what a child had started
+   * typing if the same link were opened twice. Normalised the way `handleLink`
+   * normalises typed input, so a lowercase link behaves like a lowercase entry.
+   */
+  const [code, setCode] = useState(() => (route?.params?.code || '').trim().toUpperCase());
   const [loading, setLoading] = useState(false);
 
   const handleLink = async () => {

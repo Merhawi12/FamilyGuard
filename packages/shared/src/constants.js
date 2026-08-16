@@ -204,14 +204,13 @@ export const categoryLabel = (key) =>
 export const ALERT_LABELS = {
   left_safe_zone: 'Left Safe Zone',
   entered_safe_zone: 'Arrived at Safe Zone',
-  dangerous_content: 'Dangerous Content Detected',
+  dangerous_content: 'Risky Site Opened',
   emergency_button: 'Emergency Alert',
   cyberbullying: 'Cyberbullying Detected',
   screen_time_exceeded: 'Screen Time Exceeded',
   blocked_app: 'Blocked App Attempt',
   blocked_app_attempt: 'Blocked App Attempt',
-  app_installed: 'New App Installed',
-  unknown_contact: 'Unknown Contact',
+  app_installed: 'New App Used',
   safety_pattern: 'Safety Pattern Detected',
 };
 

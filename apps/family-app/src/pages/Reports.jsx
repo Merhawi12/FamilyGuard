@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import {
   BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
-import { children as childrenApi, reports as reportsApi, EmptyState, errorMessage } from '@parentix/shared';
+import {
+  children as childrenApi, reports as reportsApi, localDateKey, EmptyState, errorMessage,
+} from '@parentix/shared';
 import ChildTabs from '../components/ChildTabs';
 import PageIntro from '../components/PageIntro';
 import { PRIMARY, SERIES } from '../brand';
@@ -21,7 +23,10 @@ export default function Reports() {
   const [selected, setSelected] = useState(null);
   const [weekly, setWeekly] = useState(null);
   const [daily, setDaily] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  // The parent's own calendar day, not UTC's. This was `toISOString()`, so from
+  // about 20:00 local the picker opened on *tomorrow* and the panel under it
+  // read "Nothing recorded that day" every evening. See shared/dates.js.
+  const [selectedDate, setSelectedDate] = useState(() => localDateKey());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 

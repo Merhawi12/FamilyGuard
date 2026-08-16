@@ -68,8 +68,40 @@ const send = async (req, res, next) => {
     }
 
     const rows = await Notification.bulkCreate(
-      recipients.map((u) => ({ userId: u.id, title, message, type, createdBy: req.user.id }))
+      recipients.map((u) => ({ userId: u.id, title, message, type, createdBy: req.user.id })),
+      // Postgres needs telling to hand the generated ids back; without them the
+      // broadcast below would push rows the client cannot key or mark read.
+      { returning: true },
     );
+
+    /**
+     * Delivered, not just filed.
+     *
+     * This wrote the rows and stopped. The bell polls once a minute, so an
+     * announcement took up to a minute to appear on a dashboard that was open
+     * the whole time — and the socket every signed-in parent already holds was
+     * sitting there unused. A maintenance notice is worth arriving when it is
+     * sent.
+     *
+     * Emitted per recipient rather than broadcast to everyone, because a
+     * notification row belongs to one account: the client marks it read by id,
+     * and a shared payload would put another customer's row in this customer's
+     * bell. `parent:<userId>` is the room every authenticated non-device socket
+     * joins (see sockets/deviceEvents.js), staff included.
+     *
+     * Best effort, and after the write: a socket layer that is unavailable must
+     * not turn a stored announcement into a failed request.
+     */
+    const io = req.app.get('io');
+    if (io) {
+      for (const row of rows) {
+        try {
+          io.to(`parent:${row.userId}`).emit('notification:new', row);
+        } catch {
+          /* one undeliverable socket must not abort the rest of the send */
+        }
+      }
+    }
 
     auditLog(req, {
       userId: req.user.id,

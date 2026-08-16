@@ -197,6 +197,27 @@ export function deliverNotification(data, { tapped = false } = {}) {
 // ── expo-location ────────────────────────────────────────────────────────────
 export const locationStub = {
   Accuracy: { Balanced: 3 },
+  /**
+   * The real enum's values, not invented ones.
+   *
+   * `monitoring.js` passes `ActivityType.Other` to stop iOS suspending location
+   * updates when it decides the phone has been sitting still. A stub missing the
+   * enum does not fail politely — reading `.Other` off `undefined` throws inside
+   * `startLocationTracking`, which is how this was found: the whole harness went
+   * from 173 passing checks to a bare `fetch failed` with nothing naming
+   * location.
+   *
+   * Transcribed from expo-location rather than made up, for the reason
+   * [[mfa-otplib-v13]] cost an afternoon: a stub that invents an API agrees with
+   * the test and disagrees with production.
+   */
+  ActivityType: {
+    Other: 1,
+    AutomotiveNavigation: 2,
+    Fitness: 3,
+    OtherNavigation: 4,
+    Airborne: 5,
+  },
   async getForegroundPermissionsAsync() { return { granted: platformState.permissions.locationForeground }; },
   async getBackgroundPermissionsAsync() { return { granted: platformState.permissions.locationBackground }; },
   async requestForegroundPermissionsAsync() { return { granted: true }; },

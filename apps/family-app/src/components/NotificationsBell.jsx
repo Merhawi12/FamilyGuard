@@ -42,7 +42,7 @@ const timeAgo = (value) => {
  * icon and a second panel.
  */
 export default function NotificationsBell() {
-  const { alerts, alertsError, markAlertRead, markAllAlertsRead } = useSocket();
+  const { socket, alerts, alertsError, markAlertRead, markAllAlertsRead } = useSocket();
   const [updates, setUpdates] = useState([]);
   const [tab, setTab] = useState('alerts');
   const { open, setOpen, toggle, ref } = useDismissable();
@@ -51,9 +51,27 @@ export default function NotificationsBell() {
   useEffect(() => {
     const load = () => notificationsApi.list().then((r) => setUpdates(r.data)).catch(() => {});
     load();
+    // Still polled: the socket covers a dashboard that is open, and this covers
+    // one that was asleep, offline, or missed a delivery while reconnecting.
     const interval = setInterval(load, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  /**
+   * An announcement from Parentix, the moment it is sent.
+   *
+   * Without this the only path to the bell was the minute poll above — so a
+   * maintenance notice reached a parent watching the dashboard up to a minute
+   * after the operator sent it. Deduplicated by id because the poll and the
+   * socket can deliver the same row.
+   */
+  useEffect(() => {
+    if (!socket) return undefined;
+    const onNotification = (row) =>
+      setUpdates((prev) => (prev.some((n) => n.id === row.id) ? prev : [row, ...prev]));
+    socket.on('notification:new', onNotification);
+    return () => socket.off('notification:new', onNotification);
+  }, [socket]);
 
   const unreadAlerts = alerts.filter((a) => !a.isRead).length;
   const unreadUpdates = updates.filter((n) => !n.isRead).length;

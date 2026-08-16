@@ -76,12 +76,39 @@ const tealGray = {
   900: '#0E2F35',
 };
 
+/**
+ * Two breakpoints keyed on the height of the viewport rather than its width.
+ *
+ * The launch screen is a photograph stacked above a sheet, and that shape has a
+ * floor: below roughly 520px of height the picture and the copy cannot both have
+ * room, and a splash that scrolls is not a splash. A phone held sideways is
+ * 390px tall, so this is not a corner case — it is what happens when someone
+ * opens the app while their phone is lying on a desk.
+ *
+ * `wide` is the query for "lay this out as two columns", and it is deliberately
+ * one screen rather than two variants written side by side: a desktop and a
+ * phone in landscape want the same arrangement for opposite reasons, and
+ * spelling that as `lg:flex-row short:flex-row` on a dozen elements is where the
+ * two quietly drift apart. `short` is the compaction that only the phone needs —
+ * a smaller tile, smaller type, a shorter button.
+ *
+ * Height queries, not `landscape`: a tall phone rotated is still tall enough for
+ * the stacked layout, and an orientation check would rearrange it for no reason.
+ * Declared here rather than in the shared preset because no other app has a
+ * screen whose whole design is bounded by height.
+ */
+const screens = {
+  wide: { raw: '(min-width: 1024px), (max-height: 520px)' },
+  short: { raw: '(max-height: 520px)' },
+};
+
 export default {
   presets: [preset],
   content: ['./index.html', './src/**/*.{js,jsx}', '../../packages/shared/src/**/*.{js,jsx}'],
   theme: {
     extend: {
       colors: { primary: teal, gray: tealGray },
+      screens,
     },
   },
 };

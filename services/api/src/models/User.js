@@ -3,6 +3,23 @@ const { sequelize } = require('../config/db');
 const bcrypt = require('bcryptjs');
 const { normalizeEmail } = require('../utils/normalizeEmail');
 const { normalizePhone } = require('../utils/normalizePhone');
+const { hashCode } = require('../utils/otp');
+
+/**
+ * A one-time code is stored the way a password is: never as the thing itself.
+ *
+ * Put on the setters rather than left to the controllers for the same reason
+ * `passwordHash` is hashed in a hook — there are four write paths between
+ * registration, resend, profile email change and the phone flow, and the one
+ * that forgets is the one that leaves six live digits in a backup. See
+ * `utils/otp.js` for why this is a keyed HMAC rather than a plain digest.
+ */
+const codeColumn = (field) => ({
+  type: DataTypes.STRING,
+  set(value) {
+    this.setDataValue(field, hashCode(value));
+  },
+});
 
 const User = sequelize.define('User', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
@@ -45,7 +62,7 @@ const User = sequelize.define('User', {
     },
   },
   phoneVerified: { type: DataTypes.BOOLEAN, defaultValue: false },
-  phoneVerificationCode: { type: DataTypes.STRING },
+  phoneVerificationCode: codeColumn('phoneVerificationCode'),
   phoneVerificationExpires: { type: DataTypes.DATE },
   /**
    * Null for an account created through Sign in with Google, which has no
@@ -67,10 +84,30 @@ const User = sequelize.define('User', {
   mfaSecret: { type: DataTypes.STRING },
   mfaBackupCodes: { type: DataTypes.TEXT },
   emailVerified: { type: DataTypes.BOOLEAN, defaultValue: false },
-  emailVerificationCode: { type: DataTypes.STRING },
+  emailVerificationCode: codeColumn('emailVerificationCode'),
   emailVerificationExpires: { type: DataTypes.DATE },
+  /**
+   * The forgotten-password code, and the ticket it buys.
+   *
+   * Two pairs rather than one, because they are two different secrets at two
+   * different moments: `passwordResetCode` is the six digits that go to the
+   * address, and `passwordResetToken` is what `verify-reset-code` mints once
+   * those digits come back — the short-lived proof the "choose a new password"
+   * screen presents. Folding them into one column would mean either emailing
+   * the ticket (which is the link this flow replaced) or keeping the code alive
+   * after it has been spent.
+   */
+  passwordResetCode: codeColumn('passwordResetCode'),
+  passwordResetCodeExpires: { type: DataTypes.DATE },
   passwordResetToken: { type: DataTypes.STRING },
   passwordResetExpires: { type: DataTypes.DATE },
+  /**
+   * Per-purpose counters for the code flows: how many have been sent, when the
+   * last one went, and how many wrong guesses the live one has taken. TEXT
+   * holding JSON — see `utils/otp.js` for the shape and for why it is not a
+   * JSON column.
+   */
+  otpState: { type: DataTypes.TEXT, defaultValue: '{}' },
   stripeCustomerId: { type: DataTypes.STRING },
   stripeSubscriptionId: { type: DataTypes.STRING },
   subscriptionStatus: { type: DataTypes.STRING, defaultValue: 'trial' },

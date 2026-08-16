@@ -142,7 +142,9 @@ export default function Profile() {
         <Avatar name={user?.name} size="lg" />
         <div className="min-w-0 flex-1">
           <p className="text-lg font-semibold text-gray-900 truncate">{user?.name}</p>
-          <p className="text-sm text-gray-500 truncate">{user?.email}</p>
+          {/* An account created from a phone number has no address; naming the
+              identifier it does have beats an empty line under the name. */}
+          <p className="text-sm text-gray-500 truncate">{user?.email || user?.phone}</p>
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-2.5">
             <span className="badge-primary">{planLabel(user?.plan)}</span>
             {user?.mfaEnabled && (
@@ -230,7 +232,14 @@ export default function Profile() {
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
             />
-            <span className="field-hint">You sign in with this address.</span>
+            {/* For a phone-number account this field is how you *gain* an
+                address rather than change one, and "you sign in with this"
+                would be describing something that is not true yet. */}
+            <span className="field-hint">
+              {user?.email
+                ? 'You sign in with this address.'
+                : 'Optional. Adding one gives you a second way to sign in, and lets Parentix email you alerts.'}
+            </span>
           </label>
           <button type="submit" className="btn-primary btn-block sm:w-auto" disabled={saving || !dirty}>
             {saving ? 'Saving…' : 'Save changes'}

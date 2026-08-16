@@ -3,3 +3,65 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ── The launch screen's motion ────────────────────────────────────────────
+   Only src/pages/Welcome.jsx uses these, and they live here rather than in the
+   shared base stylesheet because they are the one screen's character, not a
+   platform primitive: nothing else in the app drifts a photograph or throws a
+   card in from the side.
+
+   Written as plain CSS after the Tailwind layers rather than as `@layer
+   utilities` so the keyframes are not reordered by the layer sort, and declared
+   here rather than inline on the elements so the whole set can be switched off
+   in one place for `prefers-reduced-motion` — see the bottom of this block.
+
+   All three are cheap: transform and opacity only, so each runs on the
+   compositor and none of them lays the page out again. `both` holds the from-
+   state before the animation starts, which is what stops a card flashing at its
+   final position for one frame before it moves. */
+
+@keyframes splash-drift {
+  from { transform: scale(1.06); }
+  to   { transform: scale(1.16); }
+}
+
+@keyframes splash-pop {
+  from { opacity: 0; transform: scale(0.86); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes splash-enter-right {
+  from { opacity: 0; transform: translate3d(18px, 8px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes splash-enter-left {
+  from { opacity: 0; transform: translate3d(-18px, 8px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Slow enough that it reads as the room breathing rather than as a zoom. Ken
+   Burns at any speed a viewer can name is a distraction on a screen they are
+   meant to leave within seconds. */
+.splash-drift { animation: splash-drift 26s ease-out both; }
+
+.splash-pop { animation: splash-pop 0.45s cubic-bezier(0.16, 0.84, 0.44, 1) both; }
+
+/* The copy follows the tile rather than arriving with it — 90ms is below the
+   threshold where a stagger looks like a queue and above the one where it looks
+   simultaneous. */
+.splash-enter-right { animation: splash-enter-right 0.45s cubic-bezier(0.16, 0.84, 0.44, 1) 0.09s both; }
+.splash-enter-left  { animation: splash-enter-left  0.45s cubic-bezier(0.16, 0.84, 0.44, 1) 0.09s both; }
+
+/* Removing the animation rather than shortening it is deliberate: with no
+   animation the `both` fill mode stops applying too, so every element renders
+   at its natural opacity and position instead of being held at the from-state
+   by a rule that never runs. */
+@media (prefers-reduced-motion: reduce) {
+  .splash-drift,
+  .splash-pop,
+  .splash-enter-right,
+  .splash-enter-left {
+    animation: none;
+  }
+}

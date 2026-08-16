@@ -6,6 +6,7 @@ const { parsePagination } = require('../utils/pagination');
 // interceptable from the tests.
 const pushService = require('../utils/pushService');
 const { track } = require('../utils/background');
+const { notifyParentOfChildMessage } = require('../utils/childMessageNotice');
 const { isUuid } = require('../utils/ids');
 
 // Verify the child belongs to the authenticated parent. A malformed id is "not
@@ -90,7 +91,7 @@ const receiveFromChild = async (req, res, next) => {
     const { text, messageType = 'normal' } = req.body;
     if (!text?.trim()) return res.status(400).json({ error: 'text is required' });
 
-    const child = await Child.findByPk(childId, { attributes: ['id', 'parentId'] });
+    const child = await Child.findByPk(childId, { attributes: ['id', 'parentId', 'name'] });
     if (!child) return res.status(404).json({ error: 'Child not found' });
 
     const message = await Message.create({
@@ -114,6 +115,23 @@ const receiveFromChild = async (req, res, next) => {
     }
 
     io.to(`parent:${child.parentId}`).emit('chat:message', message);
+
+    /**
+     * The socket only reaches a dashboard that is open. Without this a child's
+     * message produced nothing at all on a parent's phone — see
+     * utils/childMessageNotice.js. Tracked rather than awaited: the message is
+     * stored and delivered already, and a slow push service must not hold up the
+     * device's request.
+     */
+    track(notifyParentOfChildMessage({
+      parentId: child.parentId,
+      childId: child.id,
+      childName: child.name,
+      text: message.text,
+      messageType,
+      messageId: message.id,
+    }));
+
     res.status(201).json(message);
   } catch (err) {
     next(err);

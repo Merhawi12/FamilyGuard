@@ -1,0 +1,143 @@
+# Generates, compiles and commits `apps/child-app/ios/`.
+#
+# The child app has no committed iOS project by default — EAS prebuilds one from
+# app.json on its own machines at build time. This workflow is for the other
+# choice: keeping the Xcode project in the repository the way `android/` is.
+#
+# It exists as CI rather than as a local script because `expo prebuild
+# --platform ios` refuses to run on Windows ("run again from macOS or Linux"),
+# and this project's development machine is Windows. A macOS runner is the only
+# place the directory can be produced — and, more to the point, the only place it
+# can be *compiled*, which is the whole reason to commit one rather than trust a
+# generator nobody has run.
+#
+# ── Read this before running it ──────────────────────────────────────────────
+#
+# Committing `ios/` changes how every later build behaves. EAS decides a
+# platform's workflow by looking for its native directory: with `ios/` present it
+# stops prebuilding and builds what is committed. From then on **app.json's iOS
+# keys stop taking effect on their own** — an edit to a permission string, a
+# background mode or the URL scheme changes nothing until this workflow is re-run
+# and the result committed.
+#
+# `childAppPlatforms.test.js` guards exactly that: once the directory exists, it
+# reads the committed Info.plist and asserts it still agrees with app.json, so
+# the drift fails a test run rather than a store submission.
+#
+# Re-run this whenever the iOS half of app.json changes, or the Expo SDK moves.
+
+name: iOS — Child App prebuild
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Commit the generated project back to the branch
+        type: boolean
+        default: true
+      api_url:
+        description: API the JS bundle is built against
+        default: https://api.parentix.ca
+        required: true
+
+concurrency:
+  group: ios-child-prebuild-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prebuild:
+    name: Prebuild and compile
+    runs-on: macos-14
+    permissions:
+      # Needed only by the commit step below. Everything else is read-only.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commit step pushes back to the branch this ran on, so check out
+          # the branch rather than the detached commit Actions gives by default.
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # The child app is not an npm workspace — it keeps its own lockfile,
+      # because Metro resolves from the app directory rather than the hoisted
+      # root. `npm ci` at the repo root would not install it.
+      - name: Install
+        working-directory: apps/child-app
+        run: npm ci
+
+      # `--clean` so the result is the config's output and not a merge with
+      # whatever a previous run left behind, which is the failure mode that makes
+      # a committed native project drift from the config that supposedly owns it.
+      #
+      # `--no-install` skips CocoaPods here; it runs as its own step below so a
+      # pod failure is distinguishable from a prebuild failure in the log.
+      - name: Prebuild iOS
+        working-directory: apps/child-app
+        env:
+          EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url }}/api
+          EXPO_PUBLIC_SOCKET_URL: ${{ github.event.inputs.api_url }}
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      # Android must come out of this untouched. `--platform ios` should
+      # guarantee it, and this is cheap insurance against a future Expo release
+      # deciding otherwise — the Kotlin modules in there are not regenerable.
+      - name: Fail if Android was touched
+        run: |
+          if ! git diff --quiet -- apps/child-app/android; then
+            echo "::error::expo prebuild modified apps/child-app/android, which holds the native modules."
+            git diff --stat -- apps/child-app/android
+            exit 1
+          fi
+
+      - name: Install Pods
+        working-directory: apps/child-app/ios
+        run: pod install
+
+      # The point of committing a project rather than generating one: proof it
+      # builds. No signing, so this needs no Apple account.
+      # The workspace and scheme are discovered rather than named. Prebuild
+      # derives them from the Expo `name`, so hardcoding "Parentix" would be a
+      # guess that only fails once someone renames the app — and it would fail
+      # here, on the runner, long after the rename looked successful.
+      - name: Compile for Simulator
+        working-directory: apps/child-app
+        run: |
+          WORKSPACE="$(ls -d ios/*.xcworkspace | head -1)"
+          SCHEME="$(basename "$WORKSPACE" .xcworkspace)"
+          echo "Building $SCHEME from $WORKSPACE"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Show what would be committed
+        run: git status --short -- apps/child-app/ios
+
+      - name: Commit
+        if: ${{ github.event.inputs.commit == 'true' }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/child-app/ios
+          # Nothing to do on a re-run that produced an identical tree, which is
+          # the expected outcome most of the time.
+          if git diff --cached --quiet; then
+            echo "iOS project is already current — nothing to commit."
+            exit 0
+          fi
+          git commit -m "Regenerate the child app's iOS project
+
+          Produced by .github/workflows/ios-child-prebuild.yml on a macOS runner
+          and compiled for the Simulator before committing. expo prebuild cannot
+          run on the Windows development machine.
+          "
+          git push

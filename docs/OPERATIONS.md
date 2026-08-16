@@ -220,8 +220,17 @@ two wins.
 
 **Email is not arriving.** Check `EMAIL_PROVIDER` is `smtp` and that the
 `smtp-host` secret holds a real value rather than the placeholder. With
-`EMAIL_PROVIDER=none` the API logs verification codes and reset links instead of
-sending them, which is the intended local behaviour but wrong in production.
+`EMAIL_PROVIDER=none` the API logs signup and password-reset codes at `info`
+instead of sending them, which is the intended local behaviour but wrong in
+production.
+
+**A parent says the code never arrived, and asking again does nothing.** Both
+code flows are limited per account as well as per IP: one code a minute, five an
+hour. `resend-code` and `phone/request` answer 429 with `retryAfter`;
+`forgot-password` cannot, because it must answer identically for an address with
+no account, so it refuses silently and records `auth.password_reset_throttled`
+in the audit log. A run of those against one account is somebody being
+mail-bombed. A successful verification clears the budget.
 
 **Uploads fail with 503.** `STORAGE_PROVIDER` or `GCS_BUCKET` is unset.
 

@@ -130,7 +130,7 @@ const run = async () => {
       to,
       subject: 'Parentix mail check',
       text:
-        'If you are reading this, outbound mail works: password reset links and '
+        'If you are reading this, outbound mail works: password reset codes and '
         + 'signup verification codes will reach their recipients.\n\n'
         + `Sent from ${host}:${port} as ${from}.\n`,
     });

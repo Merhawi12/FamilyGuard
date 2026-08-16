@@ -12,38 +12,58 @@ import VpnControl from '../native/VpnControl';
 import { checkPermission as checkPushPermission, requestPermission as requestPushPermission, registerForPush } from '../services/push';
 import { colors, radius, space, type } from '../theme';
 
+/**
+ * Every step this screen can offer, and what has to be true for it to appear.
+ *
+ * `available` is what keeps the iOS build honest. Three of these five are
+ * Android-only — not unimplemented, but impossible, for the reasons written at
+ * the top of each module in ../native. Listing them anyway would give a child an
+ * iPhone setup screen with three rows that can never turn green and instructions
+ * naming Android settings screens that do not exist, and would leave the "all
+ * set up" state permanently out of reach.
+ *
+ * Read from the native modules rather than from `Platform.OS` directly, so the
+ * question each row answers is "can this device do it?" rather than "which OS is
+ * this?" — the same answer today, and the right one to have written down if the
+ * Family Controls work in docs/IOS.md ever lands.
+ */
 const STEPS = [
   {
     id: 'location',
     title: 'Location',
     description: 'Lets your parent see where this phone is on their map.',
     icon: 'location',
+    available: true,
   },
   {
     id: 'usage',
     title: 'Usage access',
     description: 'Counts your screen time. Android Settings → Apps → Usage Access → Parentix.',
     icon: 'usage',
+    available: UsageStats.supported,
   },
   {
     id: 'accessibility',
     title: 'App blocking',
     description: 'Pauses apps your parent has blocked. Android Settings → Accessibility → Parentix.',
     icon: 'apps',
+    available: AppBlocker.supported,
   },
   {
     id: 'vpn',
     title: 'Website filtering',
     description: 'Filters websites on this phone only. No outside VPN is used.',
     icon: 'globe',
+    available: VpnControl.supported,
   },
   {
     id: 'notifications',
     title: 'Notifications',
     description: 'Lets your parent reach you even when this app is closed.',
     icon: 'bell',
+    available: true,
   },
-];
+].filter((step) => step.available);
 
 export default function PermissionsScreen({ navigation }) {
   const insets = useSafeAreaInsets();

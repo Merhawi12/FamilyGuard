@@ -200,6 +200,73 @@ describe('the family app is drawn in one teal', () => {
    *
    * Read raw rather than through `sourcesUnder`, which only collects js/jsx/css.
    */
+  /**
+   * The child app has a native half, and nothing in `src/` can reach it.
+   *
+   * `android/app/src/main/res/values/colors.xml` and `app.json` are read by
+   * Android and by Expo's config plugins before a line of JavaScript runs, so
+   * every check above walked past them — and all four values stayed `#2563eb`
+   * through the entire rebrand. The result was a *blue* splash screen on every
+   * launch, fading into a teal app, and a blue accent on every notification
+   * Parentix raised. It is the first thing a child sees and the only thing they
+   * see when the app is closed.
+   *
+   * Compared against `theme.js` rather than a literal, so the ramp stays the one
+   * source and whoever retints the app has to bring the native side along.
+   */
+  it('paints the child app’s native chrome in the same teal its screens use', () => {
+    const nativeColors = read('apps/child-app/android/app/src/main/res/values/colors.xml');
+    const appConfig = JSON.parse(read('apps/child-app/app.json'));
+
+    const xml = (name) =>
+      new RegExp(`<color name="${name}">(#[0-9a-fA-F]{6})</color>`).exec(nativeColors)?.[1]?.toLowerCase();
+
+    const primary = shade(childTheme, 'teal700');
+    const deepest = shade(childTheme, 'teal900');
+
+    expect(xml('splashscreen_background')).toBe(primary);
+    expect(xml('notification_icon_color')).toBe(primary);
+    expect(xml('colorPrimaryDark')).toBe(deepest);
+
+    // Expo writes the splash and the notification accent from app.json on a
+    // prebuild, so a mismatch here would silently undo the XML above.
+    expect(appConfig.expo.splash.backgroundColor.toLowerCase()).toBe(primary);
+    const notifications = appConfig.expo.plugins.find(
+      (p) => Array.isArray(p) && p[0] === 'expo-notifications',
+    );
+    expect(notifications[1].color.toLowerCase()).toBe(primary);
+  });
+
+  /**
+   * And the family app has a native half too.
+   *
+   * Its `styles.xml` binds `AppTheme` to `@color/colorPrimary`,
+   * `colorPrimaryDark` and `colorAccent`, and no `colors.xml` existed at all —
+   * so Android resolved all three from the Capacitor library, whose defaults are
+   * stock Material indigo and pink. Every part of the shell Android draws for
+   * itself was therefore untouched by the rebrand: a parent typing their
+   * password got pink text-selection handles inside a teal app.
+   */
+  it('paints the family app’s native chrome in the same teal its screens use', () => {
+    const nativeColors = read('apps/family-app/android/app/src/main/res/values/colors.xml');
+    const xml = (name) =>
+      new RegExp(`<color name="${name}">(#[0-9a-fA-F]{6})</color>`).exec(nativeColors)?.[1]?.toLowerCase();
+
+    expect(xml('colorPrimary')).toBe(shade(tailwindConfig, '600'));
+    expect(xml('colorPrimaryDark')).toBe(shade(tailwindConfig, '800'));
+    expect(xml('colorAccent')).toBe(shade(tailwindConfig, '600'));
+  });
+
+  it('has no unconverted blue left in the child app either', () => {
+    // The foreground-service notification and the Android channel's light both
+    // carried the old primary as a bare hex, outside anything theme.js governs.
+    const stragglers = sourcesUnder('apps/child-app/src')
+      .filter(([, source]) => /#2563eb/i.test(source))
+      .map(([file]) => file);
+
+    expect(stragglers).toEqual([]);
+  });
+
   it('tints the browser chrome on the static pages to match the page', () => {
     const offenders = ['landing.html', 'contact.html']
       .map((name) => [name, read(`apps/family-app/public/${name}`)])

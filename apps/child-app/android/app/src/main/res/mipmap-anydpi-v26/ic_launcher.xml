@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The adaptive icon, which is what Android 8 and later actually draws.
+
+  Without this file the launcher falls back to the legacy `ic_launcher.png`
+  bitmap: a fixed square that modern launchers cannot mask to their shape and
+  cannot animate, so Parentix sat as a hard-edged tile among circles. The
+  per-density `ic_launcher_foreground.png` files existed all along and nothing
+  referenced them — this is the reference.
+
+  Background is a flat colour rather than a bitmap because the mark is a
+  silhouette on teal; there is nothing in the ground for a bitmap to add.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/iconBackground"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>

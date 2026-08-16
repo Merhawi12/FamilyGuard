@@ -1,7 +1,26 @@
+<!--
+  The native half of the child app's palette. `src/theme.js` owns the JavaScript
+  side; these are the values Android needs before any JavaScript has run, so they
+  have to be kept in step by hand.
+
+  All three were #2563eb — the pre-rebrand business blue — long after the app
+  itself turned teal, because nothing in `src/` reads this file. The result was
+  a blue splash screen on every launch that faded into a teal app, and a blue
+  accent on every notification the app raised.
+-->
 <resources>
-  <color name="splashscreen_background">#2563eb</color>
-  <color name="iconBackground">#FFFFFF</color>
-  <color name="colorPrimary">#023c69</color>
-  <color name="colorPrimaryDark">#2563eb</color>
-  <color name="notification_icon_color">#2563eb</color>
+  <!-- colors.teal700 — the app's primary, and what the splash fades out of. -->
+  <color name="splashscreen_background">#0E7C86</color>
+  <!--
+    The ground behind the adaptive launcher icon, and teal rather than white for
+    a load-bearing reason: `ic_launcher_foreground` is a *white* shield on
+    transparent, so on the white this used to be the icon was a blank tile. The
+    foreground was unreferenced until mipmap-anydpi-v26/ic_launcher.xml was
+    added, which is why nobody saw it.
+  -->
+  <color name="iconBackground">#0E7C86</color>
+  <!-- colors.teal900 — the deepest shade, for the status bar behind the hero. -->
+  <color name="colorPrimary">#06525B</color>
+  <color name="colorPrimaryDark">#06525B</color>
+  <color name="notification_icon_color">#0E7C86</color>
 </resources>

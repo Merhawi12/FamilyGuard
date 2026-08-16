@@ -1,16 +1,32 @@
 {
   "expo": {
     "name": "Parentix",
-    "slug": "parentix-child",
+    "slug": "familyguard-child",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "scheme": "com.parentix.child",
+    "backgroundColor": "#0E7C86",
+    "userInterfaceStyle": "light",
     "splash": {
-      "backgroundColor": "#2563eb"
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0E7C86"
     },
+    "assetBundlePatterns": [
+      "assets/*"
+    ],
     "android": {
       "package": "com.parentix.child",
       "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0E7C86"
+      },
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -23,31 +39,60 @@
         "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
+    "ios": {
+      "bundleIdentifier": "com.parentix.child",
+      "buildNumber": "1",
+      "supportsTablet": false,
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "location",
+          "fetch",
+          "remote-notification"
+        ],
+        "UIRequiredDeviceCapabilities": [
+          "arm64"
+        ],
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait"
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsLocalNetworking": true
+        },
+        "NSUserNotificationsUsageDescription": "Parentix uses notifications to pass on messages from your parent and to tell you when screen time is nearly up."
+      }
+    },
     "plugins": [
       [
         "expo-notifications",
         {
-          "icon": "./assets/icon.png",
-          "color": "#2563eb"
+          "icon": "./assets/notification-icon.png",
+          "color": "#0E7C86"
         }
       ],
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Parentix needs location access to keep your child safe.",
-          "locationAlwaysPermission": "Parentix needs background location to monitor your child's whereabouts.",
-          "locationWhenInUsePermission": "Parentix needs location access for safety monitoring."
+          "locationAlwaysAndWhenInUsePermission": "Parentix shares this phone's location with your parent so they can see you are safe. Location is sent while the app is open and in the background.",
+          "locationAlwaysPermission": "Parentix shares this phone's location with your parent so they can see you are safe, including when the app is in the background.",
+          "locationWhenInUsePermission": "Parentix shares this phone's location with your parent so they can see you are safe.",
+          "isIosBackgroundLocationEnabled": true
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "eas": {
         "projectId": "b9ba998c-af61-4f0c-a1ce-3b13cde4311f"
       }
     },
-    "owner": "parentix",
+    "owner": "familyguard",
     "platforms": [
-      "android"
+      "android",
+      "ios"
     ]
   }
 }

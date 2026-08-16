@@ -69,6 +69,20 @@ parentix-release.keystore
 # signing certificate, and a public repository is a great deal easier to scrape
 # than an APK.
 google-services.json
+# The iOS half of the same thing, downloaded into apps/*/ios/App/App/. Ignored
+# for the same reasons, and with one extra: unlike the Android file this one also
+# carries the project's GCM sender ID and Google App ID for the *iOS* app, which
+# is what an FCM token is minted against.
+GoogleService-Info.plist
+
+# Apple signing material — never commit these. The .p8 is the APNs auth key that
+# lets FCM deliver to every iOS install of this app; it is downloadable from
+# Apple exactly once, and it does not expire, so a leak is permanent until the
+# key is revoked by hand.
+*.p8
+*.p12
+*.mobileprovision
+*.certSigningRequest
 
 # Capacitor — the Android project is committed (it holds signing and manifest
 # configuration), its build output is not.
@@ -79,3 +93,13 @@ apps/family-app/android/capacitor-cordova-android-plugins/build/
 apps/family-app/android/local.properties
 # Copied from dist/ by `npx cap sync` on every build.
 apps/family-app/android/app/src/main/assets/public/
+
+# The iOS project is committed for the same reason the Android one is: it holds
+# the Info.plist, the entitlements and the AppDelegate that bridges APNs to FCM.
+#
+# Its build output needs no rules here — `npx cap add ios` writes
+# apps/family-app/ios/.gitignore covering Pods/, build output, DerivedData and
+# the public/ folder copied from dist/. Only the two below are left, because
+# they are per-developer Xcode state that can appear outside that directory too.
+*.xcuserstate
+xcuserdata/

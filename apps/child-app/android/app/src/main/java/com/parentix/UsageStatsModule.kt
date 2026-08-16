@@ -27,8 +27,29 @@ class UsageStatsModule(private val ctx: ReactApplicationContext) : ReactContextB
     }
 
     /**
-     * Returns a map of packageName → { minutes, appName } for today's usage.
+     * Returns a map of packageName → { minutes, appName } for today's usage,
+     * measured from the device's own local midnight — which is the day boundary
+     * the server files a sample under, so the two have to agree.
+     *
      * Requires PACKAGE_USAGE_STATS permission (Settings → Apps → Usage access).
+     *
+     * ── Why `queryAndAggregateUsageStats` ────────────────────────────────────
+     * This used `queryUsageStats(INTERVAL_DAILY, …)` and walked the result with
+     * `result.putMap(stat.packageName, appMap)` — which *overwrites*. That is
+     * only correct if Android returns exactly one bucket per package, and it
+     * does not guarantee that: `queryUsageStats` returns every daily bucket
+     * whose interval intersects the range, so a package with two could have any
+     * one of them win. The failure is silent and it can go either way — an
+     * undercount hands a child screen time they have already spent, and picking
+     * a bucket that began yesterday reports yesterday's total as today's,
+     * locking a phone that has barely been used.
+     *
+     * `queryAndAggregateUsageStats` is the platform's own answer to exactly this
+     * question: it merges the buckets per package with `UsageStats.add()` and
+     * hands back one entry each. Using it removes the choice between overwriting
+     * and hand-summing rather than picking the less wrong of the two — and it is
+     * the aggregation Android itself considers authoritative, which matters for
+     * a number that decides when a child's phone stops working.
      */
     @ReactMethod
     fun getUsageStats(promise: Promise) {
@@ -47,21 +68,23 @@ class UsageStatsModule(private val ctx: ReactApplicationContext) : ReactContextB
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
 
-        val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, midnight, System.currentTimeMillis())
+        val aggregated = usm.queryAndAggregateUsageStats(midnight, System.currentTimeMillis())
 
         val result = WritableNativeMap()
-        for (stat in stats) {
+        for ((packageName, stat) in aggregated) {
             if (stat.totalTimeInForeground <= 0) continue
             val appMap = WritableNativeMap()
             appMap.putDouble("minutes", stat.totalTimeInForeground / 60_000.0)
-            appMap.putString("packageName", stat.packageName)
+            appMap.putString("packageName", packageName)
             try {
-                val info = pm.getApplicationInfo(stat.packageName, 0)
+                val info = pm.getApplicationInfo(packageName, 0)
                 appMap.putString("appName", pm.getApplicationLabel(info).toString())
             } catch (_: Exception) {
-                appMap.putString("appName", stat.packageName)
+                // An app uninstalled since it was used still has usage recorded
+                // against it; the package name is the honest label for it.
+                appMap.putString("appName", packageName)
             }
-            result.putMap(stat.packageName, appMap)
+            result.putMap(packageName, appMap)
         }
         promise.resolve(result)
     }

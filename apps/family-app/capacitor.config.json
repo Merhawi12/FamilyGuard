@@ -5,8 +5,15 @@
   "android": {
     "allowMixedContent": false
   },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#0E7C86",
+    "limitsNavigationsToAppBoundDomains": false,
+    "preferredContentMode": "mobile"
+  },
   "server": {
     "androidScheme": "https",
+    "iosScheme": "https",
     "hostname": "app.parentix.ca"
   }
 }

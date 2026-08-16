@@ -1,0 +1,25 @@
+<!--
+  The native chrome of the family app's Android shell.
+
+  `styles.xml` binds `AppTheme` to `@color/colorPrimary`, `colorPrimaryDark` and
+  `colorAccent`, and no `colors.xml` existed here — so all three resolved to the
+  Capacitor library's own defaults, which are stock Material **indigo and pink**
+  (#3F51B5 / #303F9F / #FF4081). Everything Android draws for itself outside the
+  WebView therefore ignored the rebrand entirely: the launch theme's tint, the
+  text-selection handles in every form field, the ripple on a native dialog. A
+  parent typing their password saw pink selection handles inside a teal app.
+
+  App resources win over library resources, so declaring the three here is the
+  whole of the fix. The values mirror `tailwind.config.js` — `primary-600` is the
+  brand teal — and `services/api/tests/familyBrandColors.test.js` asserts they
+  stay in step with it.
+-->
+<resources>
+  <!-- primary-600 — the brand teal, and what .btn-primary resolves to. -->
+  <color name="colorPrimary">#0E7C86</color>
+  <!-- primary-800 — the deepest shade, for the status bar above it. -->
+  <color name="colorPrimaryDark">#06525B</color>
+  <!-- primary-600 again: the accent is selection handles and native ripples,
+       which should read as the same brand colour rather than a second one. -->
+  <color name="colorAccent">#0E7C86</color>
+</resources>

@@ -36,6 +36,12 @@ describe('log severity — derived from the action name', () => {
     expect(levelFor('device.removed')).toBe('warning');
     expect(levelFor('safezone.deleted')).toBe('warning');
     expect(levelFor('widget.frobnicated_failed')).toBe('error');
+    // The code flows' refusals. `forgot-password` cannot tell the caller it
+    // declined to send — that would confirm the address has an account — so
+    // this entry is the only place a mail-bombed parent is visible at all.
+    expect(levelFor('auth.password_reset_throttled')).toBe('warning');
+    expect(levelFor('auth.phone_code_throttled')).toBe('warning');
+    expect(levelFor('auth.password_reset_code_failed')).toBe('error');
     expect(levelFor('auth.login')).toBe('info');
     expect(levelFor(undefined)).toBe('info');
   });

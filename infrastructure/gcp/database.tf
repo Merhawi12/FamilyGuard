@@ -36,6 +36,19 @@ resource "google_sql_database_instance" "main" {
 
     user_labels = local.labels
 
+    # The second of two independent guards, and the one that covers the case the
+    # first cannot.
+    #
+    # `deletion_protection` above is a Terraform-side flag: it makes *this*
+    # configuration refuse to destroy the instance. It is invisible to anyone
+    # outside Terraform, so a `gcloud sql instances delete` — or a console click
+    # — drops the production database with it set. This one is enforced by Cloud
+    # SQL itself and refuses the delete whatever asks for it.
+    #
+    # Both are driven by the same variable because "may this instance be
+    # deleted?" is one decision, not two.
+    deletion_protection_enabled = var.db_deletion_protection
+
     backup_configuration {
       enabled    = true
       start_time = "03:00"

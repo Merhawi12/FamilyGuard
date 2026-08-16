@@ -3,6 +3,7 @@ const { ActivityLog, Child, Device } = require('../models');
 const { parsePagination } = require('../utils/pagination');
 const { blindIndex } = require('../utils/crypto');
 const { isUuid } = require('../utils/ids');
+const { dateRangeWhere } = require('../utils/dateRange');
 
 // A malformed id is "not found", not a database error — see utils/ids.js for why
 // this has to be checked before the query rather than after it.
@@ -17,11 +18,9 @@ const getActivity = async (req, res, next) => {
     const { limit, offset } = parsePagination(req.query, { max: 500, defaultLimit: 50 });
     const { from, to } = req.query;
     const where = { childId: child.id };
-    if (from || to) {
-      where.startTime = {};
-      if (from) where.startTime[Op.gte] = new Date(from);
-      if (to) where.startTime[Op.lte] = new Date(to);
-    }
+    // A date-only `to` covers the whole of that day — see utils/dateRange.js.
+    const range = dateRangeWhere(from, to, { Op });
+    if (range) where.startTime = range;
 
     const logs = await ActivityLog.findAndCountAll({
       where,
@@ -83,11 +82,8 @@ const getWebHistory = async (req, res, next) => {
     const { from, to, search } = req.query;
 
     const where = { childId: child.id, category: 'browsing' };
-    if (from || to) {
-      where.startTime = {};
-      if (from) where.startTime[Op.gte] = new Date(from);
-      if (to) where.startTime[Op.lte] = new Date(to);
-    }
+    const range = dateRangeWhere(from, to, { Op });
+    if (range) where.startTime = range;
 
     const term = String(search || '').trim().toLowerCase();
     if (!term) {

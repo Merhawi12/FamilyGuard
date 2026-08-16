@@ -1,0 +1,163 @@
+# Builds the Family App for iOS on a macOS runner.
+#
+# This workflow exists because the archive step cannot be run anywhere else.
+# Everything up to it — the Vite build, `cap copy` — works on any operating
+# system, but `pod install` needs CocoaPods and `xcodebuild` needs Xcode, and
+# both are macOS-only. The project's usual development machine is Windows, so
+# without this there is no way to produce an iOS build from this repository at
+# all. (The Child App has no such problem: EAS builds it on Expo's own Macs, so
+# it is driven from scripts/build-ios.sh instead.)
+#
+# Manual by default, and the signing half is opt-in. With no Apple credentials
+# configured it still builds the app for the Simulator, which type-checks the
+# Swift, resolves the Pods and proves the Xcode project is intact — the failures
+# worth catching early — without needing an Apple Developer account.
+#
+# To get a signed .ipa, add these repository secrets:
+#
+#   APPLE_CERTIFICATE_P12       base64 of the distribution certificate (.p12)
+#   APPLE_CERTIFICATE_PASSWORD  its password
+#   APPLE_PROVISIONING_PROFILE  base64 of the .mobileprovision
+#   APPLE_TEAM_ID               the ten-character team identifier
+#   GOOGLE_SERVICE_INFO_PLIST   base64 of GoogleService-Info.plist, without
+#                               which the build runs but is never notified
+#
+# macOS runners bill at ten times the Linux rate, which is the other reason this
+# is not on every push.
+
+name: iOS — Family App
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: The API the bundle is built against
+        default: https://api.parentix.ca
+        required: true
+
+concurrency:
+  group: ios-family-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # The workspace root, because the family app is an npm workspace and its
+      # vite/react/@parentix-shared resolution comes from the hoisted tree.
+      - run: npm ci
+
+      # Same shape as the Android build: index.html as the shell, `/` pointing at
+      # the app rather than the marketing page, and the API origin inlined.
+      - name: Build web bundle
+        env:
+          VITE_BUILD_TARGET: capacitor
+          VITE_API_URL: ${{ github.event.inputs.api_url }}
+          VITE_ADMIN_URL: https://admin.parentix.ca
+          VITE_GOOGLE_MAPS_KEY: ${{ secrets.VITE_GOOGLE_MAPS_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+        run: npm run build:family
+
+      - name: Fail if the shell is missing
+        run: test -f apps/family-app/dist/index.html
+
+      # Absent on a fork or before Firebase has an iOS app registered. The build
+      # is allowed to continue without it — AppDelegate.swift degrades to "push
+      # disabled" rather than crashing — so that the compile is still checked.
+      - name: Restore GoogleService-Info.plist
+        if: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST != '' }}
+        run: |
+          echo "${{ secrets.GOOGLE_SERVICE_INFO_PLIST }}" | base64 --decode \
+            > apps/family-app/ios/App/App/GoogleService-Info.plist
+
+      - name: Sync Capacitor and install Pods
+        working-directory: apps/family-app
+        run: npx cap sync ios
+
+      # ── Unsigned path ──────────────────────────────────────────────────────
+      # A Simulator build needs no certificate, so it runs on every invocation
+      # and is what makes this workflow useful without an Apple account. It
+      # compiles AppDelegate.swift and links Firebase, which is where a mistake
+      # in the push bridge would show up.
+      - name: Build for Simulator (no signing)
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 == '' }}
+        run: |
+          xcodebuild \
+            -workspace apps/family-app/ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      # ── Signed path ────────────────────────────────────────────────────────
+      - name: Import signing certificate
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+        run: |
+          # A throwaway keychain, so nothing is left behind on the runner and the
+          # login keychain is never touched.
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+
+          echo "$CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$PROFILE" | base64 --decode \
+            > "$HOME/Library/MobileDevice/Provisioning Profiles/build.mobileprovision"
+
+      - name: Archive and export
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild \
+            -workspace apps/family-app/ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            archive
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/output"
+
+      - name: Upload .ipa
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: parentix-family-ios
+          path: ${{ runner.temp }}/output/*.ipa
+          if-no-files-found: error

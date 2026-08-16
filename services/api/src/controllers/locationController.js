@@ -4,6 +4,7 @@ const { createAlert } = require('../utils/alertHelper');
 const { parsePagination } = require('../utils/pagination');
 const { parseFix, INVALID_FIX } = require('../utils/geo');
 const { isUuid } = require('../utils/ids');
+const { dateRangeWhere } = require('../utils/dateRange');
 
 // A malformed id is "not found", not a database error — see utils/ids.js for why
 // this has to be checked before the query rather than after it.
@@ -195,11 +196,9 @@ const getHistory = async (req, res, next) => {
     const { limit, offset } = parsePagination(req.query, { max: 500, defaultLimit: 100 });
     const { from, to } = req.query;
     const where = { childId: child.id };
-    if (from || to) {
-      where.recordedAt = {};
-      if (from) where.recordedAt[Op.gte] = new Date(from);
-      if (to) where.recordedAt[Op.lte] = new Date(to);
-    }
+    // A date-only `to` covers the whole of that day — see utils/dateRange.js.
+    const range = dateRangeWhere(from, to, { Op });
+    if (range) where.recordedAt = range;
 
     const history = await Location.findAndCountAll({
       where,

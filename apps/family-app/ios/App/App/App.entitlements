@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		The push entitlement, without which APNs never issues a device token and
+		`didRegisterForRemoteNotificationsWithDeviceToken` in AppDelegate.swift is
+		simply never called — so registration hangs rather than fails, which is the
+		hardest version of this bug to read from the outside.
+
+		`development` is the correct value to keep committed here, and it does not
+		mean production builds get a sandbox token: it is what Xcode itself writes
+		when the Push Notifications capability is enabled, and the export step
+		re-signs against whichever provisioning profile is used, taking that
+		profile's aps-environment. An App Store or TestFlight export therefore ships
+		`production` without this file changing. Hard-coding `production` here is
+		the actual mistake — it breaks every local debug run against the sandbox.
+
+		This is the only entitlement the app claims. Associated Domains (universal
+		links from the emailed app.parentix.ca links) is deliberately absent: it
+		requires an apple-app-site-association file served from that host and the
+		matching capability on the App ID, and an entitlement present here but not
+		on the App ID fails signing. It is a follow-up, not a prerequisite — the
+		password-reset flow is code-based rather than link-based now, so nothing in
+		the product depends on it.
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

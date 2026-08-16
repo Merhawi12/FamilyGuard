@@ -17,4 +17,5 @@ export { default as GoogleSignInButton } from './components/GoogleSignInButton.j
 export { useBodyScrollLock } from './hooks/useBodyScrollLock.js';
 export { useDismissable } from './hooks/useDismissable.js';
 export { API_ORIGIN, API_BASE_URL, SOCKET_URL } from './config.js';
+export { localDateKey, lastLocalDays } from './dates.js';
 export * from './constants.js';

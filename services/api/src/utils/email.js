@@ -62,22 +62,33 @@ const sendVerificationEmail = ({ name, email, code }) => {
   });
 };
 
-const sendPasswordResetEmail = ({ name, email, token }) => {
-  const resetUrl = `${env.clientUrl}/reset-password?token=${encodeURIComponent(token)}`;
-
+/**
+ * A code, where there used to be a link.
+ *
+ * A reset link is a credential in a URL: it is logged by every mail gateway and
+ * link scanner it passes, it survives in browser history, and it works for
+ * anyone who reaches it — including the corporate filter that "checked" the
+ * message by fetching it. Six digits go to the same inbox but have to be carried
+ * back to a screen someone is already looking at, which is also what lets the
+ * whole flow finish in the app rather than punting between the app and a browser.
+ *
+ * The line logged when there is no relay is what makes the flow completable in
+ * development, and is the same shape as the verification-code one above.
+ */
+const sendPasswordResetCodeEmail = ({ name, email, code }) => {
   if (!isEnabled()) {
-    logger.info('Password reset link (email disabled)', { email, resetUrl });
+    logger.info('Password reset code (email disabled)', { email, code });
     return Promise.resolve(false);
   }
 
   return send({
     to: email,
-    subject: 'Reset your Parentix password',
+    subject: 'Your Parentix password reset code',
     html: layout(`
       <h2>Hi ${escapeHtml(name)},</h2>
-      <p>We received a request to reset your Parentix password. Click below to choose a new one:</p>
-      <p><a href="${resetUrl}" style="display:inline-block;background:#4F46E5;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">Reset Password</a></p>
-      <p>This link expires in <strong>30 minutes</strong>.</p>
+      <p>We received a request to reset your Parentix password. Enter this code to continue:</p>
+      <h1 style="letter-spacing:8px;font-size:40px;color:#4F46E5">${escapeHtml(code)}</h1>
+      <p>This code expires in <strong>15 minutes</strong> and can be used once.</p>
       <p>If you didn't request this, you can safely ignore this email — your password won't change.</p>
     `),
   });
@@ -135,14 +146,13 @@ const sendPasswordChangedEmail = ({ name, email, when, viaReset }) =>
 const ALERT_TYPE_LABELS = {
   left_safe_zone: 'Left Safe Zone',
   entered_safe_zone: 'Arrived at Safe Zone',
-  dangerous_content: 'Dangerous Content Detected',
+  dangerous_content: 'Risky Site Opened',
   emergency_button: 'Emergency Alert',
   cyberbullying: 'Cyberbullying Detected',
   screen_time_exceeded: 'Screen Time Exceeded',
   blocked_app: 'Blocked App Attempt',
   blocked_app_attempt: 'Blocked App Attempt',
-  app_installed: 'New App Installed',
-  unknown_contact: 'Unknown Contact',
+  app_installed: 'New App Used',
   safety_pattern: 'Safety Pattern Detected',
 };
 
@@ -164,9 +174,22 @@ const sendAlertEmail = ({ name, email, type, message, severity }) => {
   });
 };
 
-const sendContactFormEmail = ({ name, email, message }) => {
+/**
+ * The operator's copy of a contact-form submission.
+ *
+ * `replyTo` is the sender, so hitting reply in the mailbox answers the person
+ * rather than the no-reply address the platform sends from. `reference` is the
+ * stored row's id: the message is in the database whether or not this email
+ * arrives, and quoting the id is what connects the two when someone has to go
+ * looking.
+ */
+const sendContactFormEmail = ({ name, email, message, reference }) => {
   if (!env.email.adminAddress) {
-    logger.info('Contact form received (no ADMIN_EMAIL configured)', { name, email });
+    // No longer the message's only trace — it is stored before this is called —
+    // but still worth saying plainly, because it means nobody is being told.
+    logger.error('Contact form message stored but ADMIN_EMAIL is not configured', {
+      reference, from: email,
+    });
     return Promise.resolve(false);
   }
 
@@ -180,9 +203,42 @@ const sendContactFormEmail = ({ name, email, message }) => {
       <p><strong>Email:</strong> ${escapeHtml(email)}</p>
       <p><strong>Message:</strong></p>
       <p style="white-space:pre-wrap;">${escapeHtml(message)}</p>
+      ${reference ? `<p style="color:#94a3b8;font-size:.8rem;">Reference ${escapeHtml(reference)}</p>` : ''}
     `),
   });
 };
+
+/**
+ * The sender's own copy, so "did that go through?" has an answer in their inbox.
+ *
+ * The form said "Thanks! Your message has been sent" on the page and nothing
+ * ever followed it. Someone who closed the tab had no evidence they had written
+ * at all, and no reference to quote if they had to chase it.
+ *
+ * Their message is quoted back deliberately: it is the only copy they have, and
+ * a support desk that can show you what it received is one you can correct.
+ *
+ * `replyTo` is the admin mailbox — a person answering this acknowledgement is
+ * continuing the conversation, and it should reach a human rather than bounce
+ * off no-reply.
+ */
+const sendContactFormReceiptEmail = ({ name, email, message, reference }) =>
+  send({
+    to: email,
+    ...(env.email.adminAddress && { replyTo: env.email.adminAddress }),
+    subject: 'We received your message — Parentix',
+    html: layout(`
+      <h2>Thanks for getting in touch</h2>
+      <p>Hi ${escapeHtml(name)}, we have your message and someone will reply to this
+         address. There is nothing else you need to do.</p>
+      <div style="background:#f8fafc;border-left:4px solid #0E7C86;padding:16px 20px;border-radius:4px;margin:16px 0;">
+        <p style="margin:0;color:#334155;white-space:pre-wrap;">${escapeHtml(message)}</p>
+      </div>
+      ${reference ? `<p style="color:#94a3b8;font-size:.8rem;">Reference ${escapeHtml(reference)}</p>` : ''}
+      <p style="color:#64748b;font-size:.9rem;">If you did not send this, you can ignore it —
+         nothing has been created and no account has been changed.</p>
+    `),
+  });
 
 module.exports = {
   sendWelcomeEmail,
@@ -190,7 +246,8 @@ module.exports = {
   sendVerificationEmail,
   sendAlertEmail,
   sendContactFormEmail,
-  sendPasswordResetEmail,
+  sendContactFormReceiptEmail,
+  sendPasswordResetCodeEmail,
   sendNewSignInEmail,
   sendPasswordChangedEmail,
   ALERT_TYPE_LABELS,

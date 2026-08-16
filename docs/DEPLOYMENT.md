@@ -811,7 +811,10 @@ apply once more. The old certificate is detached and deleted, and
 - A deep link such as `https://app.parentix.ca/dashboard/children` returns 200,
   not 404. That was a standing defect of the bucket arrangement.
 - The socket connects rather than polling forever.
-- A password-reset email links to `https://app.parentix.ca/reset-password`.
+- A password-reset email carries a 6-digit code, and entering it on
+  `https://app.parentix.ca/login` reaches the "choose a new password" step.
+  There is no link in that message any more; `/reset-password` is a redirect
+  kept only for bookmarks.
 - Stripe returns to the dashboard after a checkout.
 - The child app still reports in. It talks to `api.parentix.ca` and should be
   entirely unaffected — confirm rather than assume, because a device that stops

@@ -5,6 +5,8 @@ import Icon from '../components/Icon';
 import { Button, Card, EmptyNote, Pill, Row, SectionTitle } from '../components/ui';
 import { getDeviceId } from '../services/link';
 import { getMonitoringStatus } from '../services/monitoring';
+import AppBlocker from '../native/AppBlocker';
+import VpnControl from '../native/VpnControl';
 import { colors, radius, space, type } from '../theme';
 
 /**
@@ -16,15 +18,29 @@ import { colors, radius, space, type } from '../theme';
  * blocked app and site is listed, because a child is entitled to know what is
  * being recorded about them.
  */
+/**
+ * `available` keeps the list to what this phone can actually do.
+ *
+ * Three of these are Android-only and impossible on iOS rather than merely
+ * unimplemented — see the headers in ../native. Listing them on an iPhone would
+ * be worse than incomplete, it would be untrue twice: each would read a
+ * permanent "Off", and the notice below counts the off ones and tells the child
+ * "your parent may ask you to turn them back on" — about three things that
+ * cannot be turned on, on a screen whose entire purpose is to be straight with
+ * them about what is being recorded.
+ *
+ * A phone that cannot block apps says nothing about blocking apps. What it does
+ * report, it reports honestly.
+ */
 const MONITORS = [
-  { key: 'monitoring', label: 'Monitoring is running', icon: 'shieldOutline' },
-  { key: 'appBlocking', label: 'App blocking', icon: 'apps' },
-  { key: 'websiteBlocking', label: 'Website blocking', icon: 'globe' },
-  { key: 'webHistory', label: 'Web history', icon: 'usage' },
-  { key: 'locationTracking', label: 'Location', icon: 'location' },
-  { key: 'contactSync', label: 'Approved contacts', icon: 'phone' },
-  { key: 'pushNotifications', label: 'Notifications', icon: 'bell' },
-];
+  { key: 'monitoring', label: 'Monitoring is running', icon: 'shieldOutline', available: true },
+  { key: 'appBlocking', label: 'App blocking', icon: 'apps', available: AppBlocker.supported },
+  { key: 'websiteBlocking', label: 'Website blocking', icon: 'globe', available: VpnControl.supported },
+  { key: 'webHistory', label: 'Web history', icon: 'usage', available: VpnControl.supported },
+  { key: 'locationTracking', label: 'Location', icon: 'location', available: true },
+  { key: 'contactSync', label: 'Approved contacts', icon: 'phone', available: true },
+  { key: 'pushNotifications', label: 'Notifications', icon: 'bell', available: true },
+].filter((monitor) => monitor.available);
 
 /** "2026-08-09T14:03:00Z" → "14:03" today, "9 Aug" before that. */
 function lastSyncLabel(iso) {
@@ -41,6 +57,16 @@ export default function SettingsScreen({ navigation }) {
   const [status, setStatus] = useState({});
   const [rules, setRules] = useState({ appRules: [], websiteRules: [], screenTimeRule: null });
   const [sync, setSync] = useState({ lastSyncAt: null, lastError: null });
+  /**
+   * The people the child's parent has approved.
+   *
+   * This list has been synced to the phone since contacts shipped and nothing on
+   * the device did anything with it — the check it was fetched for needs call and
+   * SMS permissions Parentix does not ask for. Showing it is the honest use of a
+   * list that lives on a child's phone, and it belongs on the screen whose whole
+   * premise is that a child is entitled to know what is being kept about them.
+   */
+  const [contacts, setContacts] = useState([]);
   const [deviceId, setDeviceId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const appState = useRef(AppState.currentState);
@@ -50,6 +76,7 @@ export default function SettingsScreen({ navigation }) {
     setStatus(monitoring.status);
     setRules(monitoring.rules);
     setSync(monitoring.sync || { lastSyncAt: null, lastError: null });
+    setContacts(monitoring.contacts?.contacts || []);
   }, []);
 
   const pullToRefresh = useCallback(async () => {
@@ -170,6 +197,34 @@ export default function SettingsScreen({ navigation }) {
               </View>
             )}
           </>
+        )}
+      </Card>
+
+      <Card>
+        <SectionTitle hint="Added by your parent. Ask them if someone is missing.">
+          People your parent has approved
+        </SectionTitle>
+
+        {contacts.length === 0 ? (
+          <EmptyNote
+            icon="phone"
+            title="Nobody added yet"
+            text="When your parent adds someone here, you will see them on this list."
+          />
+        ) : (
+          contacts.map((contact, i) => (
+            <Row
+              key={contact.id}
+              icon="phone"
+              label={contact.name}
+              // The parent's private note is stripped server-side before the list
+              // ever reaches this device, so there is nothing here a child should
+              // not read. The relationship is the useful half.
+              value={contact.relationship || ''}
+              tone="muted"
+              last={i === contacts.length - 1}
+            />
+          ))
         )}
       </Card>
 

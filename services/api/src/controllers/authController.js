@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const { User, Session } = require('../models');
 const { cancelSubscription } = require('../services/billing');
 const { eraseAccount } = require('../utils/accountErasure');
-const { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendPasswordResetEmail, sendPasswordChangedEmail } = require('../utils/email');
+const { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendPasswordResetCodeEmail, sendPasswordChangedEmail } = require('../utils/email');
 const { auditLog } = require('../utils/auditLogger');
 const { createSession, revokeSession, revokeAllSessions, revokeOtherSessions } = require('../utils/session');
 const { notifyNewSignIn } = require('../utils/signInNotice');
@@ -20,8 +20,30 @@ const { normalizePhone, maskPhone } = require('../utils/normalizePhone');
 const { sendVerificationSms, canVerifyByPhone } = require('../services/sms');
 const { env } = require('../config/env');
 const logger = require('../utils/logger');
+/**
+ * Every six-digit code on this service is minted, stored, expired, attempt-
+ * limited and resend-limited by this one module. What stays here is what a code
+ * *means* — which account it activates, whether presenting a wrong one also
+ * counts towards the account lockout — because that genuinely differs between
+ * confirming an address, signing in by SMS, and recovering a password.
+ */
+const otp = require('../utils/otp');
 
-const generateVerificationCode = () => String(crypto.randomInt(100000, 1000000));
+/**
+ * A resend the recipient is not entitled to yet.
+ *
+ * Answered as 429 with the wait in seconds, so a client can count down against
+ * the server's clock rather than its own guess. Deliberately *not* used by
+ * `forgotPassword`, which must answer identically whether or not the address has
+ * an account — see the note there.
+ */
+const throttled = (res, prepared, thing = 'code') =>
+  res.status(429).json({
+    error: prepared.reason === 'cooldown'
+      ? `Please wait ${prepared.retryAfter} seconds before asking for another ${thing}.`
+      : `Too many ${thing}s requested for this account. Try again later.`,
+    retryAfter: prepared.retryAfter,
+  });
 
 /**
  * Every signup path hands out the same trial, and has to.
@@ -77,14 +99,22 @@ const register = async (req, res, next) => {
     const existing = await User.findByEmail(email);
     if (existing) return res.status(409).json({ error: 'Email already registered' });
 
-    const code = generateVerificationCode();
     const trialEndsAt = await trialEndsAtFromNow();
-    const emailVerificationExpires = new Date(Date.now() + 15 * 60 * 1000);
+
+    /**
+     * The account is created unactivated, and that is the state the code exists
+     * to leave: `emailVerified` false is refused by `login`, so until the digits
+     * come back this row can hold a place and nothing else. `isActive` is a
+     * different question — an operator's decision about an account that already
+     * works — and the two are deliberately not the same flag.
+     *
+     * A brand-new account has no send history, so this cannot be throttled; the
+     * same call is what `resendCode` makes, where it can be.
+     */
+    const prepared = otp.prepareCode({}, 'email');
 
     const user = await User.create({
-      name, email, passwordHash: password, trialEndsAt,
-      emailVerificationCode: code,
-      emailVerificationExpires,
+      name, email, passwordHash: password, trialEndsAt, ...prepared.fields,
     });
 
     auditLog(req, { userId: user.id, action: 'auth.register', entity: 'User', entityId: user.id, metadata: { email } });
@@ -103,7 +133,7 @@ const register = async (req, res, next) => {
      * The account is deliberately still created: it is valid, and "Resend code"
      * finishes the job once mail is working again.
      */
-    const emailDelivered = await sendVerificationEmail({ name, email, code });
+    const emailDelivered = await sendVerificationEmail({ name, email, code: prepared.code });
     if (!emailDelivered) logger.error('Verification email was not delivered', { email });
 
     // Not on the critical path — nobody is blocked when this one fails.
@@ -135,36 +165,40 @@ const verifyEmail = async (req, res, next) => {
       return res.status(423).json({ error: 'Too many incorrect codes. Try again later.' });
     }
 
-    if (
-      user.emailVerificationCode !== String(code) ||
-      !user.emailVerificationExpires ||
-      new Date() > new Date(user.emailVerificationExpires)
-    ) {
+    const checked = otp.checkCode(user, 'email', code);
+
+    if (!checked.ok) {
       /**
-       * Counted against the account, not just the caller's address.
+       * Counted twice, against two different things, because they stop two
+       * different attacks.
        *
-       * The route's IP limiter was the only thing standing between a six-digit
-       * code and a guesser: thirty wrong codes from thirty addresses left the
-       * code live and the account untouched, and this code is not a password
-       * check — it *issues a session*, so guessing it is a takeover of a newly
-       * registered account. The phone path already counted failures exactly this
-       * way; only the email half was missing it.
+       * `otp.checkCode` has already decided what happens to the *code* — five
+       * wrong guesses and it is destroyed, so a guesser cannot ride out the
+       * route's per-IP limiter from a second address and keep working on the
+       * same six digits. What follows counts the failure against the *account*,
+       * which is what stops them simply asking for a fresh code and starting
+       * again. This code is not a password check — it issues a session — so
+       * guessing it is a takeover of a newly registered account.
        */
       const attempts = user.failedLoginAttempts + 1;
-      const updates = { failedLoginAttempts: attempts };
+      const updates = { ...checked.fields, failedLoginAttempts: attempts };
       if (attempts >= MAX_LOGIN_ATTEMPTS) {
         updates.failedLoginAttempts = 0;
         updates.lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MS);
       }
       await user.update(updates);
-      auditLog(req, { userId: user.id, action: 'auth.email_code_failed', entity: 'User', entityId: user.id });
+      auditLog(req, {
+        userId: user.id, action: 'auth.email_code_failed', entity: 'User', entityId: user.id,
+        metadata: { reason: checked.reason },
+      });
       return res.status(400).json({ error: 'Invalid or expired verification code' });
     }
 
+    // Activation. The address has proved itself, so the account stops being a
+    // pending one — and the code that proved it is destroyed by `fields`.
     await user.update({
+      ...checked.fields,
       emailVerified: true,
-      emailVerificationCode: null,
-      emailVerificationExpires: null,
       failedLoginAttempts: 0,
       lockedUntil: null,
     });
@@ -327,14 +361,33 @@ const resendCode = async (req, res, next) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (user.emailVerified) return res.status(400).json({ error: 'Email already verified' });
 
-    const code = generateVerificationCode();
-    const emailVerificationExpires = new Date(Date.now() + 15 * 60 * 1000);
-    await user.update({ emailVerificationCode: code, emailVerificationExpires });
+    /**
+     * The limit that is about the person receiving the mail, not the machine
+     * asking.
+     *
+     * The route's per-IP ceiling stops one address flooding the service and does
+     * nothing about the case that actually hurts somebody: an attacker naming a
+     * stranger's address from enough machines to stay under it, which is a mail
+     * bomb they cannot turn off. This one is counted against the account, so
+     * where the requests come from does not matter.
+     */
+    const prepared = otp.prepareCode(user, 'email');
+    if (!prepared.allowed) {
+      auditLog(req, {
+        userId: user.id, action: 'auth.email_code_throttled', entity: 'User', entityId: user.id,
+        metadata: { reason: prepared.reason },
+      });
+      return throttled(res, prepared);
+    }
+
+    await user.update(prepared.fields);
 
     // Same reasoning as `register`: a resend that quietly fails is worse than
     // one that says so, because the parent goes on waiting for it.
-    const emailDelivered = await sendVerificationEmail({ name: user.name, email, code });
+    const emailDelivered = await sendVerificationEmail({ name: user.name, email, code: prepared.code });
     if (!emailDelivered) logger.error('Verification email was not delivered', { email });
+
+    auditLog(req, { userId: user.id, action: 'auth.email_code_resent', entity: 'User', entityId: user.id });
 
     res.json({
       message: emailDelivered
@@ -361,7 +414,7 @@ const updateProfile = async (req, res, next) => {
      * This wrote the address straight through and left `emailVerified` true, so
      * an account could move to any address its owner had never demonstrated
      * control of while still counting as verified. Everything that matters then
-     * follows the account there: the password-reset link, every alert about the
+     * follows the account there: the password-reset code, every alert about the
      * child, the receipts. A typo alone silently redirected all of it to a
      * stranger, and nothing in the flow ever asked the new address to prove
      * itself.
@@ -375,14 +428,25 @@ const updateProfile = async (req, res, next) => {
     // with different capitalisation is a no-op rather than a clash with itself.
     const changingEmail = !!email && normalizeEmail(email) !== req.user.email;
     let verificationSent = false;
+    // Held here because `updates.emailVerificationCode` is the *hash* the moment
+    // it goes through the model — the digits exist only between this line and
+    // the message that carries them.
+    let issuedCode = null;
 
     if (changingEmail) {
       const existing = await User.findByEmail(email);
       if (existing) return res.status(409).json({ error: 'Email already in use' });
+
+      // Rate limited like any other code, and for the sharper version of the
+      // same reason: this one is aimed at an address chosen by whoever holds the
+      // session, so without a limit a stolen session is a mail cannon.
+      const prepared = otp.prepareCode(req.user, 'email');
+      if (!prepared.allowed) return throttled(res, prepared);
+
+      issuedCode = prepared.code;
       updates.email = email;
       updates.emailVerified = false;
-      updates.emailVerificationCode = generateVerificationCode();
-      updates.emailVerificationExpires = new Date(Date.now() + 15 * 60 * 1000);
+      Object.assign(updates, prepared.fields);
     }
 
     await req.user.update(updates);
@@ -391,7 +455,7 @@ const updateProfile = async (req, res, next) => {
       verificationSent = await sendVerificationEmail({
         name: req.user.name,
         email: req.user.email,
-        code: updates.emailVerificationCode,
+        code: issuedCode,
       });
       if (!verificationSent) logger.error('Verification email was not delivered', { email: req.user.email });
       auditLog(req, {
@@ -468,8 +532,8 @@ const changePassword = async (req, res, next) => {
      * measure, and until now it was completely silent: an attacker with a live
      * session could change the password, evict the real owner, and the only
      * signal the owner ever got was a login that stopped working. This mail is
-     * what turns that into something they can act on while the reset link still
-     * works.
+     * what turns that into something they can act on while a reset code can
+     * still be sent to an address they control.
      */
     track(
       sendPasswordChangedEmail({ name: req.user.name, email: req.user.email, when: new Date() }).then(
@@ -688,7 +752,35 @@ const authProviders = async (req, res, next) => {
   }
 };
 
-const RESET_TOKEN_EXPIRES_MS = 30 * 60 * 1000;
+/* ── Forgotten password ───────────────────────────────────────────────────────
+ *
+ * Three steps, and a code rather than a link: ask for one, present it, choose a
+ * new password.
+ *
+ * The middle step is what the link used to be. `verify-reset-code` exchanges six
+ * digits for a random single-use ticket, and `reset-password` takes that ticket
+ * — so the endpoint that actually changes the password is unchanged, and what
+ * changed is only how a ticket comes into existence. That split matters: it
+ * means the secret that travels through somebody's inbox is short-lived and
+ * attempt-limited, while the secret that authorises the change never leaves the
+ * two requests it lives between.
+ *
+ * The same three properties hold across all of it. Nothing here says whether an
+ * address has an account. Nothing here signs anybody in — a reset ends at the
+ * sign-in screen, which then applies every gate it always did. And every step
+ * lands in the audit log, because this is the flow somebody walks when they have
+ * already lost control of something.
+ */
+
+/** How long the ticket minted by `verify-reset-code` is good for. */
+const RESET_TOKEN_EXPIRES_MS = 15 * 60 * 1000;
+
+/**
+ * Identical for an address with an account and one without — including when the
+ * account exists but has asked too often, which is the case that is easy to get
+ * wrong. A 429 there would answer a question the 200 exists to refuse.
+ */
+const RESET_REQUESTED_MESSAGE = 'If an account exists for that email, we have sent a 6-digit code';
 
 const forgotPassword = async (req, res, next) => {
   try {
@@ -696,31 +788,106 @@ const forgotPassword = async (req, res, next) => {
     if (!email) return res.status(400).json({ error: 'Email required' });
 
     const user = await User.findByEmail(email);
-    // Always return the same response so this endpoint can't be used to enumerate accounts
+
     if (user) {
-      const token = crypto.randomBytes(32).toString('hex');
-      const passwordResetExpires = new Date(Date.now() + RESET_TOKEN_EXPIRES_MS);
-      await user.update({ passwordResetToken: token, passwordResetExpires });
+      const prepared = otp.prepareCode(user, 'reset');
+
+      if (!prepared.allowed) {
+        /**
+         * Refused silently, and recorded.
+         *
+         * The caller is told nothing, because the cooldown is a fact about an
+         * account and telling them would be the enumeration oracle this whole
+         * endpoint is shaped around avoiding. The operator is told everything,
+         * because a stream of these is somebody being mail-bombed.
+         */
+        auditLog(req, {
+          userId: user.id, action: 'auth.password_reset_throttled', entity: 'User', entityId: user.id,
+          metadata: { reason: prepared.reason },
+        });
+        return res.json({ message: RESET_REQUESTED_MESSAGE });
+      }
+
+      /**
+       * Any ticket already outstanding dies here.
+       *
+       * Asking for a new code is what somebody does when the last one went
+       * astray, and a half-finished reset that stays live is a key to the
+       * account sitting in whatever went wrong the first time.
+       */
+      await user.update({ ...prepared.fields, passwordResetToken: null, passwordResetExpires: null });
 
       /**
        * Awaited and its result logged, but never reported to the caller.
        *
-       * The `.catch` this replaces could not fire: `mailer.send` reports failure
-       * by resolving false rather than throwing, so a reset link that never left
-       * the server produced no error, no log and no signal of any kind — the one
-       * failure operators most need to see about the flow people use when they
-       * are already locked out.
-       *
-       * The response stays identical either way on purpose. Saying "we could not
-       * send it" would confirm the address has an account, which is exactly what
-       * the constant message below exists to hide.
+       * `mailer.send` reports failure by resolving false rather than throwing,
+       * so a code that never left the server produces no error of its own — and
+       * this is the flow people use when they are already locked out, so it is
+       * the failure operators most need to see. The response stays identical
+       * either way: saying "we could not send it" would confirm the address has
+       * an account.
        */
-      const delivered = await sendPasswordResetEmail({ name: user.name, email, token });
+      const delivered = await sendPasswordResetCodeEmail({ name: user.name, email, code: prepared.code });
       if (!delivered) logger.error('Password reset email was not delivered', { email });
+
       auditLog(req, { userId: user.id, action: 'auth.password_reset_requested', entity: 'User', entityId: user.id });
     }
 
-    res.json({ message: 'If an account exists for that email, a reset link has been sent' });
+    res.json({ message: RESET_REQUESTED_MESSAGE });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Step two: six digits in, a single-use ticket out.
+ *
+ * Every refusal is the same sentence — an address with no account, a wrong code,
+ * an expired one, and a code that has been guessed at too many times all answer
+ * `Invalid or expired code`. Anything finer would turn this into the account
+ * oracle that `forgotPassword` above is careful not to be.
+ *
+ * A wrong code is deliberately *not* counted against `failedLoginAttempts`. Every
+ * other code path on this service locks the account after five, and that is
+ * right where the code is a way *in*; here it would let anyone who knows an
+ * address lock its owner out of the one flow that exists to get them back in.
+ * `otp.checkCode` still burns the code after five wrong guesses, so the guessing
+ * is bounded — it just costs the attacker a code rather than costing the owner
+ * their recovery path.
+ */
+const verifyResetCode = async (req, res, next) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+
+    const invalid = () => res.status(400).json({ error: 'Invalid or expired code' });
+
+    const user = await User.findByEmail(email);
+    if (!user) return invalid();
+
+    const checked = otp.checkCode(user, 'reset', code);
+    if (!checked.ok) {
+      await user.update(checked.fields);
+      auditLog(req, {
+        userId: user.id, action: 'auth.password_reset_code_failed', entity: 'User', entityId: user.id,
+        metadata: { reason: checked.reason },
+      });
+      return invalid();
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    await user.update({
+      ...checked.fields,
+      passwordResetToken: token,
+      passwordResetExpires: new Date(Date.now() + RESET_TOKEN_EXPIRES_MS),
+    });
+
+    auditLog(req, { userId: user.id, action: 'auth.password_reset_code_verified', entity: 'User', entityId: user.id });
+
+    // Returned in the body rather than mailed, because the address has just been
+    // proved by the code that arrived at it. It is single use, it expires in
+    // fifteen minutes, and it authorises exactly one thing.
+    res.json({ resetToken: token, expiresIn: Math.floor(RESET_TOKEN_EXPIRES_MS / 1000) });
   } catch (err) {
     next(err);
   }
@@ -736,13 +903,23 @@ const resetPassword = async (req, res, next) => {
 
     const user = await User.findOne({ where: { passwordResetToken: token } });
     if (!user || !user.passwordResetExpires || new Date() > new Date(user.passwordResetExpires)) {
-      return res.status(400).json({ error: 'Invalid or expired reset link' });
+      return res.status(400).json({ error: 'Invalid or expired reset request' });
     }
 
     await user.update({
       passwordHash: newPassword,
       passwordResetToken: null,
       passwordResetExpires: null,
+      /**
+       * The code goes too, not just the ticket it bought.
+       *
+       * `verify-reset-code` already consumes it, so this is belt and braces for
+       * any future path that mints a ticket some other way — a code left alive
+       * after the password it guards has already been changed is a second key to
+       * a door that has just been re-locked.
+       */
+      passwordResetCode: null,
+      passwordResetCodeExpires: null,
       failedLoginAttempts: 0,
       lockedUntil: null,
     });
@@ -751,8 +928,8 @@ const resetPassword = async (req, res, next) => {
     // session has to go, not just the one doing the reset.
     await revokeAllSessions(user.id, req.app.get('io'));
 
-    // Confirms the reset to the address that asked for it. A reset link that was
-    // requested by somebody else is only visible to the owner through this.
+    // Confirms the reset to the address that asked for it. A reset that somebody
+    // else drove is only visible to the owner through this.
     track(
       sendPasswordChangedEmail({ name: user.name, email: user.email, when: new Date(), viaReset: true }).then(
         (delivered) => {
@@ -824,9 +1001,6 @@ const updateNotificationPrefs = async (req, res, next) => {
  * session with its own rules about revocation or two-factor.
  */
 
-/** Same fifteen minutes the email code gets. Long enough to find the message, short enough to matter. */
-const PHONE_CODE_TTL_MS = 15 * 60 * 1000;
-
 const requestPhoneCode = async (req, res, next) => {
   try {
     /**
@@ -854,6 +1028,28 @@ const requestPhoneCode = async (req, res, next) => {
     let user = await User.findByPhone(phone);
     const registering = mode === 'register';
 
+    /**
+     * Decided before the row is touched, so a throttled request cannot leave a
+     * user behind as a side effect.
+     *
+     * An account that does not exist yet has no send history and so is always
+     * allowed its first code — the limit engages from the second request
+     * onwards, which is the one that can be abused. This matters more here than
+     * on the email flows: every call that gets past this point spends money at
+     * the SMS provider and lands on a real handset, and the route's per-IP
+     * ceiling does nothing about a number being texted from many machines.
+     */
+    const prepared = otp.prepareCode(user || {}, 'phone');
+    if (!prepared.allowed) {
+      if (user) {
+        auditLog(req, {
+          userId: user.id, action: 'auth.phone_code_throttled', entity: 'User', entityId: user.id,
+          metadata: { reason: prepared.reason },
+        });
+      }
+      return throttled(res, prepared);
+    }
+
     if (registering) {
       // Only a *verified* number is taken. An abandoned signup leaves a row
       // holding a number its owner never proved, and refusing to let the real
@@ -864,7 +1060,9 @@ const requestPhoneCode = async (req, res, next) => {
       }
       if (!name?.trim()) return res.status(400).json({ error: 'Name required' });
       if (!user) {
-        user = await User.create({ name: name.trim(), phone, trialEndsAt: await trialEndsAtFromNow() });
+        user = await User.create({
+          name: name.trim(), phone, trialEndsAt: await trialEndsAtFromNow(), ...prepared.fields,
+        });
       } else {
         // Resuming an abandoned signup. Backfilled only when absent, which both
         // heals a row created before the trial was granted here and stops the
@@ -872,6 +1070,7 @@ const requestPhoneCode = async (req, res, next) => {
         await user.update({
           name: name.trim(),
           ...(user.trialEndsAt ? {} : { trialEndsAt: await trialEndsAtFromNow() }),
+          ...prepared.fields,
         });
       }
     } else if (!user?.phoneVerified) {
@@ -884,14 +1083,12 @@ const requestPhoneCode = async (req, res, next) => {
        * enumeration impractical, rather than the wording of this line.
        */
       return res.status(404).json({ error: 'No account found for that number. Create one instead.' });
+    } else {
+      // Signing in: the row already exists, so only the code columns move.
+      await user.update(prepared.fields);
     }
 
-    const code = generateVerificationCode();
-    await user.update({
-      phoneVerificationCode: code,
-      phoneVerificationExpires: new Date(Date.now() + PHONE_CODE_TTL_MS),
-    });
-
+    const code = prepared.code;
     const smsDelivered = await sendVerificationSms({ phone, code });
     if (!smsDelivered) logger.error('Phone verification SMS was not delivered', { phone: maskPhone(phone) });
 
@@ -939,30 +1136,31 @@ const verifyPhoneCode = async (req, res, next) => {
       return res.status(423).json({ error: 'Account temporarily locked due to repeated failed logins. Try again later.' });
     }
 
-    if (
-      user.phoneVerificationCode !== String(code)
-      || !user.phoneVerificationExpires
-      || new Date() > new Date(user.phoneVerificationExpires)
-    ) {
-      // Counted against the same lockout the password path uses. Six digits is
-      // a million possibilities, and the per-route limiter caps a single IP —
-      // this is what caps the account no matter where the guesses come from.
+    const checked = otp.checkCode(user, 'phone', code);
+
+    if (!checked.ok) {
+      // Counted against the same lockout the password path uses, on top of the
+      // per-code budget `checkCode` keeps. Six digits is a million
+      // possibilities, and the per-route limiter caps a single IP — this is what
+      // caps the account no matter where the guesses come from.
       const attempts = user.failedLoginAttempts + 1;
-      const updates = { failedLoginAttempts: attempts };
+      const updates = { ...checked.fields, failedLoginAttempts: attempts };
       if (attempts >= MAX_LOGIN_ATTEMPTS) {
         updates.failedLoginAttempts = 0;
         updates.lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MS);
       }
       await user.update(updates);
-      auditLog(req, { userId: user.id, action: 'auth.phone_code_failed', entity: 'User', entityId: user.id });
+      auditLog(req, {
+        userId: user.id, action: 'auth.phone_code_failed', entity: 'User', entityId: user.id,
+        metadata: { reason: checked.reason },
+      });
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
 
     const firstVerification = !user.phoneVerified;
     await user.update({
+      ...checked.fields,
       phoneVerified: true,
-      phoneVerificationCode: null,
-      phoneVerificationExpires: null,
       failedLoginAttempts: 0,
       lockedUntil: null,
     });
@@ -1155,6 +1353,6 @@ const deleteAccount = async (req, res, next) => {
 module.exports = {
   register, login, me, logout, verifyEmail, resendCode, updateProfile, changePassword,
   googleAuth, authProviders, requestPhoneCode, verifyPhoneCode,
-  forgotPassword, resetPassword, getNotificationPrefs, updateNotificationPrefs,
+  forgotPassword, verifyResetCode, resetPassword, getNotificationPrefs, updateNotificationPrefs,
   listSessions, revokeOneSession, revokeOtherSessionsForUser, deleteAccount,
 };

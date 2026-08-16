@@ -2,7 +2,8 @@ const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const {
   register, login, me, logout, verifyEmail, resendCode, updateProfile, changePassword,
-  googleAuth, authProviders, requestPhoneCode, verifyPhoneCode, forgotPassword, resetPassword,
+  googleAuth, authProviders, requestPhoneCode, verifyPhoneCode,
+  forgotPassword, verifyResetCode, resetPassword,
   getNotificationPrefs, updateNotificationPrefs,
   listSessions, revokeOneSession, revokeOtherSessionsForUser, deleteAccount,
 } = require('../controllers/authController');
@@ -91,7 +92,17 @@ router.post('/google', loginLimiter, googleAuth);
 // Read-only and unauthenticated on purpose — the sign-in page has to know
 // whether to draw the Google button before anyone has signed in.
 router.get('/providers', authProviders);
+/**
+ * Forgotten password, in three steps: ask for a code, present it, choose a new
+ * password.
+ *
+ * `verify-reset-code` gets `codeLimiter` for the same reason the other two code
+ * screens do — six digits need their window closed by attempt count as well as
+ * by time — and `reset-password` keeps it because the ticket it takes is the
+ * last thing standing between a caller and somebody's account.
+ */
 router.post('/forgot-password', resendLimiter, forgotPassword);
+router.post('/verify-reset-code', codeLimiter, verifyResetCode);
 router.post('/reset-password', codeLimiter, resetPassword);
 router.get('/me', authenticate, me);
 router.post('/logout', authenticate, logout);

@@ -260,7 +260,23 @@ const sendExpo = async (row, payload) => {
 // ── Sending ───────────────────────────────────────────────────────────────────
 
 const deliver = async (rows, payload, context) => {
-  if (rows.length === 0) return { sent: 0, failed: 0, recipients: 0 };
+  if (rows.length === 0) {
+    /**
+     * Nowhere to send it, said out loud.
+     *
+     * This returned silently, which made the two ways a notification fails to
+     * arrive indistinguishable in the logs: a send that failed leaves a `push
+     * delivery failed` line, and a send with no destination left nothing at all.
+     * So "the parent never got the emergency alert" and "the parent has never
+     * turned notifications on" looked the same from the outside — and the second
+     * is the commoner of the two and the one an operator can actually act on.
+     *
+     * `info`, not `warn`: an account with no push subscription is an ordinary
+     * state, not a fault. What matters is that the attempt is on the record.
+     */
+    logger.info('push had no active destination', { ...context, recipients: 0 });
+    return { sent: 0, failed: 0, recipients: 0 };
+  }
 
   if (!env.push.enabled) {
     // Tests and local runs: record the intent without reaching a push service,

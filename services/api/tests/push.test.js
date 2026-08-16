@@ -358,6 +358,30 @@ describe('Push — delivery and token health', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  /**
+   * "Nobody has notifications on" and "the notification failed" are different
+   * answers, and the logs used to give the same one for both — a failed send
+   * leaves a `push delivery failed` line, and a send with no destination left
+   * nothing at all. The second is by far the commoner, and the only one an
+   * operator can actually do something about.
+   */
+  it('records an attempt that had nowhere to go', async () => {
+    const logger = require('../src/utils/logger');
+    const spy = jest.spyOn(logger, 'info').mockImplementation(() => {});
+    const parent = await createUser();
+
+    const result = await push.sendToUser(parent.id, {
+      title: 'x', body: 'y', data: { type: 'alert' },
+    });
+
+    expect(result).toMatchObject({ sent: 0, failed: 0, recipients: 0 });
+    expect(spy).toHaveBeenCalledWith(
+      'push had no active destination',
+      expect.objectContaining({ target: 'user', userId: parent.id, type: 'alert' }),
+    );
+    spy.mockRestore();
+  });
+
   it('never sends one parent\'s notification to another parent\'s browser', async () => {
     const first = await createUser();
     const second = await createUser();

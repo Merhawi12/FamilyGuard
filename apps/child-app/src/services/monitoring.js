@@ -8,20 +8,32 @@ import {
   startWebHistory, stopWebHistory, uploadWebHistory, collectNow, getWebHistoryStatus,
 } from './webHistory';
 import { registerForPush, getPushStatus } from './push';
+import { reportNewApps } from './newApps';
 import { lockState } from './schedule';
 import { disconnectSocket } from './socket';
 import AppBlocker from '../native/AppBlocker';
 import UsageStats from '../native/UsageStats';
 import VpnControl from '../native/VpnControl';
+import { colors } from '../theme';
 
 const BG_TASK = 'fg-monitoring-task';
 const LOCATION_TASK = 'fg-location-task';
 const LOCK_TICK_MS = 60 * 1000;
 
-// Packages excluded from screen-time totals (own app, launchers, core system UI)
-const EXCLUDED_PACKAGES = new Set(['com.parentix']);
+/**
+ * Packages excluded from screen-time totals: this app, launchers, core system UI.
+ *
+ * The entry here was `com.parentix`, and the app's `applicationId` is
+ * `com.parentix.child` — so the exclusion never matched and Parentix counted
+ * itself. Every minute a child spent on the screen that tells them how much time
+ * they have left was charged against that time, and worse, the minutes spent in
+ * Permissions and Settings — screens the app itself sends them to — pushed them
+ * towards a lock. `com.parentix` is kept as a prefix so a future sibling package
+ * (a family build, a rename) is excluded too, rather than repeating this.
+ */
 const isExcludedPackage = (pkg) =>
-  EXCLUDED_PACKAGES.has(pkg) ||
+  pkg === 'com.parentix' ||
+  pkg.startsWith('com.parentix.') ||
   pkg.startsWith('com.android.launcher') ||
   pkg.startsWith('com.google.android.apps.nexuslauncher') ||
   pkg === 'com.android.systemui' ||
@@ -197,6 +209,9 @@ async function syncUsageStats() {
   // Rebuilt rather than accumulated, so yesterday's totals cannot keep an app
   // blocked after the usage window has rolled over.
   const appMinutes = {};
+  // Labels alongside the totals, so a new-app alert can name the app rather than
+  // hand the parent a package name to decipher.
+  const appNames = {};
 
   /**
    * When this phone's usage day opened — the same local midnight
@@ -216,6 +231,7 @@ async function syncUsageStats() {
     if (isExcludedPackage(packageName)) continue;
     totalMinutes += data.minutes;
     appMinutes[packageName] = data.minutes;
+    appNames[packageName] = data.appName || packageName;
 
     try {
       await deviceApi.logActivity({
@@ -237,6 +253,21 @@ async function syncUsageStats() {
   _state.appMinutes = appMinutes;
 
   /**
+   * Anything on this phone the parent has not seen before.
+   *
+   * The set is already in hand — this is the only place on the device that knows
+   * which apps a child actually opens — so the alert costs one comparison rather
+   * than the `PACKAGE_ADDED` receiver the catalogue assumed. Awaited so a failed
+   * cache write cannot leave the baseline unsaved and re-announce the phone on
+   * the next launch. See services/newApps.js.
+   */
+  try {
+    await reportNewApps(Object.keys(appMinutes), appNames);
+  } catch (err) {
+    console.warn('[monitoring] new-app check failed:', err.message);
+  }
+
+  /**
    * Screen-time enforcement.
    *
    * Usage resets at midnight, so this has to be able to *release* the block as
@@ -250,7 +281,17 @@ async function syncUsageStats() {
   // limit is worth an alert: bedtime and the schedule arrive at their hour every
   // day by design, and alerting on those would be noise, not news.
   if (_state.lockReason === 'daily_limit') {
-    const today = new Date().toISOString().slice(0, 10);
+    /**
+     * The phone's own calendar day, not UTC's.
+     *
+     * `toISOString()` here meant that in Canada the "day" rolled over at 20:00
+     * local — so a limit reached at 19:00 and still in force at 21:00 alerted
+     * the parent twice on the same evening, which is the one evening they are
+     * most likely to be looking. The usage window this guards is the device's
+     * local day, so the key has to be too.
+     */
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     if (_state.screenTimeAlertedDate !== today) {
       _state.screenTimeAlertedDate = today;
       emitEvent('alert:screen_time_exceeded');
@@ -296,15 +337,43 @@ async function startLocationTracking() {
     });
   }
 
+  /**
+   * Half of these keys are read by one platform and ignored by the other, which
+   * is the whole difficulty of background location.
+   *
+   * Android only: `timeInterval` (iOS schedules on its own terms) and
+   * `foregroundService` (the persistent notification Android requires before it
+   * will keep a background service alive).
+   *
+   * iOS only: `showsBackgroundLocationIndicator`, and the two below.
+   *
+   * `pausesUpdatesAutomatically` is the one that matters, and it defends against
+   * a failure with no symptom. iOS will suspend location updates when it decides
+   * the device has been stationary long enough — and it does **not** resume them
+   * by itself. Left at the system default, a child's phone sitting on a desk
+   * through a lesson stops reporting, the parent's map keeps showing the last
+   * fix as though it were current, and nothing anywhere records that updates
+   * stopped. That is the same class of bug as the stalest-fix one above, arrived
+   * at from the other direction.
+   *
+   * `activityType: Other` goes with it: the default (`AutomotiveNavigation`)
+   * tells iOS to expect a car, which makes its own pausing heuristics wrong for
+   * a child walking around a school.
+   */
   await Location.startLocationUpdatesAsync(LOCATION_TASK, {
     accuracy: Location.Accuracy.Balanced,
     timeInterval: 60_000,      // min 1 update/min
     distanceInterval: 50,       // or every 50m
     showsBackgroundLocationIndicator: true,
+    pausesUpdatesAutomatically: false,
+    activityType: Location.ActivityType.Other,
     foregroundService: {
       notificationTitle: 'Parentix',
       notificationBody: 'Location monitoring active',
-      notificationColor: '#2563eb',
+      // colors.teal700, the app's primary. It was the old business blue, which
+      // survived the teal rebrand because it is a hex in a config object rather
+      // than a token read from theme.js.
+      notificationColor: colors.teal700,
     },
   });
 

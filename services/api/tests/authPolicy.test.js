@@ -1,7 +1,14 @@
 const request = require('supertest');
 const { app } = require('../src/app');
 const { User, Session } = require('../src/models');
-const { createUser, tokenFor, uniqueEmail, DEFAULT_PASSWORD } = require('./helpers');
+const { createUser, tokenFor, uniqueEmail, DEFAULT_PASSWORD, seedResetCode } = require('./helpers');
+
+/** Walks the reset flow as far as the ticket the last step spends. */
+const resetTicketFor = async (user) => {
+  const code = await seedResetCode(user);
+  const res = await request(app).post('/api/auth/verify-reset-code').send({ email: user.email, code });
+  return res.body.resetToken;
+};
 
 describe('password policy', () => {
   it.each([
@@ -44,10 +51,19 @@ describe('email verification', () => {
       .post('/api/auth/register')
       .send({ name: 'Verify Me', email, password: 'correct-horse9' });
 
+    /**
+     * The code registration issued cannot be read back — the column holds a
+     * keyed hash — so a known one is put in its place. What this test is about
+     * is the session the endpoint issues, not the digits that reach it;
+     * `emailDelivery.test.js` is where the issued code is followed into a
+     * message.
+     */
     const user = await User.findOne({ where: { email } });
+    await user.update({ emailVerificationCode: '246813' });
+
     const res = await request(app)
       .post('/api/auth/verify-email')
-      .send({ email, code: user.emailVerificationCode });
+      .send({ email, code: '246813' });
 
     expect(res.status).toBe(200);
     expect(res.body.token).toBeTruthy();
@@ -76,13 +92,14 @@ describe('password reset', () => {
     const first = await Session.create({ userId: user.id });
     const second = await Session.create({ userId: user.id });
 
-    await request(app).post('/api/auth/forgot-password').send({ email: user.email });
-    await user.reload();
-    expect(user.passwordResetToken).toBeTruthy();
+    // The code goes to the address; the ticket that authorises the change comes
+    // back from `verify-reset-code`. The full flow is covered in
+    // passwordResetFlow.test.js — here it is only the way in.
+    const token = await resetTicketFor(user);
 
     const res = await request(app)
       .post('/api/auth/reset-password')
-      .send({ token: user.passwordResetToken, newPassword: 'brand-new-pass1' });
+      .send({ token, newPassword: 'brand-new-pass1' });
 
     expect(res.status).toBe(200);
     await first.reload();
@@ -93,12 +110,10 @@ describe('password reset', () => {
 
   it('enforces the password policy on the new password', async () => {
     const user = await createUser();
-    await request(app).post('/api/auth/forgot-password').send({ email: user.email });
-    await user.reload();
 
     const res = await request(app)
       .post('/api/auth/reset-password')
-      .send({ token: user.passwordResetToken, newPassword: 'weak' });
+      .send({ token: await resetTicketFor(user), newPassword: 'weak' });
 
     expect(res.status).toBe(400);
   });

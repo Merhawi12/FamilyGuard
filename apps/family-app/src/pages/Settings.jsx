@@ -22,19 +22,28 @@ const SECTIONS = [
    product, none of them true. */
 
 /*
- * Only alerts the platform can actually raise are listed. `dangerous_content`
- * and `app_installed` still do not appear: nothing produces them, and a switch
- * that promises an alert which can never arrive is worse than no switch.
+ * Only alerts the platform can actually raise are listed — a switch that
+ * promises an alert which can never arrive is worse than no switch.
+ *
+ * All three that used to fail that rule have been resolved rather than hidden:
+ * `dangerous_content` and `app_installed` are now raised by real producers (the
+ * API's risky-browsing check and the device's first-seen-app check), and
+ * `unknown_contact` was removed from the platform — matching a caller needs
+ * call-log and SMS permissions Parentix does not ask a family for. So this list
+ * is once again the whole catalogue, and
+ * `services/api/tests/alertCatalogue.test.js` asserts it stays that way in both
+ * directions: nothing offered that cannot fire, nothing that can fire left out.
  */
 const ALERT_TYPES = [
   { key: 'emergency_button', label: 'Emergency button' },
-  { key: 'unknown_contact', label: 'Unapproved contact' },
   { key: 'cyberbullying', label: 'Cyberbullying detected' },
-  { key: 'left_safe_zone', label: 'Left safe zone' },
-  { key: 'entered_safe_zone', label: 'Arrived at safe zone' },
   { key: 'safety_pattern', label: 'AI safety patterns' },
   { key: 'screen_time_exceeded', label: 'Screen time reached' },
+  { key: 'left_safe_zone', label: 'Left safe zone' },
+  { key: 'entered_safe_zone', label: 'Arrived at safe zone' },
   { key: 'blocked_app_attempt', label: 'Blocked app attempt' },
+  { key: 'dangerous_content', label: 'Risky site opened' },
+  { key: 'app_installed', label: 'New app used' },
 ];
 
 /**
@@ -306,13 +315,33 @@ export default function Settings() {
                   <p className="text-sm text-gray-500 mb-2">Where alerts are sent.</p>
 
                   <div className="divide-y divide-gray-50">
-                    <Toggle
-                      label="Email alerts"
-                      description={`Sent to ${user?.email}`}
-                      checked={!!notifPrefs.emailAlerts}
-                      onChange={(v) => setNotifPrefs((p) => ({ ...p, emailAlerts: v }))}
-                    />
-                    {notifPrefs.emailAlerts && (
+                    {/* An account created from a phone number has no address, and
+                        the alert pipeline skips the email channel for it
+                        entirely. The switch was still drawn — under the label
+                        "Sent to " with nothing after it — offering to turn on a
+                        channel that could never deliver and reporting an address
+                        that does not exist. */}
+                    {user?.email ? (
+                      <Toggle
+                        label="Email alerts"
+                        description={`Sent to ${user.email}`}
+                        checked={!!notifPrefs.emailAlerts}
+                        onChange={(v) => setNotifPrefs((p) => ({ ...p, emailAlerts: v }))}
+                      />
+                    ) : (
+                      <div className="py-3">
+                        <p className="text-sm font-medium text-gray-900">Email alerts</p>
+                        <p className="text-sm text-gray-500 mt-0.5">
+                          This account has no email address, so alerts are delivered by push only.
+                          Add one under{' '}
+                          <Link to="/dashboard/profile" className="text-primary-600 font-medium hover:underline">
+                            Profile
+                          </Link>{' '}
+                          to turn this on.
+                        </p>
+                      </div>
+                    )}
+                    {user?.email && notifPrefs.emailAlerts && (
                       <div className="pl-4 border-l-2 border-primary-100 ml-1">
                         <Toggle
                           label="High severity only"
@@ -322,9 +351,14 @@ export default function Settings() {
                         />
                       </div>
                     )}
+                    {/* Named for what it actually governs. It said "every
+                        browser", which left out the Android app — the place most
+                        parents read these — and it now also covers messages from
+                        a child, which used to reach nothing at all when the
+                        dashboard was closed. */}
                     <Toggle
-                      label="Push alerts"
-                      description="Sent to every browser you have enabled notifications on"
+                      label="Push notifications"
+                      description="Alerts and messages from your children, on every device you have enabled notifications on"
                       checked={!!notifPrefs.pushAlerts}
                       onChange={(v) => setNotifPrefs((p) => ({ ...p, pushAlerts: v }))}
                     />
@@ -524,7 +558,10 @@ export default function Settings() {
               <dl className="text-sm space-y-2">
                 <div className="flex justify-between gap-4">
                   <dt className="text-gray-500">Signed in as</dt>
-                  <dd className="text-gray-900 truncate">{user?.email}</dd>
+                  {/* A phone-number account has no address, and this rendered an
+                      empty cell next to the label. Whichever identifier the
+                      account actually has is the one worth naming. */}
+                  <dd className="text-gray-900 truncate">{user?.email || user?.phone || '—'}</dd>
                 </div>
                 <div className="flex justify-between gap-4">
                   <dt className="text-gray-500">Plan</dt>

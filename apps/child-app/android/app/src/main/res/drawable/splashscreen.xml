@@ -1,3 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The frame Android paints from the moment the icon is tapped until React Native
+  has drawn something.
+
+  This was the teal colour alone, so a cold launch of the child app opened on a
+  blank screen with no mark on it — the family app got its logo during the teal
+  reskin and this one was missed. The second layer is that mark.
+
+  A layer-list rather than a single bitmap because a bitmap used as a window
+  background is *stretched* to the screen, which would distort the shield on
+  every aspect ratio. Painting the colour first and centring the mark over it
+  with `gravity` leaves it undistorted at whatever size the density bucket
+  supplies. `splashscreen_logo` is that per-density mark, drawn by
+  scripts/build-brand-assets.mjs with a transparent ground so this teal shows
+  through.
+-->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
   <item android:drawable="@color/splashscreen_background"/>
+  <item android:drawable="@drawable/splashscreen_logo" android:gravity="center"/>
 </layer-list>

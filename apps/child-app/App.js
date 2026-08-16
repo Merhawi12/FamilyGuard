@@ -19,6 +19,50 @@ const SCREEN_FOR = {
   chat: 'Messages',
 };
 
+/**
+ * Deep links, and the reason they are built per-state rather than declared once.
+ *
+ * `com.parentix.child://` is registered on both platforms — by hand in
+ * AndroidManifest.xml, and by `scheme` in app.json for the iOS project EAS
+ * prebuilds. Until now nothing consumed it on either: the Android intent filter
+ * had been there all along and the app simply opened on whatever screen it would
+ * have opened on anyway.
+ *
+ * The gate is what makes this more than a screens map. Every screen except
+ * `Link` assumes a linked device with credentials in the keystore — `Home` reads
+ * monitoring state, `Messages` opens a socket — so a link arriving at an
+ * unlinked phone must not be allowed to land on one. When there is no link,
+ * every path collapses to the Link screen, which is both the only screen that
+ * works and the only one worth showing.
+ *
+ * `link/:code?` is the one that earns its keep: `com.parentix.child://link/ABC12345`
+ * prefills the eight characters the parent is reading out. The QR the API used to
+ * mint was removed because nothing could scan it without adding a camera
+ * permission to a monitoring app — a link needs no camera and no new permission.
+ */
+const linkingFor = (linked) => ({
+  prefixes: ['com.parentix.child://', 'https://app.parentix.ca'],
+  config: {
+    screens: linked
+      ? {
+        Link: 'link/:code?',
+        Home: 'home',
+        Messages: 'messages',
+        Settings: 'settings',
+        Permissions: 'permissions',
+      }
+      /**
+       * Unlinked: only the Link screen is reachable, and no wildcard is needed
+       * to enforce it. A path that matches nothing does not navigate at all —
+       * React Navigation leaves the app on `initialRouteName`, which is `Link`
+       * in exactly this state. A `'*'` here would be worse than redundant: it
+       * would swallow `link/ABC12345` as an unnamed wildcard param and lose the
+       * code that is the only reason the link was sent.
+       */
+      : { Link: 'link/:code?' },
+  },
+});
+
 export default function App() {
   const [initialRoute, setInitialRoute] = useState(null);
   const navigationRef = useRef(null);
@@ -79,6 +123,7 @@ export default function App() {
     <SafeAreaProvider>
       <NavigationContainer
         ref={navigationRef}
+        linking={linkingFor(initialRoute !== 'Link')}
         onReady={() => {
           if (pendingRoute.current) {
             navigationRef.current?.navigate(pendingRoute.current);

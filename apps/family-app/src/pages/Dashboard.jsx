@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   children as childrenApi, reports as reportsApi,
-  alertLabel, Avatar, EmptyState, Icon, StatsCard, useSocket,
+  alertLabel, lastLocalDays, Avatar, EmptyState, Icon, StatsCard, useSocket,
 } from '@parentix/shared';
 import PageIntro from '../components/PageIntro';
 import { PRIMARY } from '../brand';
@@ -49,14 +49,20 @@ export default function Dashboard() {
           });
         });
 
-        const today = new Date();
-        const days = [];
-        for (let i = 6; i >= 0; i--) {
-          const d = new Date(today);
-          d.setDate(d.getDate() - i);
-          const key = d.toISOString().split('T')[0];
-          days.push({ day: DAY_LABELS[d.getDay()], minutes: minutesByDay[key] || 0 });
-        }
+        /**
+         * Keyed on the local calendar day, not the UTC one.
+         *
+         * This built each key with `toISOString()`, which is UTC — so every
+         * evening after about 20:00 local the key for "today" was tomorrow's
+         * date, and the tile below reported 0 minutes for the rest of the night
+         * while the whole chart slid one label to the left. The server files a
+         * day's usage under the local midnight the device reported, so a local
+         * key is the one that matches it. See shared/dates.js.
+         */
+        const days = lastLocalDays(7).map(({ key, date }) => ({
+          day: DAY_LABELS[date.getDay()],
+          minutes: minutesByDay[key] || 0,
+        }));
         setWeeklyUsage(days);
         setTodayMinutes(days[days.length - 1].minutes);
       })

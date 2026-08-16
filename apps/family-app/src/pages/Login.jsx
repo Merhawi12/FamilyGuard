@@ -12,14 +12,35 @@ import { DEFAULT_COUNTRY } from '../countries';
  * Sign in and sign up, over two identifiers.
  *
  * `tab` is the step, not the identifier: 'login' and 'register' are the two
- * entry screens and everything else ('verify', 'code', 'mfa', 'forgot') is a
- * step reached from one of them. `method` is the identifier — 'email' or
- * 'phone' — and is what the segmented control switches. Keeping them separate is
- * what lets the phone path reuse the code screen, the MFA challenge and the
- * post-sign-in redirect rather than growing parallel copies of each.
+ * entry screens and everything else ('verify', 'code', 'mfa', and the three-step
+ * 'forgot' → 'reset-code' → 'reset-new') is a step reached from one of them.
+ * `method` is the identifier — 'email' or 'phone' — and is what the segmented
+ * control switches. Keeping them separate is what lets the phone path reuse the
+ * code screen, the MFA challenge and the post-sign-in redirect rather than
+ * growing parallel copies of each.
+ *
+ * Password reset lives here rather than on its own route because it is now three
+ * screens rather than one: since the email carries a code instead of a link,
+ * nothing arrives at a URL, and the whole flow can finish where it started —
+ * which also means it works inside the Capacitor shell, where bouncing out to a
+ * browser and back was never going to.
  */
 export default function Login() {
   const [tab, setTab] = useState('login');
+  /**
+   * Which entry screen the current step came from.
+   *
+   * `tab` is the step, so it stops being 'register' the moment the code screen
+   * opens — and `isRegister` is derived from it. Everything the code screen still
+   * has to do with the original intent was therefore reading 'login': resending
+   * an SMS during *signup* asked for `mode: 'login'`, which for a number with no
+   * verified account is the one case the API refuses, so the parent who tapped
+   * "Resend code" on the screen the signup had just put them on was told "No
+   * account found for that number. Create one instead." — about the account they
+   * were in the middle of creating. "Use a different number" landed them on Sign
+   * In for the same reason.
+   */
+  const [entry, setEntry] = useState('login');
   const [method, setMethod] = useState('email');
   /**
    * Whether this deployment can actually send an SMS.
@@ -39,16 +60,42 @@ export default function Login() {
   const [agreed, setAgreed] = useState(false);
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [pendingEmail, setPendingEmail] = useState('');
-  // The API reports whether the code actually left the building. It used to
-  // always answer "sent", so a deployment with broken mail credentials stranded
-  // every new account on a screen waiting for an email that was never going out.
-  // The SMS path answers the same way, for the same reason.
-  const [deliveryProblem, setDeliveryProblem] = useState('');
+  /**
+   * Whether the code failed to leave the building — a flag, not the API's words.
+   *
+   * The API reports delivery honestly (it used to always answer "sent", which
+   * stranded every new account on a screen waiting for a message that was never
+   * going out), and this screen used to render `data.message` and then append its
+   * own advice to it. The two said the same thing, so the parent read the same
+   * sentence twice: "Your code could not be sent. Check the SMS settings for this
+   * deployment. Check the SMS settings for this deployment, then use Resend code."
+   *
+   * Holding a boolean rather than the string is what makes that unrepeatable
+   * instead of merely fixed — there is no longer a server sentence here to
+   * concatenate. It also settles the more important half: `message` is written
+   * for an operator reading logs, and "check the SMS settings for this
+   * deployment" is not something a parent trying to sign in can act on. The
+   * server keeps its wording for the API contract and the logs; the screen says
+   * what the person in front of it needs to hear. Same rule as the 404 in
+   * `errorMessage` and the linking-code 404 in the child app.
+   */
+  const [deliveryProblem, setDeliveryProblem] = useState(false);
   const [error, setError] = useState('');
+  /** Good news, where `error` is bad. Survives the step change that shows it. */
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotSent, setForgotSent] = useState(false);
+  /**
+   * The reset ticket, held for exactly one screen.
+   *
+   * `verify-reset-code` mints it once the six digits come back and
+   * `reset-password` spends it. It is never emailed and never stored — a reload
+   * on the "choose a new password" step means starting the flow again, which is
+   * the correct outcome for a fifteen-minute credential.
+   */
+  const [resetToken, setResetToken] = useState('');
+  const [newPassword, setNewPassword] = useState({ value: '', confirm: '' });
   const [mfa, setMfa] = useState({ preAuthToken: '', code: '' });
   const [country, setCountry] = useState(DEFAULT_COUNTRY);
   const [national, setNational] = useState('');
@@ -150,6 +197,9 @@ export default function Login() {
     }
 
     setLoading(true);
+    // Remembered before the step changes, so a resend still knows what it is
+    // resending for. See `entry`.
+    setEntry(tab);
     try {
       if (method === 'phone') {
         const e164 = joinPhone(country, national);
@@ -162,7 +212,7 @@ export default function Login() {
         // both would tell the parent something went wrong while handing them
         // the thing they need.
         setDevCode(data.devCode || '');
-        setDeliveryProblem(data.smsDelivered === false && !data.devCode ? data.message : '');
+        setDeliveryProblem(data.smsDelivered === false && !data.devCode);
         setCode(['', '', '', '', '', '']);
         setResendCooldown(60);
         setTab('code');
@@ -172,7 +222,7 @@ export default function Login() {
       if (isRegister) {
         const result = await register(form.name, form.email, form.password);
         setPendingEmail(form.email);
-        setDeliveryProblem(result?.emailDelivered === false ? result.message : '');
+        setDeliveryProblem(result?.emailDelivered === false);
         setTab('verify');
         return;
       }
@@ -265,15 +315,71 @@ export default function Login() {
     }
   };
 
+  /**
+   * Step one of three. Moves to the code screen whatever the answer was.
+   *
+   * The API deliberately gives the same 200 for an address with an account and
+   * one without, so waiting on the response to decide would be inventing an
+   * answer it refused to give. Someone who mistyped their address types a code
+   * that never arrives and gets "That code is invalid" — which is the cost of an
+   * endpoint that will not confirm who has an account, and the right price.
+   */
   const handleForgotPassword = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
       await authApi.forgotPassword({ email: forgotEmail });
-      setForgotSent(true);
+      setCode(['', '', '', '', '', '']);
+      setResendCooldown(60);
+      setTab('reset-code');
     } catch (err) {
-      setError(errorMessage(err, 'Could not send a reset link.'));
+      setError(errorMessage(err, 'Could not send a reset code.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** Step two. Six digits in, a single-use ticket out. */
+  const handleVerifyResetCode = async (e) => {
+    e.preventDefault();
+    const fullCode = code.join('');
+    if (fullCode.length < 6) return setError('Enter the 6-digit code');
+    setError('');
+    setLoading(true);
+    try {
+      const res = await authApi.verifyResetCode({ email: forgotEmail, code: fullCode });
+      setResetToken(res.data.resetToken);
+      setNewPassword({ value: '', confirm: '' });
+      setTab('reset-new');
+    } catch (err) {
+      setError(errorMessage(err, 'That code is invalid or has expired.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Step three. Ends at the sign-in screen rather than in the app: a reset is
+   * what somebody does when they think their account is compromised, and it
+   * revokes every session — including any this browser was holding.
+   */
+  const handleSetNewPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (newPassword.value !== newPassword.confirm) return setError('Those passwords do not match.');
+    if (newPassword.value.length < 10) return setError('Use at least 10 characters.');
+
+    setLoading(true);
+    try {
+      await authApi.resetPassword({ token: resetToken, newPassword: newPassword.value });
+      setResetToken('');
+      setNewPassword({ value: '', confirm: '' });
+      setForm((f) => ({ ...f, email: forgotEmail, password: '' }));
+      setNotice('Your password has been reset. Sign in with your new one.');
+      setTab('login');
+    } catch (err) {
+      setError(errorMessage(err, 'We could not reset your password. Ask for a new code and try again.'));
     } finally {
       setLoading(false);
     }
@@ -284,14 +390,19 @@ export default function Login() {
     try {
       if (tab === 'code') {
         const data = await requestPhoneCode(pendingPhone.e164, {
-          mode: isRegister ? 'register' : 'login',
+          mode: entry === 'register' ? 'register' : 'login',
           name: form.name,
         });
         setDevCode(data.devCode || '');
-        setDeliveryProblem(data.smsDelivered === false && !data.devCode ? data.message : '');
+        setDeliveryProblem(data.smsDelivered === false && !data.devCode);
+      } else if (tab === 'reset-code') {
+        // The same call that started the flow. It answers 200 whatever happens,
+        // including when the server's own cooldown refuses to send — so there is
+        // nothing here to report and the countdown below is the honest signal.
+        await authApi.forgotPassword({ email: forgotEmail });
       } else {
         const res = await authApi.resendCode({ email: pendingEmail });
-        setDeliveryProblem(res.data?.emailDelivered === false ? res.data.message : '');
+        setDeliveryProblem(res.data?.emailDelivered === false);
       }
       setCode(['', '', '', '', '', '']);
       setError('');
@@ -395,12 +506,21 @@ export default function Login() {
           </div>
 
           {deliveryProblem && (
-            <p className="notice-warning mb-4 text-left">
+            <div className="notice-warning mb-4 text-left">
               <Icon name="warning" size={16} className="mt-0.5" />
               <span>
-                {deliveryProblem} Check the SMS settings for this deployment, then use Resend code.
+                We could not text that number. Nothing is wrong with the number you
+                entered — this is a problem at our end.
+                {' '}You can try Resend below, or sign in with an email address instead.
+                <button
+                  type="button"
+                  onClick={() => { setMethod('email'); setTab(entry); setError(''); setDeliveryProblem(false); }}
+                  className="block mt-2 font-semibold underline"
+                >
+                  Use an email address instead
+                </button>
               </span>
-            </p>
+            </div>
           )}
 
           {/* Development only — the API returns the code when it has no provider
@@ -426,7 +546,7 @@ export default function Login() {
           </form>
 
           {resendRow}
-          {backButton(() => { setTab(isRegister ? 'register' : 'login'); setError(''); }, 'Use a different number')}
+          {backButton(() => { setTab(entry); setError(''); }, 'Use a different number')}
         </>
       ) : tab === 'verify' ? (
         /* ── Email verification ─────────────────────────────────────────── */
@@ -446,8 +566,10 @@ export default function Login() {
             <p className="notice-warning mb-4 text-left">
               <Icon name="warning" size={16} className="mt-0.5" />
               <span>
-                {deliveryProblem} Your account was created — the code just could not be emailed.
-                Check the mail settings for this deployment, then use Resend code.
+                Your account was created, but we could not send the code to that address.
+                Nothing you typed is wrong — this is a problem at our end. Try Resend in a
+                moment, and if it keeps failing{' '}
+                <a href="/contact" className="font-semibold underline">contact support</a>.
               </span>
             </p>
           )}
@@ -466,42 +588,103 @@ export default function Login() {
           {backButton(() => { setTab('register'); setError(''); }, 'Back')}
         </>
       ) : tab === 'forgot' ? (
-        /* ── Forgotten password ─────────────────────────────────────────── */
+        /* ── Forgotten password, step 1 of 3 ────────────────────────────── */
         <>
           <div className="text-center mb-6">
             <h2 className="text-xl font-bold text-gray-900">Reset your password</h2>
             <p className="text-sm text-gray-500 mt-1">
-              Enter your account email and we&apos;ll send you a reset link.
+              Enter your account email and we&apos;ll send you a 6-digit code.
             </p>
           </div>
 
-          {forgotSent ? (
-            <p className="notice-success justify-center text-center">
-              If an account exists for that address, a reset link is on its way.
-            </p>
-          ) : (
-            <form onSubmit={handleForgotPassword} className="space-y-4">
-              <label className="field">
-                <span className="field-label">Email Address</span>
-                <input
-                  className="input"
-                  type="email"
-                  autoComplete="email"
-                  inputMode="email"
-                  placeholder="name@company.com"
-                  value={forgotEmail}
-                  onChange={(e) => setForgotEmail(e.target.value)}
-                  required
-                />
-              </label>
-              {error && <p className="notice-error">{error}</p>}
-              <button type="submit" disabled={loading} className="btn-primary btn-block">
-                {loading ? 'Sending…' : 'Send reset link'}
-              </button>
-            </form>
-          )}
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            <label className="field">
+              <span className="field-label">Email Address</span>
+              <input
+                className="input"
+                type="email"
+                autoComplete="email"
+                inputMode="email"
+                placeholder="name@company.com"
+                value={forgotEmail}
+                onChange={(e) => setForgotEmail(e.target.value)}
+                required
+              />
+            </label>
+            {error && <p className="notice-error">{error}</p>}
+            <button type="submit" disabled={loading} className="btn-primary btn-block">
+              {loading ? 'Sending…' : 'Send reset code'}
+            </button>
+          </form>
 
-          {backButton(() => { setTab('login'); setError(''); setForgotSent(false); })}
+          {backButton(() => { setTab('login'); setError(''); })}
+        </>
+      ) : tab === 'reset-code' ? (
+        /* ── Forgotten password, step 2 of 3 ────────────────────────────── */
+        <>
+          <div className="text-center mb-6">
+            <span className="inline-flex w-14 h-14 bg-primary-50 text-primary-600 rounded-2xl items-center justify-center mb-3">
+              <Icon name="mail" size={26} />
+            </span>
+            <h2 className="text-xl font-bold text-gray-900">Check your email</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              If an account exists for<br />
+              <span className="font-semibold text-gray-700 break-all">{forgotEmail}</span><br />
+              we&apos;ve sent it a 6-digit code.
+            </p>
+          </div>
+
+          <form onSubmit={handleVerifyResetCode} className="space-y-4">
+            {codeBoxes}
+            {error && <p className="notice-error">{error}</p>}
+            <button type="submit" disabled={loading} className="btn-primary btn-block">
+              {loading ? 'Checking…' : 'Continue'}
+            </button>
+          </form>
+
+          {resendRow}
+          {backButton(() => { setTab('forgot'); setError(''); }, 'Use a different address')}
+        </>
+      ) : tab === 'reset-new' ? (
+        /* ── Forgotten password, step 3 of 3 ────────────────────────────── */
+        <>
+          <div className="text-center mb-6">
+            <h2 className="text-xl font-bold text-gray-900">Choose a new password</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              At least 10 characters, including a letter and a number.
+            </p>
+          </div>
+
+          <form onSubmit={handleSetNewPassword} className="space-y-4">
+            <PasswordField
+              label="New password"
+              autoComplete="new-password"
+              placeholder="New password"
+              value={newPassword.value}
+              onChange={(e) => setNewPassword((p) => ({ ...p, value: e.target.value }))}
+              required
+            />
+            <PasswordField
+              label="Confirm new password"
+              autoComplete="new-password"
+              placeholder="Confirm new password"
+              value={newPassword.confirm}
+              onChange={(e) => setNewPassword((p) => ({ ...p, confirm: e.target.value }))}
+              required
+            />
+            {/* Said before it happens rather than after: every other device is
+                signed out, and a parent who does not expect that reads it as the
+                reset having gone wrong. */}
+            <p className="text-xs text-gray-500">
+              This signs you out everywhere else.
+            </p>
+            {error && <p className="notice-error">{error}</p>}
+            <button type="submit" disabled={loading} className="btn-primary btn-block">
+              {loading ? 'Saving…' : 'Reset password'}
+            </button>
+          </form>
+
+          {backButton(() => { setTab('login'); setError(''); setResetToken(''); })}
         </>
       ) : (
         /* ── Sign in / sign up ──────────────────────────────────────────── */
@@ -534,6 +717,10 @@ export default function Login() {
             ))}
           </div>
           )}
+
+          {/* Where a finished password reset lands. Rendered above the form so
+              it is the first thing read, and cleared by the tab switch below. */}
+          {notice && <p className="notice-success mb-4">{notice}</p>}
 
           <form onSubmit={handleAuth} className="space-y-4">
             {isRegister && (
@@ -597,7 +784,14 @@ export default function Login() {
               <div className="text-right -mt-1">
                 <button
                   type="button"
-                  onClick={() => { setTab('forgot'); setError(''); }}
+                  onClick={() => {
+                    // Carried across so the reset screen does not ask for an
+                    // address that has already been typed one field above.
+                    if (form.email) setForgotEmail(form.email);
+                    setTab('forgot');
+                    setError('');
+                    setNotice('');
+                  }}
                   className="inline-flex items-center min-h-[36px] px-1 text-sm font-medium text-primary-600 hover:underline"
                 >
                   Forgot Password?
@@ -658,6 +852,7 @@ export default function Login() {
               onClick={() => {
                 setTab(isRegister ? 'login' : 'register');
                 setError('');
+                setNotice('');
               }}
               className="text-primary-600 font-semibold hover:underline"
             >

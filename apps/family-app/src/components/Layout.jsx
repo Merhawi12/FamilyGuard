@@ -5,6 +5,7 @@ import Sidebar from './Sidebar';
 import BottomNav from './BottomNav';
 import NotificationsBell from './NotificationsBell';
 import ProfileMenu from './ProfileMenu';
+import PushBanner from './PushBanner';
 import { resyncPush, startNativeHandling } from '../services/push';
 import { titleForPath } from '../navigation';
 
@@ -24,6 +25,8 @@ import { titleForPath } from '../navigation';
  */
 export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
+  /** A push that arrived while the app was in the foreground — Android only. */
+  const [notice, setNotice] = useState(null);
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { alerts, messages } = useSocket();
@@ -47,7 +50,13 @@ export default function Layout() {
    */
   useEffect(() => {
     resyncPush();
-    startNativeHandling({ onOpen: (data) => { if (data.url) navigate(data.url); } });
+    startNativeHandling({
+      onOpen: (data) => { if (data.url) navigate(data.url); },
+      // Android shows nothing for a push that lands while the app is open — see
+      // PushBanner. Without this the parent least likely to be told was the one
+      // holding the app.
+      onForeground: setNotice,
+    });
   }, [navigate]);
 
   const badges = {
@@ -57,6 +66,12 @@ export default function Layout() {
 
   return (
     <div className="min-h-dvh bg-gray-50 lg:flex">
+      <PushBanner
+        notice={notice}
+        onDismiss={() => setNotice(null)}
+        onOpen={() => { const { url } = notice.data; setNotice(null); if (url) navigate(url); }}
+      />
+
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} badges={badges} />
 
       <div className="flex-1 min-w-0 flex flex-col">

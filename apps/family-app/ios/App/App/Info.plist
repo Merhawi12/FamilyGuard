@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Parentix</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+
+	<!--
+		arm64, not armv7.
+
+		Capacitor's template still writes `armv7`, which is the 32-bit marker for
+		devices that stopped being supported at iOS 11 — this app targets 13. It is
+		inert rather than harmful, but it describes a device that cannot run this
+		build, and App Store Connect reads this array when deciding which devices
+		may install it.
+	-->
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+
+	<!--
+		Both orientations on both idioms, matching Android.
+
+		The Family App's layout is responsive to the tablet and desktop breakpoints
+		already (see Layout.jsx — the bottom tab bar becomes a sidebar at `lg`), so
+		landscape on an iPad is a supported layout rather than a stretched phone
+		one. The Child App is the opposite case and stays portrait-locked.
+	-->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+
+	<!--
+		Push, which on iOS is the only way this app is ever notified.
+
+		The wrapper is a WKWebView and WebKit on iOS has no Web Push for a
+		home-screen-installed app inside a native shell, so `@capacitor/push-
+		notifications` bridges to APNs exactly as the Android build bridges to FCM.
+		`remote-notification` is what lets a delivered payload wake the app to
+		refresh the badge and the notification list rather than only drawing a
+		banner. See apps/family-app/src/services/push.js.
+	-->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+
+	<!--
+		Firebase must not swizzle the app delegate, because Capacitor is already
+		using it.
+
+		Left at its default of true, FirebaseMessaging replaces
+		`didRegisterForRemoteNotificationsWithDeviceToken` at runtime to capture the
+		APNs token itself. AppDelegate.swift captures it explicitly instead — it has
+		to, because it does something Firebase's version does not: post the
+		resulting FCM token to the NotificationCenter name Capacitor's plugin
+		listens on. Two owners of one delegate method is a race whose outcome
+		depends on load order, and the losing case is a push registration that never
+		completes with nothing logged to say why.
+
+		Turning the proxy off makes the wiring in AppDelegate.swift the only wiring.
+		Nothing is lost by it here: the swizzled path also forwards notification
+		receipts for FCM topic messaging and analytics, and this app subscribes to
+		no topics — the server sends to individual tokens (see the v1
+		`messages:send` call in services/api/src/utils/pushService.js).
+	-->
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<false/>
+
+	<!--
+		Why each of the three permission strings below exists. iOS terminates the
+		app — it does not merely refuse the permission — if the matching key is
+		missing when the API is first touched, so an absent string is a crash on a
+		feature that works perfectly on Android.
+	-->
+
+	<!--
+		Location.jsx calls `navigator.geolocation.getCurrentPosition` to centre the
+		map on the parent, so the distance to the child reads as a distance from
+		where the parent actually is. It is never uploaded and the page works
+		without it — the map simply centres on the child instead.
+	-->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Parentix uses your location only to show how far away your child is on the map. Your location is never uploaded or shared.</string>
+
+	<!--
+		The two below are for one feature: the child photo picker in Children.jsx,
+		an `<input type="file" accept="image/…">`. iOS offers "Take Photo" and
+		"Photo Library" for that input, and asks for a separate string for each.
+	-->
+	<key>NSCameraUsageDescription</key>
+	<string>Parentix uses the camera so you can take a profile photo for your child.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Parentix needs access to your photos so you can choose a profile photo for your child.</string>
+
+	<!--
+		Answers App Store Connect's export-compliance question once, here, instead
+		of on every single upload.
+
+		False is the correct answer: the app's only cryptography is HTTPS to
+		api.parentix.ca through the operating system's own TLS, which is exempt.
+		Leaving this key out does not change what the app does — it just stops the
+		build being held in "Missing Compliance" until somebody clicks through.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>

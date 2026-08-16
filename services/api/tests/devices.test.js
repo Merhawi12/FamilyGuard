@@ -311,7 +311,10 @@ describe('A device that was never connected', () => {
     expect(res.status).toBe(200);
     expect(res.body.code).toBeTruthy();
     expect(res.body.code).not.toBe('OLD12345');
-    expect(res.body.qrCode).toMatch(/^data:image\/png;base64,/);
+    // No QR: nothing can scan one. The child app has no camera dependency, so
+    // the square this used to mint was an instruction the product cannot carry
+    // out. See issueLinkingCode.
+    expect(res.body.qrCode).toBeUndefined();
 
     // The expired code must not still work alongside the new one.
     const stale = await request(app).post('/api/devices/confirm').send({ code: 'OLD12345', deviceId: device.id });

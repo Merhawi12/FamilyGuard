@@ -1,0 +1,39 @@
+require_relative '../../../../node_modules/@capacitor/ios/scripts/pods_helpers'
+
+platform :ios, '13.0'
+use_frameworks!
+
+# workaround to avoid Xcode caching of Pods that requires
+# Product -> Clean Build Folder after new Cordova plugins installed
+# Requires CocoaPods 1.6 or newer
+install! 'cocoapods', :disable_input_output_paths => true
+
+def capacitor_pods
+  pod 'Capacitor', :path => '../../../../node_modules/@capacitor/ios'
+  pod 'CapacitorCordova', :path => '../../../../node_modules/@capacitor/ios'
+  pod 'CapacitorPushNotifications', :path => '../../../../node_modules/@capacitor/push-notifications'
+end
+
+target 'App' do
+  capacitor_pods
+
+  # Firebase Cloud Messaging, which is how this app receives push on iOS.
+  #
+  # Not a duplicate of CapacitorPushNotifications above — that plugin owns the
+  # permission prompt, the listeners and the APNs registration, and it reports
+  # the *APNs* token. The server has no APNs transport (it speaks web / fcm /
+  # expo, see services/api/src/utils/pushService.js), so AppDelegate.swift trades
+  # that APNs token for an FCM one and posts that instead. FirebaseMessaging is
+  # what performs the trade.
+  #
+  # Pinned to a major version: Firebase ships breaking changes in majors and an
+  # unpinned `pod install` on a new machine is how a build starts differing from
+  # the one that was tested. FirebaseCore comes in as a dependency but is named
+  # explicitly because AppDelegate.swift imports it directly.
+  pod 'FirebaseCore', '~> 11.0'
+  pod 'FirebaseMessaging', '~> 11.0'
+end
+
+post_install do |installer|
+  assertDeploymentTarget(installer)
+end

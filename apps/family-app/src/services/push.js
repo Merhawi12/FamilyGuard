@@ -122,6 +122,8 @@ const nativeState = {
   token: null,
   registered: false,
   listening: false,
+  /** Capacitor listener handles, so they can be released rather than leaked. */
+  handles: [],
 };
 
 /**
@@ -133,22 +135,45 @@ const nativeState = {
  * with no google-services.json, where FCM has nothing to register against — so
  * the error is surfaced rather than swallowed into a generic failure.
  */
-const awaitNativeToken = async (plugin) =>
-  new Promise((resolve, reject) => {
-    let settled = false;
-    const finish = (fn, value) => { if (!settled) { settled = true; fn(value); } };
+const awaitNativeToken = async (plugin) => {
+  /**
+   * Both handles are removed once the promise settles, and that is not tidiness.
+   *
+   * These were added and never removed, and `awaitNativeToken` runs on every
+   * `resyncPush()` — which the app shell calls on every mount. So each sign-in
+   * left two more permanent listeners behind, and every one of them fired on
+   * every later `registration` event only to find its own promise already
+   * settled and do nothing. Growing set of handles, none of them able to act.
+   *
+   * The rotation case is handled by the standing listener in
+   * `startNativeHandling` instead, which is where it belongs: FCM announces a
+   * new token by firing `registration`, and a one-shot promise is the wrong
+   * shape for news that can arrive at any time.
+   */
+  const handles = [];
+  const track = (promise) => { promise.then((h) => handles.push(h)).catch(() => {}); };
+  const cleanup = () => { for (const h of handles) h?.remove?.(); handles.length = 0; };
 
-    plugin.addListener('registration', (token) => finish(resolve, token.value));
-    plugin.addListener('registrationError', (err) =>
-      finish(reject, new Error(err?.error || 'FCM registration failed')));
+  try {
+    return await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn, value) => { if (!settled) { settled = true; fn(value); } };
 
-    plugin.register().catch((err) => finish(reject, err));
+      track(plugin.addListener('registration', (token) => finish(resolve, token.value)));
+      track(plugin.addListener('registrationError', (err) =>
+        finish(reject, new Error(err?.error || 'FCM registration failed'))));
 
-    // Registration is a round trip to Google's servers; on a device with no
-    // connectivity neither listener ever fires and the settings screen would
-    // spin forever.
-    setTimeout(() => finish(reject, new Error('Timed out registering for notifications')), 20000);
-  });
+      plugin.register().catch((err) => finish(reject, err));
+
+      // Registration is a round trip to Google's servers; on a device with no
+      // connectivity neither listener ever fires and the settings screen would
+      // spin forever.
+      setTimeout(() => finish(reject, new Error('Timed out registering for notifications')), 20000);
+    });
+  } finally {
+    cleanup();
+  }
+};
 
 const enableNativePush = async (config) => {
   if (!config?.fcmAvailable) return { ok: false, reason: 'not-configured' };
@@ -200,24 +225,76 @@ export async function refreshNativePermission() {
 }
 
 /**
- * Show notifications that arrive while the app is open, and act on a tap.
+ * Everything the Android app has to keep listening for, for as long as it runs.
  *
- * Android suppresses a foreground notification by default, which is wrong here:
- * an alert about a child is worth seeing whether or not the parent happens to
- * have the app in front of them. Idempotent — the settings screen and the app
- * shell may both call it.
+ * Three separate things, and only one of them used to be here.
+ *
+ * **A tap.** `pushNotificationActionPerformed` fires when the parent opens a
+ * notification, and the destination the server named is followed.
+ *
+ * **A push that arrives while the app is open.** Android's FCM SDK posts a
+ * notification to the tray only when the app is *backgrounded*; in the
+ * foreground the plugin hands it to `pushNotificationReceived` and nothing is
+ * shown. This docblock has always claimed the opposite — "Android suppresses a
+ * foreground notification by default, which is wrong here" — and then registered
+ * no listener for it, so a parent holding the app open was the one parent who
+ * saw nothing when their child pressed the emergency button. It is surfaced
+ * in-app instead of re-posting it to the tray: an in-app banner needs no further
+ * permission, no second notification channel and no extra dependency, and it can
+ * say more than a notification can because the app is right there.
+ *
+ * **A token this device did not ask for.** FCM reissues a registration token on
+ * its own schedule and announces it by firing `registration`. The only listener
+ * for that used to be the one-shot inside `awaitNativeToken`, already settled and
+ * therefore inert — so a rotation while the app was running was simply dropped,
+ * and the server went on pushing to a token Google had retired until the parent
+ * happened to reload the app. A standing listener is the shape that news actually
+ * has.
+ *
+ * Idempotent — the settings screen and the app shell may both call it.
  */
-export async function startNativeHandling({ onOpen } = {}) {
+export async function startNativeHandling({ onOpen, onForeground } = {}) {
   if (!nativePlatform() || nativeState.listening) return;
   const plugin = await nativePush();
-
-  await plugin.addListener('pushNotificationActionPerformed', (action) => {
-    const url = action?.notification?.data?.url;
-    if (onOpen) onOpen(action?.notification?.data || {});
-    else if (url) window.location.hash = url;
-  });
-
+  // Marked before the awaits below, so two callers racing on first paint cannot
+  // both get past the guard and register a second set of listeners.
   nativeState.listening = true;
+
+  const handles = await Promise.all([
+    plugin.addListener('pushNotificationActionPerformed', (action) => {
+      const data = action?.notification?.data || {};
+      if (onOpen) onOpen(data);
+      else if (data.url) window.location.hash = data.url;
+    }),
+
+    plugin.addListener('pushNotificationReceived', (notification) => {
+      onForeground?.({
+        title: notification?.title || 'Parentix',
+        body: notification?.body || '',
+        data: notification?.data || {},
+      });
+    }),
+
+    plugin.addListener('registration', (token) => {
+      // Only when it is genuinely new: `awaitNativeToken` also triggers this
+      // event, and it has already registered the value it received.
+      if (!token?.value || token.value === nativeState.token) return;
+      nativeState.token = token.value;
+      notificationsApi
+        .pushSubscribe(token.value, deviceLabel(), 'fcm')
+        .then(() => { nativeState.registered = true; })
+        .catch(() => { /* the next resync or an explicit re-enable will retry */ });
+    }),
+  ]);
+
+  nativeState.handles = handles;
+}
+
+/** Release the listeners above. Exported for symmetry and for tests. */
+export async function stopNativeHandling() {
+  for (const handle of nativeState.handles || []) handle?.remove?.();
+  nativeState.handles = [];
+  nativeState.listening = false;
 }
 
 // ── One interface ─────────────────────────────────────────────────────────────

@@ -1,5 +1,4 @@
 const jwt = require('jsonwebtoken');
-const QRCode = require('qrcode');
 const { Op } = require('sequelize');
 const { Device, Child, User, AppRule, WebsiteRule, ScreenTimeRule, ActivityLog } = require('../models');
 const { generateLinkingCode } = require('../utils/crypto');
@@ -10,6 +9,8 @@ const { blindIndex } = require('../utils/crypto');
 const { getContentPolicy } = require('../utils/contentSettings');
 const { deviceWebsiteRules } = require('../utils/contentPolicy');
 const { disconnectDeviceSockets } = require('../utils/session');
+const { reportRiskyBrowsing } = require('../utils/riskyBrowsing');
+const { track } = require('../utils/background');
 const { isUuid } = require('../utils/ids');
 const { env } = require('../config/env');
 
@@ -33,12 +34,10 @@ const DEVICE_TYPES = ['android', 'ios', 'windows', 'mac'];
 const LINK_CODE_TTL_MS = 30 * 60 * 1000;
 
 /**
- * Stamps a fresh linking code on a device and renders its QR.
+ * Stamps a fresh linking code on a device.
  *
  * Shared by the first link and by re-issuing one for a device that was never
- * connected, so the two cannot drift apart on TTL or QR payload — the child app
- * cross-checks both fields, and a mismatch would fail confirmation with nothing
- * to show for it.
+ * connected, so the two cannot drift apart on TTL.
  */
 const issueLinkingCode = async (device) => {
   const code = generateLinkingCode();
@@ -47,9 +46,26 @@ const issueLinkingCode = async (device) => {
     linkingCodeExpiry: new Date(Date.now() + LINK_CODE_TTL_MS),
   });
 
-  // Include deviceId in QR so confirmLink can cross-check both values
-  const qrCode = await QRCode.toDataURL(JSON.stringify({ code, deviceId: device.id }));
-  return { device, code, qrCode };
+  /**
+   * No QR.
+   *
+   * This minted a PNG data URI on every link request and nothing could ever read
+   * it: the child app has no camera dependency and no scanner screen, so the
+   * square the family app drew beside the code plainly meant "point the phone at
+   * this" and the phone would simply never respond. The parent had no way to
+   * discover that.
+   *
+   * Adding a scanner is a native rebuild — `expo-camera`, a CAMERA permission on
+   * a product that has deliberately kept its permission set narrow, and a screen
+   * that cannot be verified without a handset. The eight characters work, they
+   * are what the child app asks for, and a code a child types is one fewer
+   * permission on a monitoring app. So the decision is the other way: the QR
+   * goes, rather than waiting indefinitely for the half that would justify it.
+   *
+   * The `qrcode` dependency stays — `mfaController` uses it for the two-factor
+   * setup code, which authenticator apps really do scan.
+   */
+  return { device, code };
 };
 
 /** Loads an active device the caller's account owns, or sends the right refusal. */
@@ -510,12 +526,17 @@ const deviceLogWebHistory = async (req, res, next) => {
     let created = 0;
     let merged = 0;
     let rejected = 0;
+    // Collected as the batch is written so the risky-category check runs once
+    // over the whole window rather than per visit — a page load resolves the
+    // same host repeatedly, and one alert should speak for all of them.
+    const accepted = [];
 
     for (const visit of visits) {
       const domain = normalizeDomain(visit?.domain);
       // A malformed entry is dropped and counted rather than failing the batch —
       // one bad name must not cost the device the rest of its window.
       if (!domain) { rejected += 1; continue; }
+      accepted.push(domain);
 
       const firstSeen = toTime(visit.firstSeen, new Date(now));
       const lastSeen = toTime(visit.lastSeen, firstSeen);
@@ -558,6 +579,26 @@ const deviceLogWebHistory = async (req, res, next) => {
     }
 
     await Device.update({ lastSeen: new Date() }, { where: { id: req.deviceId } });
+
+    /**
+     * A site worth interrupting a parent about.
+     *
+     * `dangerous_content` was in the alert catalogue with nothing behind it: the
+     * socket handler waited on a classification the phone cannot perform. This
+     * is the version the platform can actually do — the device reports domains,
+     * `contentCategories.js` already knows which are adult or gambling, and one
+     * lookup of either is news whether or not the parent had thought to block it.
+     * See utils/riskyBrowsing.js.
+     *
+     * Tracked rather than awaited: the visits are stored, the device is waiting
+     * to clear its queue, and an alert that is slow to raise must not turn a
+     * successful upload into a timeout the device will retry.
+     */
+    track(reportRiskyBrowsing(
+      req.app.get('io'),
+      { parentId: req.parentId, childId: req.childId, deviceId: req.deviceId },
+      accepted,
+    ));
 
     // The device needs to know the batch landed before it clears its queue, and
     // the counts are what make a silent partial failure visible in the logs.

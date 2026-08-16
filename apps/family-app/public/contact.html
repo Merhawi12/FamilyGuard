@@ -196,11 +196,13 @@ body.nav-open .nav-toggle .ic-close{display:block;}
   outline:none;border-color:var(--tide);box-shadow:0 0 0 3px rgba(21,184,201,.15);
 }
 .form-field textarea{resize:vertical;min-height:140px;}
+.hp-field{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;}
 .contact-submit{width:100%;}
 .contact-submit:disabled{opacity:.6;cursor:not-allowed;}
 .contact-status{font-size:.9rem;margin-top:.9rem;text-align:center;}
 .contact-status.success{color:#1FAE74;}
 .contact-status.error{color:var(--coral-deep);}
+.cf-ref{display:block;margin-top:.35rem;font-size:.78rem;color:#7C9AA3;letter-spacing:.04em;}
 
 /* ============ FOOTER ============ */
 footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
@@ -268,6 +270,22 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
         <div class="form-field">
           <label for="cf-message">Your message</label>
           <textarea id="cf-message" name="message" required></textarea>
+        </div>
+        <!--
+          The honeypot. Hidden from sight, from the tab order and from screen
+          readers, and named like a field a bot would want to fill. A person
+          cannot reach it; a naive bot fills every input it finds. `aria-hidden`
+          and `tabindex="-1"` matter as much as the CSS: hiding it visually alone
+          would present a real, unlabelled field to anyone using a screen reader
+          and then reject them for answering it.
+
+          Positioned off-screen rather than `display:none` — some bots skip
+          fields that are display:none specifically because it is the obvious
+          tell.
+        -->
+        <div class="hp-field" aria-hidden="true">
+          <label for="cf-company">Company</label>
+          <input id="cf-company" name="company" type="text" tabindex="-1" autocomplete="off">
         </div>
         <button type="submit" class="btn btn-primary contact-submit">Send Message</button>
         <p class="contact-status" id="cfStatus"></p>
@@ -344,6 +362,8 @@ const contactForm = document.getElementById('contactForm');
 if (contactForm) {
   const cfStatus = document.getElementById('cfStatus');
   const submitBtn = contactForm.querySelector('.contact-submit');
+  /** When this form was drawn, for the server's how-fast-was-this check. */
+  let renderedAt = Date.now();
   contactForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     submitBtn.disabled = true;
@@ -358,13 +378,32 @@ if (contactForm) {
           name: contactForm.name.value,
           email: contactForm.email.value,
           message: contactForm.message.value,
+          // The honeypot, sent as-is. A person leaves it empty.
+          honeypot: contactForm.company ? contactForm.company.value : '',
+          // When this form was drawn. A submission that arrives within a few
+          // seconds of it was not typed by anyone.
+          renderedAt,
         }),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || 'Failed to send message');
-      cfStatus.textContent = "Thanks! Your message has been sent — we'll get back to you soon.";
+      /*
+       * The API stores the message before it tries to email anyone, so this
+       * says "received" rather than "sent" — which is both the truth and the
+       * stronger promise. It used to claim "sent" for a request that had only
+       * been handed to a mailer, and showed the same words whether or not
+       * anything left the building.
+       *
+       * The reference is the stored row's id, shown so a sender chasing this
+       * later has something to quote.
+       */
+      cfStatus.innerHTML = "Thanks! We've got your message and we'll reply to that address soon."
+        + (body.reference ? ' <span class="cf-ref">Reference ' + body.reference.slice(0, 8) + '</span>' : '');
       cfStatus.classList.add('success');
       contactForm.reset();
+      // The clock restarts with the emptied form, or a second genuine message
+      // typed carefully would be judged against the first form's timestamp.
+      renderedAt = Date.now();
     } catch (err) {
       cfStatus.textContent = err.message || 'Something went wrong — please try again.';
       cfStatus.classList.add('error');

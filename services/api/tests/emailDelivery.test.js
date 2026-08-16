@@ -23,6 +23,7 @@ const request = require('supertest');
 const { app } = require('../src/app');
 const { User } = require('../src/models');
 const mailer = require('../src/services/mailer');
+const { rewindOtpCooldown } = require('./helpers');
 
 const register = (email) => request(app).post('/api/auth/register')
   .send({ name: 'Delivery Test', email, password: 'password123' });
@@ -60,12 +61,17 @@ describe('a verification email that cannot be sent is reported', () => {
     const user = await User.findByEmail('stranded@example.com');
     expect(user).not.toBeNull();
     expect(user.emailVerified).toBe(false);
-    expect(user.emailVerificationCode).toMatch(/^\d{6}$/);
+    // Stored as a keyed hash, never as the digits — see utils/otp.js. The code
+    // itself exists only in the message, which is what the mock above holds.
+    expect(user.emailVerificationCode).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it('reports the same failure on a resend', async () => {
     await register('resend@example.com').expect(201);
     mailer.send.mockResolvedValue(false);
+    // A minute has to pass between codes. Simulated rather than waited out —
+    // the cooldown itself is asserted in tests/otp.test.js.
+    await rewindOtpCooldown(await User.findByEmail('resend@example.com'));
 
     const res = await request(app).post('/api/auth/resend-code')
       .send({ email: 'resend@example.com' })
@@ -77,6 +83,7 @@ describe('a verification email that cannot be sent is reported', () => {
 
   it('a delivered resend still says so', async () => {
     await register('resend-ok@example.com').expect(201);
+    await rewindOtpCooldown(await User.findByEmail('resend-ok@example.com'));
 
     const res = await request(app).post('/api/auth/resend-code')
       .send({ email: 'resend-ok@example.com' })

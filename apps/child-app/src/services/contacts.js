@@ -1,6 +1,6 @@
 import { device as deviceApi } from './api';
 import { onUnlinked } from './link';
-import { onSocket, emitSocket } from './socket';
+import { onSocket } from './socket';
 import { readJson, writeJson } from './secureCache';
 
 const CACHE_KEY = 'fg_approved_contacts';
@@ -89,22 +89,24 @@ export function findContact(phoneNumber) {
   return _state.contacts.find((c) => sameNumber(c.phoneNumber, phoneNumber)) || null;
 }
 
-/**
- * Apply the approved-contact policy to someone trying to reach the child.
+/*
+ * `checkIncomingContact` used to live here: it matched a caller against the
+ * approved list and emitted `alert:unknown_contact` when the match failed.
  *
- * Returns whether the contact is approved, and raises the parent's
- * `unknown_contact` alert when it is not. The alert is only raised once the
- * device holds a list it actually fetched: before the first successful sync an
- * empty list means "not known yet", and alerting on it would report every
- * caller as unknown while the device was still starting up.
+ * Nothing ever called it, and nothing could. Seeing who is calling needs
+ * READ_CALL_LOG on Android 9+, and seeing a text needs RECEIVE_SMS — both on
+ * Google Play's restricted list, both requiring a reviewed use case, on an app
+ * that has deliberately kept its permissions narrow enough to explain to a
+ * family. That is a product decision and the answer is no, so the check has been
+ * removed rather than left as an entry point waiting for a caller that is not
+ * coming. The server-side handler and the alert type went with it.
+ *
+ * What stays is the list itself, and it is not idle: `isApprovedNumber` and
+ * `findContact` are exported for anything that legitimately knows a number, and
+ * the Settings screen shows the child who their parent has approved — which is
+ * the honest use of a list synced to their phone, and the one thing here a child
+ * is entitled to see.
  */
-export function checkIncomingContact(phoneNumber) {
-  const approved = isApprovedNumber(phoneNumber);
-  if (!approved && _state.fresh) {
-    emitSocket('alert:unknown_contact', { phoneNumber });
-  }
-  return approved;
-}
 
 // ── Sync ─────────────────────────────────────────────────────────────────────
 

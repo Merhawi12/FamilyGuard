@@ -180,13 +180,60 @@ const run = async () => {
 
   const login = await call('POST', '/auth/login', { body: { email, password } });
   check('login returns a session token', login.status === 200 && !!login.data?.token);
-  const parentToken = login.data.token;
+  // Reassigned after the password reset below, which revokes every session.
+  let parentToken = login.data.token;
 
   const me = await call('GET', '/auth/me', { token: parentToken });
   check('GET /auth/me resolves the session', me.status === 200 && me.data.email === email);
 
   const noToken = await call('GET', '/children');
   check('an unauthenticated request is refused', noToken.status === 401);
+
+  // ── 3b. Forgotten password ─────────────────────────────────────────────────
+  /*
+   * Three steps and a code, against a running server: ask for one, present it,
+   * choose a new password. Worth an end-to-end pass rather than only unit
+   * coverage because the flow crosses the mailer, the model's hashing setters
+   * and three endpoints, and it is the one flow whose users are by definition
+   * unable to get in any other way.
+   */
+  step('Forgotten password');
+  const resetPassword = 'e2e-reset-pass2';
+
+  const forgot = await call('POST', '/auth/forgot-password', { body: { email } });
+  check('forgot-password answers 200 and says nothing about the account', forgot.status === 200);
+
+  const resetCode = await waitFor(
+    () => serverOutput.match(new RegExp(`Password reset code[^\\n]*"email":"${email}","code":"(\\d{6})"`))?.[1],
+    { label: 'the reset code in the server log' }
+  );
+  check('a 6-digit reset code was issued', /^\d{6}$/.test(resetCode));
+
+  const wrongCode = await call('POST', '/auth/verify-reset-code', { body: { email, code: '000000' } });
+  check('a wrong reset code is refused', wrongCode.status === 400, `got ${wrongCode.status}`);
+
+  const verifiedCode = await call('POST', '/auth/verify-reset-code', { body: { email, code: resetCode } });
+  check('the right code returns a single-use ticket', verifiedCode.status === 200 && !!verifiedCode.data?.resetToken);
+
+  const replayCode = await call('POST', '/auth/verify-reset-code', { body: { email, code: resetCode } });
+  check('the same code cannot be presented twice', replayCode.status === 400, `got ${replayCode.status}`);
+
+  const changed = await call('POST', '/auth/reset-password', {
+    body: { token: verifiedCode.data.resetToken, newPassword: resetPassword },
+  });
+  check('the ticket sets a new password', changed.status === 200, JSON.stringify(changed.data));
+
+  const oldPassword = await call('POST', '/auth/login', { body: { email, password } });
+  check('the old password stops working', oldPassword.status === 401, `got ${oldPassword.status}`);
+
+  const reLogin = await call('POST', '/auth/login', { body: { email, password: resetPassword } });
+  check('the new password signs in', reLogin.status === 200 && !!reLogin.data?.token);
+
+  // A reset revokes every session, this one included — everything below runs on
+  // the token the reset handed back.
+  const staleSession = await call('GET', '/auth/me', { token: parentToken });
+  check('the reset signed the earlier session out', staleSession.status === 401, `got ${staleSession.status}`);
+  parentToken = reLogin.data.token;
 
   // ── 4. Child, rules ────────────────────────────────────────────────────────
   step('Child profile and rules');
@@ -371,26 +418,39 @@ const run = async () => {
   // ── 12. Contact form ───────────────────────────────────────────────────────
   //
   // This harness runs with EMAIL_PROVIDER=none, so a submission genuinely cannot
-  // be delivered — and the behaviour worth pinning is that the API says so.
+  // be delivered — which is the case worth pinning, and the answer to it has now
+  // changed twice.
   //
-  // It used to assert a 2xx here, which is the one answer that would be a bug:
-  // the endpoint was changed precisely because reporting success with no relay
-  // configured meant a prospective customer read "message sent", closed the tab,
-  // and waited for a reply to something that existed only in a log line. The
-  // test asserting the old behaviour survived the fix and failed ever since.
+  // Originally the endpoint reported success regardless, so a prospective
+  // customer read "message sent" and waited for a reply to something that
+  // existed only in a log line. That was fixed by answering 502 and telling them
+  // to email directly — correct at the time, because the message really had been
+  // lost and resending really was their only option.
+  //
+  // It is stored before anything is mailed now, so neither of those is true any
+  // more. Telling a visitor to try again would ask them to duplicate a message
+  // already safely held, and an unreachable relay stopped being their problem
+  // the moment the row was written — it is an operator's, and it is logged and
+  // recorded on the row as one. So the honest answer to "did you get my
+  // message?" is yes, and that is what this asserts.
   step('Marketing contact form');
   const contact = await call('POST', '/contact', {
     body: { name: 'Visitor', email: 'visitor@example.test', message: 'How does Parentix work?' },
   });
   check(
-    'an undeliverable submission is reported as undeliverable, not as sent',
-    contact.status === 502 && contact.data?.delivered === false,
+    'a submission is accepted and stored even with no relay configured',
+    contact.status === 202 && contact.data?.success === true,
     JSON.stringify(contact.data),
   );
   check(
-    'the failure tells the visitor what to do instead',
-    typeof contact.data?.error === 'string' && /email us directly/i.test(contact.data.error),
-    JSON.stringify(contact.data?.error),
+    'the visitor is given a reference for the message that was stored',
+    typeof contact.data?.reference === 'string' && contact.data.reference.length > 8,
+    JSON.stringify(contact.data?.reference),
+  );
+  check(
+    'the visitor is never told to resend something already held',
+    !/try again|email us directly/i.test(JSON.stringify(contact.data)),
+    JSON.stringify(contact.data),
   );
 
   // Validation runs before delivery is attempted, so these answer the same way

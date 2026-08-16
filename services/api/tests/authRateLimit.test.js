@@ -71,10 +71,12 @@ describe('auth endpoints are rate limited', () => {
     expect(at).not.toBeNull();
   });
 
-  it('limits how often a reset link can be requested for one address', async () => {
+  it('limits how often a reset code can be requested for one address', async () => {
     // Unlimited, this is a mail bomb aimed at any address the attacker names,
-    // and it reissues the victim's reset token on every call — so a link they
-    // were part-way through using stops working.
+    // and it reissues the victim's code on every call — so the one they were
+    // part-way through typing stops working. The per-account limits in
+    // otp.test.js are the other half of this; neither covers the other, because
+    // one caps a machine and the other caps a recipient.
     const at = await hammer('/api/auth/forgot-password', { email: 'victim@example.com' }, 40);
     expect(at).not.toBeNull();
   });

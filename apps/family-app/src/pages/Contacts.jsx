@@ -21,10 +21,22 @@ const EMPTY_FORM = { childId: '', name: '', phoneNumber: '', email: '', relation
 /**
  * The people a child is allowed to be contacted by.
  *
- * The approval state is not decoration: the device is handed exactly the
- * approved list, and anyone off it raises an "unapproved contact" alert. So the
- * approve control is the widest thing in each row rather than a 20px pill
- * squeezed between Edit and Delete.
+ * What this really is, as of today: the parent's own record of who is in their
+ * child's life, synced down to the device and kept there.
+ *
+ * It used to say more than that — "anyone off the list raises an unapproved
+ * contact alert" — and the device genuinely holds the approved list and
+ * genuinely knows how to match a number against it. What it does not have is any
+ * way to *see* a number: the child app declares no `READ_PHONE_STATE`,
+ * `READ_CALL_LOG` or `RECEIVE_SMS`, all of which are Play-restricted and a
+ * product decision rather than an oversight. So nothing has ever called the
+ * check, no `unknown_contact` alert has ever been raised, and a parent blocking
+ * a contact here was told an alert would follow that could not.
+ *
+ * The list and the approval state are still worth keeping — they are what a
+ * future call/SMS watcher would enforce, and they are already what the device
+ * caches — so the feature stays and the promise goes. The page now says what it
+ * does. See services/api/src/config/alertTypes.js.
  */
 export default function Contacts() {
   const [children, setChildren] = useState([]);
@@ -127,7 +139,7 @@ export default function Contacts() {
 
   return (
     <div className="space-y-5">
-      <PageIntro description="Who your children are allowed to be contacted by.">
+      <PageIntro description="The people in your children's lives, and who you have approved.">
         <button onClick={openAdd} disabled={children.length === 0} className="btn-primary btn-sm">
           <Icon name="plus" size={16} strokeWidth={2.5} />
           Add contact
@@ -228,7 +240,7 @@ export default function Contacts() {
         open={showForm}
         onClose={() => setShowForm(false)}
         title={editingId ? 'Edit contact' : 'Add contact'}
-        description="Approved contacts are the only ones the device will accept without raising an alert."
+        description="Approved contacts are synced to your child's device and kept there."
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           {!editingId && children.length > 1 && (

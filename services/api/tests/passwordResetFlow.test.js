@@ -1,57 +1,109 @@
 /**
- * The self-service password reset, through the API.
+ * The self-service password reset, through the API — three steps and a code.
  *
- * The link in the email carries the token this suite reads back off the user
- * row — `tests/mailDelivery.smtp.test.js` is what proves that same token reaches
- * a relay inside a working URL. Between them the chain is covered end to end:
- * the controller mints and stores a token, the mailer puts that token in a link,
- * and the endpoints here accept it exactly once.
+ * `forgot-password` mails six digits, `verify-reset-code` exchanges them for a
+ * single-use ticket, and `reset-password` spends it. The code is read out of the
+ * mocked mailer rather than off the user row, and that is the point rather than
+ * a convenience: the row holds a keyed hash, so a suite that could read a code
+ * from it would be a suite proving the codes are still in plain text.
+ * `tests/mailDelivery.smtp.test.js` is what proves the same digits reach a real
+ * relay in a real message.
  *
- * Reading it from the database rather than from the response is deliberate — the
- * token must never appear in a response body, and one of these asserts that.
+ * What each step must never do is as load-bearing as what it does:
+ *   - `forgot-password` must answer identically for an address with an account
+ *     and one without — including when it refuses to send.
+ *   - `verify-reset-code` must give one sentence for every kind of refusal.
+ *   - a wrong reset code must not lock the account, because this is the flow
+ *     somebody walks when they are already locked out of everything else.
  */
+jest.mock('../src/services/mailer', () => ({
+  send: jest.fn().mockResolvedValue(true),
+  isEnabled: jest.fn().mockReturnValue(true),
+}));
+
 const request = require('supertest');
 const { app } = require('../src/app');
 const { User, Session } = require('../src/models');
-const { createUser, DEFAULT_PASSWORD } = require('./helpers');
+const mailer = require('../src/services/mailer');
+const { createUser, DEFAULT_PASSWORD, rewindOtpCooldown } = require('./helpers');
+const { MAX_ATTEMPTS, MAX_SENDS_PER_WINDOW } = require('../src/utils/otp');
 
 const forgot = (email) => request(app).post('/api/auth/forgot-password').send({ email });
-const login = (email, password) => request(app).post('/api/auth/login').send({ email, password });
+const verifyCode = (email, code) => request(app).post('/api/auth/verify-reset-code').send({ email, code });
 const reset = (token, newPassword) => request(app).post('/api/auth/reset-password').send({ token, newPassword });
+const login = (email, password) => request(app).post('/api/auth/login').send({ email, password });
 
-/** The token as the emailed link would carry it. */
-const issuedTokenFor = async (user) => {
+/** The digits as the emailed message carries them. */
+const lastCode = () => mailer.send.mock.calls.at(-1)[0].html.match(/>(\d{6})</)[1];
+
+/** Request a code and read it back out of the message. */
+const codeFor = async (user) => {
   await forgot(user.email);
-  const reloaded = await User.findByPk(user.id);
-  return reloaded.passwordResetToken;
+  return lastCode();
 };
+
+/** Walk the whole flow to the ticket the last step spends. */
+const ticketFor = async (user) => {
+  const res = await verifyCode(user.email, await codeFor(user));
+  return res.body.resetToken;
+};
+
+beforeEach(() => {
+  mailer.send.mockClear();
+  mailer.send.mockResolvedValue(true);
+  mailer.isEnabled.mockReturnValue(true);
+});
 
 // ── Test A — a registered account ────────────────────────────────────────────
 describe('Test A — a registered account', () => {
-  it('issues a single-use token and lets the parent sign in with the new password', async () => {
+  it('mails a six-digit code and stores it hashed, never as digits', async () => {
     const user = await createUser();
 
     expect((await forgot(user.email)).status).toBe(200);
 
-    const stored = await User.findByPk(user.id);
-    expect(stored.passwordResetToken).toMatch(/^[a-f0-9]{64}$/);
-    expect(new Date(stored.passwordResetExpires).getTime()).toBeGreaterThan(Date.now());
+    const code = lastCode();
+    expect(code).toMatch(/^\d{6}$/);
 
-    expect((await reset(stored.passwordResetToken, 'brand-new-pass-9')).status).toBe(200);
+    const stored = await User.findByPk(user.id);
+    // The whole reason a database dump is not a pile of live credentials.
+    expect(stored.passwordResetCode).toMatch(/^[a-f0-9]{64}$/);
+    expect(stored.passwordResetCode).not.toContain(code);
+    expect(new Date(stored.passwordResetCodeExpires).getTime()).toBeGreaterThan(Date.now());
+
+    // And no ticket exists until the code comes back.
+    expect(stored.passwordResetToken).toBeNull();
+  });
+
+  it('exchanges the code for a ticket, and the ticket for a new password', async () => {
+    const user = await createUser();
+
+    const verified = await verifyCode(user.email, await codeFor(user));
+    expect(verified.status).toBe(200);
+    expect(verified.body.resetToken).toMatch(/^[a-f0-9]{64}$/);
+
+    expect((await reset(verified.body.resetToken, 'brand-new-pass-9')).status).toBe(200);
 
     expect((await login(user.email, 'brand-new-pass-9')).status).toBe(200);
     expect((await login(user.email, DEFAULT_PASSWORD)).status).toBe(401);
   });
 
-  it('clears the token on use, so the same link cannot be replayed', async () => {
+  it('consumes the code, so the same six digits cannot be presented twice', async () => {
     const user = await createUser();
-    const token = await issuedTokenFor(user);
+    const code = await codeFor(user);
 
-    expect((await reset(token, 'first-password-1')).status).toBe(200);
+    expect((await verifyCode(user.email, code)).status).toBe(200);
 
-    const replay = await reset(token, 'second-password-2');
+    const replay = await verifyCode(user.email, code);
     expect(replay.status).toBe(400);
     expect(replay.body.error).toMatch(/invalid or expired/i);
+  });
+
+  it('consumes the ticket on use, so the same one cannot be replayed', async () => {
+    const user = await createUser();
+    const token = await ticketFor(user);
+
+    expect((await reset(token, 'first-password-1')).status).toBe(200);
+    expect((await reset(token, 'second-password-2')).status).toBe(400);
 
     // The first reset stands.
     expect((await login(user.email, 'first-password-1')).status).toBe(200);
@@ -62,7 +114,7 @@ describe('Test A — a registered account', () => {
     await Session.create({ userId: user.id });
     await Session.create({ userId: user.id });
 
-    await reset(await issuedTokenFor(user), 'rotate-me-now-3');
+    await reset(await ticketFor(user), 'rotate-me-now-3');
 
     expect(await Session.count({ where: { userId: user.id, revoked: false } })).toBe(0);
   });
@@ -73,7 +125,7 @@ describe('Test A — a registered account', () => {
       lockedUntil: new Date(Date.now() + 60 * 60 * 1000),
     });
 
-    await reset(await issuedTokenFor(user), 'unlock-me-please-4');
+    await reset(await ticketFor(user), 'unlock-me-please-4');
 
     const reloaded = await User.findByPk(user.id);
     expect(reloaded.lockedUntil).toBeNull();
@@ -83,33 +135,45 @@ describe('Test A — a registered account', () => {
 
   it('holds the new password to the same policy as registration', async () => {
     const user = await createUser();
-    const token = await issuedTokenFor(user);
+    const token = await ticketFor(user);
 
     expect((await reset(token, 'short1')).status).toBe(400);
     expect((await reset(token, 'nodigitsanywhere')).status).toBe(400);
 
-    // A rejected attempt must not burn the token — otherwise a typo costs the
-    // parent the link and they have to start again.
+    // A rejected attempt must not burn the ticket — otherwise a typo costs the
+    // parent the whole flow and they start again from the email.
     expect((await reset(token, 'acceptable-pass-5')).status).toBe(200);
   });
 
-  it('stores the token against the right account and nobody else', async () => {
+  it('issues the code to the right account and nobody else', async () => {
     const target = await createUser();
     const bystander = await createUser();
 
     await forgot(target.email);
 
-    expect((await User.findByPk(target.id)).passwordResetToken).toMatch(/^[a-f0-9]{64}$/);
-    expect((await User.findByPk(bystander.id)).passwordResetToken).toBeNull();
+    expect((await User.findByPk(target.id)).passwordResetCode).toMatch(/^[a-f0-9]{64}$/);
+    expect((await User.findByPk(bystander.id)).passwordResetCode).toBeNull();
   });
 
-  it('mints a different token every time', async () => {
+  it('mints a different code every time', async () => {
     const seen = new Set();
     for (let i = 0; i < 5; i += 1) {
       const user = await createUser();
-      seen.add(await issuedTokenFor(user));
+      seen.add(await codeFor(user));
     }
+    // Six digits collide once in a million; five draws colliding is a broken
+    // generator, not luck.
     expect(seen.size).toBe(5);
+  });
+
+  it('clears the code once the password has actually changed', async () => {
+    const user = await createUser();
+    await reset(await ticketFor(user), 'all-cleaned-up-6');
+
+    const after = await User.findByPk(user.id);
+    expect(after.passwordResetCode).toBeNull();
+    expect(after.passwordResetCodeExpires).toBeNull();
+    expect(after.passwordResetToken).toBeNull();
   });
 });
 
@@ -126,14 +190,30 @@ describe('Test B — an unregistered address', () => {
     expect(unknown.body.message).toMatch(/if an account exists/i);
   });
 
-  it('never returns the token in the response body', async () => {
+  it('sends nothing at all for an address with no account', async () => {
+    await forgot('nobody-here@example.com');
+    expect(mailer.send).not.toHaveBeenCalled();
+  });
+
+  it('never returns the code in the response body', async () => {
     const user = await createUser();
 
     const res = await forgot(user.email);
-    const stored = await User.findByPk(user.id);
 
-    expect(JSON.stringify(res.body)).not.toContain(stored.passwordResetToken);
-    expect(res.body.token).toBeUndefined();
+    expect(JSON.stringify(res.body)).not.toContain(lastCode());
+    expect(res.body.code).toBeUndefined();
+    expect(res.body.resetToken).toBeUndefined();
+  });
+
+  it('gives an unknown address the same refusal as a wrong code', async () => {
+    const user = await createUser();
+    await forgot(user.email);
+
+    const wrongCode = await verifyCode(user.email, '000000');
+    const noAccount = await verifyCode('stranger@example.com', '000000');
+
+    expect(noAccount.status).toBe(wrongCode.status);
+    expect(noAccount.body).toEqual(wrongCode.body);
   });
 
   it('rejects a request with no address at all', async () => {
@@ -141,15 +221,15 @@ describe('Test B — an unregistered address', () => {
   });
 });
 
-// ── Test C — an expired link ─────────────────────────────────────────────────
-describe('Test C — an expired link', () => {
+// ── Test C — an expired code ─────────────────────────────────────────────────
+describe('Test C — an expired code', () => {
   it('is refused, and the old password still works', async () => {
     const user = await createUser();
-    const token = await issuedTokenFor(user);
+    const code = await codeFor(user);
 
-    await user.update({ passwordResetExpires: new Date(Date.now() - 1000) });
+    await user.update({ passwordResetCodeExpires: new Date(Date.now() - 1000) });
 
-    const res = await reset(token, 'too-late-friend-6');
+    const res = await verifyCode(user.email, code);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/invalid or expired/i);
 
@@ -158,93 +238,197 @@ describe('Test C — an expired link', () => {
 
   it('is refused when the expiry is missing entirely', async () => {
     const user = await createUser();
-    const token = await issuedTokenFor(user);
+    const code = await codeFor(user);
 
     /**
      * Cleared with a static update, not `user.update(...)`, and the difference
-     * is the whole test.
-     *
-     * `user` is a handle taken before `forgot-password` ran, so it has never
-     * loaded `passwordResetExpires`. What Sequelize does with `null` on that
-     * handle depends on the driver: after an INSERT ... RETURNING (Postgres) the
-     * attribute is already `null`, so assigning `null` is not a change, no
-     * UPDATE is issued at all, and the row keeps its perfectly valid expiry —
-     * the test then drove the happy path and called the resulting 200 a
-     * regression. On SQLite the attribute is `undefined`, `null` counts as a
-     * change, the write happens, and the same test passed for the right reason.
-     *
-     * `Model.update` is a query rather than a diff of an instance, so the state
-     * this test is about actually exists on both engines.
+     * is the whole test — see the same note in the suite this replaced. What
+     * Sequelize does with `null` on an attribute an instance has never loaded
+     * depends on the driver, so on Postgres no UPDATE was issued at all and the
+     * row kept a perfectly valid expiry. `Model.update` is a query rather than a
+     * diff of an instance, so the state under test exists on both engines.
      */
-    await User.update({ passwordResetExpires: null }, { where: { id: user.id } });
-    expect((await User.findByPk(user.id)).passwordResetExpires).toBeNull();
+    await User.update({ passwordResetCodeExpires: null }, { where: { id: user.id } });
+    expect((await User.findByPk(user.id)).passwordResetCodeExpires).toBeNull();
 
-    expect((await reset(token, 'no-expiry-set-7')).status).toBe(400);
+    expect((await verifyCode(user.email, code)).status).toBe(400);
+  });
+
+  it('refuses a ticket whose fifteen minutes have run out', async () => {
+    const user = await createUser();
+    const token = await ticketFor(user);
+
+    await User.update({ passwordResetExpires: new Date(Date.now() - 1000) }, { where: { id: user.id } });
+
+    expect((await reset(token, 'too-late-friend-7')).status).toBe(400);
+    expect((await login(user.email, DEFAULT_PASSWORD)).status).toBe(200);
   });
 });
 
-// ── Test D — a wrong token ───────────────────────────────────────────────────
-describe('Test D — an incorrect token', () => {
+// ── Test D — a wrong code ────────────────────────────────────────────────────
+describe('Test D — an incorrect code', () => {
   it('is refused without changing the password', async () => {
     const user = await createUser();
-    await issuedTokenFor(user);
+    await forgot(user.email);
 
-    const res = await reset('f'.repeat(64), 'not-my-token-8');
+    const res = await verifyCode(user.email, '000000');
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/invalid or expired/i);
+    expect(res.body.resetToken).toBeUndefined();
     expect((await login(user.email, DEFAULT_PASSWORD)).status).toBe(200);
   });
 
-  it('gives the same answer for a wrong token and an unknown one', async () => {
+  it('burns the code after five wrong guesses, so a guesser cannot grind it', async () => {
     const user = await createUser();
-    await issuedTokenFor(user);
+    const code = await codeFor(user);
 
-    const wrong = await reset('f'.repeat(64), 'valid-password-9');
-    const nonsense = await reset('not-even-hex', 'valid-password-9');
+    for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
+      // Spread across addresses, so the per-IP limiter is not what stops this.
+      await request(app).post('/api/auth/verify-reset-code')
+        .set('X-Forwarded-For', `10.0.1.${i}`)
+        .send({ email: user.email, code: String(100000 + i) });
+    }
 
-    expect(wrong.body.error).toBe(nonsense.body.error);
+    // Even the right code is dead now.
+    expect((await verifyCode(user.email, code)).status).toBe(400);
+    expect((await User.findByPk(user.id)).passwordResetCode).toBeNull();
   });
 
-  it('refuses a missing or empty token outright', async () => {
+  it('does not lock the account, because this is the recovery path', async () => {
+    /*
+     * Every other code on this service counts a wrong guess towards the account
+     * lockout. Here that would hand anyone who knows an address a way to lock
+     * its owner out of the one flow that exists to get them back in — so the
+     * code dies and the account does not.
+     */
+    const user = await createUser();
+    await forgot(user.email);
+
+    for (let i = 0; i < MAX_ATTEMPTS + 2; i += 1) {
+      await request(app).post('/api/auth/verify-reset-code')
+        .set('X-Forwarded-For', `10.0.2.${i}`)
+        .send({ email: user.email, code: '000000' });
+    }
+
+    const after = await User.findByPk(user.id);
+    expect(after.lockedUntil).toBeNull();
+    expect(after.failedLoginAttempts).toBe(0);
+    expect((await login(user.email, DEFAULT_PASSWORD)).status).toBe(200);
+  });
+
+  it('lets the parent recover by asking for a fresh code', async () => {
+    const user = await createUser();
+    await codeFor(user);
+
+    for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
+      await request(app).post('/api/auth/verify-reset-code')
+        .set('X-Forwarded-For', `10.0.3.${i}`)
+        .send({ email: user.email, code: '000000' });
+    }
+
+    await rewindOtpCooldown(user, 'reset');
+    const fresh = await codeFor(user);
+
+    // A new code arrives with its own attempt budget — the spent one must not
+    // poison it.
+    expect((await verifyCode(user.email, fresh)).status).toBe(200);
+  });
+
+  it('refuses a missing code or a missing address outright', async () => {
+    const user = await createUser();
+    expect((await verifyCode(user.email, '')).status).toBe(400);
+    expect((await verifyCode('', '123456')).status).toBe(400);
+  });
+
+  it('refuses a missing or empty ticket outright', async () => {
     expect((await request(app).post('/api/auth/reset-password')
       .send({ newPassword: 'no-token-at-all-1' })).status).toBe(400);
     expect((await reset('', 'no-token-at-all-1')).status).toBe(400);
   });
 });
 
-// ── Test E — requesting a second link ────────────────────────────────────────
+// ── Test E — asking for another code ─────────────────────────────────────────
 describe('Test E — resend', () => {
-  it('issues a fresh token and invalidates the previous one', async () => {
+  it('issues a fresh code and kills the previous one', async () => {
     const user = await createUser();
 
-    const first = await issuedTokenFor(user);
-    const second = await issuedTokenFor(user);
+    const first = await codeFor(user);
+    await rewindOtpCooldown(user, 'reset');
+    const second = await codeFor(user);
 
     expect(second).not.toBe(first);
 
-    // The superseded link must be dead. Otherwise every request ever made
+    // The superseded code must be dead. Otherwise every request ever made
     // leaves a live key to the account sitting in an inbox.
-    expect((await reset(first, 'stale-link-pass-2')).status).toBe(400);
-
-    expect((await reset(second, 'fresh-link-pass-3')).status).toBe(200);
-    expect((await login(user.email, 'fresh-link-pass-3')).status).toBe(200);
+    expect((await verifyCode(user.email, first)).status).toBe(400);
+    expect((await verifyCode(user.email, second)).status).toBe(200);
   });
 
-  it('extends the expiry with each new request', async () => {
+  it('kills a ticket that was already outstanding', async () => {
+    /*
+     * Asking for a new code is what somebody does when the last attempt went
+     * astray. A half-finished reset that stays live is a key to the account
+     * sitting in whatever went wrong the first time.
+     */
+    const user = await createUser();
+    const token = await ticketFor(user);
+
+    await rewindOtpCooldown(user, 'reset');
+    await forgot(user.email);
+
+    expect((await reset(token, 'stale-ticket-pass-8')).status).toBe(400);
+    expect((await login(user.email, DEFAULT_PASSWORD)).status).toBe(200);
+  });
+
+  it('refuses a second code inside the cooldown — silently, and without sending', async () => {
+    const user = await createUser();
+    await forgot(user.email);
+    mailer.send.mockClear();
+
+    const res = await forgot(user.email);
+
+    // The answer is unchanged, because saying "wait 60 seconds" would confirm
+    // the address has an account. The mailer is where the refusal is visible.
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/if an account exists/i);
+    expect(mailer.send).not.toHaveBeenCalled();
+
+    // And the code already in the parent's inbox is untouched by the refusal.
+    expect((await User.findByPk(user.id)).passwordResetCode).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('stops sending after five in an hour, however patient the caller is', async () => {
+    const user = await createUser();
+
+    for (let i = 0; i < MAX_SENDS_PER_WINDOW; i += 1) {
+      await forgot(user.email);
+      await rewindOtpCooldown(user, 'reset');
+    }
+    expect(mailer.send).toHaveBeenCalledTimes(MAX_SENDS_PER_WINDOW);
+
+    mailer.send.mockClear();
+    const res = await forgot(user.email);
+
+    expect(res.status).toBe(200);
+    expect(mailer.send).not.toHaveBeenCalled();
+  });
+
+  it('extends the expiry with each code that is actually sent', async () => {
     const user = await createUser();
 
     await forgot(user.email);
-    const firstExpiry = new Date((await User.findByPk(user.id)).passwordResetExpires).getTime();
+    const first = new Date((await User.findByPk(user.id)).passwordResetCodeExpires).getTime();
 
+    await rewindOtpCooldown(user, 'reset');
     await new Promise((r) => setTimeout(r, 1100));
     await forgot(user.email);
-    const secondExpiry = new Date((await User.findByPk(user.id)).passwordResetExpires).getTime();
+    const second = new Date((await User.findByPk(user.id)).passwordResetCodeExpires).getTime();
 
-    expect(secondExpiry).toBeGreaterThan(firstExpiry);
+    expect(second).toBeGreaterThan(first);
   });
 
-  // Rate limiting lives in authRateLimit.test.js: this suite runs against the
-  // pass-through mock in __mocks__/express-rate-limit.js, which is what lets it
-  // request several links in a row at all.
+  // Per-IP rate limiting lives in authRateLimit.test.js: this suite runs against
+  // the pass-through mock in __mocks__/express-rate-limit.js, which is what lets
+  // it make several requests in a row at all. The limits asserted here are the
+  // per-account ones, which is the half no IP ceiling can cover.
 });

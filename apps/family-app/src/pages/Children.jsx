@@ -552,14 +552,19 @@ export default function Children() {
             <p className="text-3xl sm:text-4xl font-mono font-bold text-primary-600 tracking-[0.2em] my-4">
               {linkData.code}
             </p>
-            {linkData.qrCode && (
-              <img
-                src={linkData.qrCode}
-                alt="Link QR code"
-                className="mx-auto w-40 h-40 rounded-2xl border border-gray-100"
-              />
-            )}
-            <p className="text-xs text-gray-400 mt-3">This code is valid for 30 minutes.</p>
+            {/* The QR code the API also returns is deliberately not drawn.
+                Nothing can read it: the child app has no scanner and no camera
+                dependency, so a square that plainly means "point the phone at
+                this" was an instruction the product cannot carry out — and the
+                parent who tried it had no way to discover that, because the
+                phone would simply never respond. The eight characters below are
+                the whole of how a device links today. (`linkData.qrCode` is left
+                on the response for the day a scanner ships; it needs a native
+                rebuild of the child app, so it is not something this screen can
+                turn on by itself.) */}
+            <p className="text-xs text-gray-400 mt-3">
+              Type it into the Parentix app on their device — it is valid for 30 minutes.
+            </p>
             {/* Not a spinner: nothing here is pending on this side. It tells the
                 parent the screen is live, which is what makes the switch to the
                 confirmation above read as an answer rather than a glitch. */}

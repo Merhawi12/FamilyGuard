@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import { device as deviceApi } from './api';
 import { onUnlinked } from './link';
 import { readJson, writeJson } from './secureCache';
+import { colors } from '../theme';
 
 /**
  * Notifications on the child device.
@@ -75,7 +76,8 @@ async function ensureAndroidChannel() {
     name: 'Parentix alerts',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#2563eb',
+    // colors.teal700 — the app's primary, not the pre-rebrand blue.
+    lightColor: colors.teal700,
   });
 }
 
@@ -160,7 +162,15 @@ export async function registerForPush({ force = false } = {}) {
       return { ok: true, reason: 'already-registered', token };
     }
 
-    await deviceApi.registerPushToken(token, `${Device.manufacturer || ''} ${Device.modelName || 'Android device'}`.trim());
+    /**
+     * The label the parent sees in their device list, so the fallback must not
+     * name a platform this phone might not be. `modelName` is null often enough
+     * on Android to need one, and "Android device" on an iPhone is worse than
+     * saying nothing specific — the parent uses this string to tell two of their
+     * children's phones apart.
+     */
+    const fallbackModel = Platform.OS === 'ios' ? 'iPhone' : 'Android device';
+    await deviceApi.registerPushToken(token, `${Device.manufacturer || ''} ${Device.modelName || fallbackModel}`.trim());
     _state.registered = true;
     _state.lastError = null;
     await writeJson(TOKEN_KEY, { token, registered: true });

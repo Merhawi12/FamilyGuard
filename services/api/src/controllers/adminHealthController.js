@@ -153,7 +153,14 @@ const getPlatformHealth = async (req, res, next) => {
       },
       recent: recent.map(entryOf),
       channels: deliveryChannels,
-      alertTypes: ALERT_TYPES.map((type) => ({ ...type, muted: muted.includes(type.key) })),
+      // `available` rather than the producer's file path: the console has to
+      // show whether a rule can fire at all, and the path is an implementation
+      // detail an operator has no use for. See config/alertTypes.js.
+      alertTypes: ALERT_TYPES.map(({ producer, ...type }) => ({
+        ...type,
+        available: !!producer,
+        muted: muted.includes(type.key),
+      })),
     });
   } catch (err) {
     next(err);

@@ -1,7 +1,7 @@
 const request = require('supertest');
 const { app } = require('../src/app');
 const { User } = require('../src/models');
-const { createUser, tokenFor, uniqueEmail, DEFAULT_PASSWORD } = require('./helpers');
+const { createUser, tokenFor, uniqueEmail, DEFAULT_PASSWORD, seedResetCode } = require('./helpers');
 
 describe('Auth', () => {
   describe('POST /api/auth/register', () => {
@@ -117,20 +117,34 @@ describe('Auth', () => {
       expect(res.status).toBe(400);
     });
 
-    it('resets the password with a valid token and clears any lock', async () => {
+    it('mails a code rather than a link, and issues no ticket until it comes back', async () => {
       const user = await createUser();
-      await request(app).post('/api/auth/forgot-password').send({ email: user.email });
+
+      await request(app).post('/api/auth/forgot-password').send({ email: user.email }).expect(200);
+
       const reloaded = await User.findByPk(user.id);
-      expect(reloaded.passwordResetToken).toBeTruthy();
+      expect(reloaded.passwordResetCode).toBeTruthy();
+      expect(reloaded.passwordResetToken).toBeNull();
+    });
+
+    it('resets the password once the code has been presented, and clears any lock', async () => {
+      const user = await createUser();
+
+      const code = await seedResetCode(user);
+      const verified = await request(app)
+        .post('/api/auth/verify-reset-code')
+        .send({ email: user.email, code });
+      expect(verified.status).toBe(200);
 
       const res = await request(app)
         .post('/api/auth/reset-password')
-        .send({ token: reloaded.passwordResetToken, newPassword: 'brandnewpw1' });
+        .send({ token: verified.body.resetToken, newPassword: 'brandnewpw1' });
       expect(res.status).toBe(200);
 
       const after = await User.findByPk(user.id);
       expect(await after.comparePassword('brandnewpw1')).toBe(true);
       expect(after.passwordResetToken).toBeNull();
+      expect(after.passwordResetCode).toBeNull();
     });
   });
 });

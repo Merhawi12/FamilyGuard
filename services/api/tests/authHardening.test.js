@@ -9,7 +9,10 @@ const jwt = require('jsonwebtoken');
 const { app } = require('../src/app');
 const { env } = require('../src/config/env');
 const { User, Session, Device } = require('../src/models');
-const { createUser, createChild, createDevice, deviceToken, tokenFor, uniqueEmail, DEFAULT_PASSWORD } = require('./helpers');
+const {
+  createUser, createChild, createDevice, deviceToken, tokenFor, uniqueEmail, DEFAULT_PASSWORD,
+  rewindOtpCooldown,
+} = require('./helpers');
 
 describe('The MFA pre-auth token is not a credential', () => {
   /*
@@ -129,11 +132,18 @@ describe('Changing the email address re-verifies it', () => {
   });
 
   it('issues a fresh verification code for it', () => {
-    expect(user.emailVerificationCode).toMatch(/^\d{6}$/);
+    // Hashed on the way in — see utils/otp.js. What matters here is that a code
+    // exists at all and has not already expired.
+    expect(user.emailVerificationCode).toMatch(/^[a-f0-9]{64}$/);
     expect(new Date(user.emailVerificationExpires).getTime()).toBeGreaterThan(Date.now());
   });
 
   it('tells the client the address needs confirming', async () => {
+    // The `beforeEach` above already spent this account's code; changing the
+    // address again inside the minute is exactly what the resend cooldown
+    // refuses, so the wait is simulated rather than served.
+    await rewindOtpCooldown(user);
+
     const res = await request(app).put('/api/auth/profile')
       .set('Authorization', `Bearer ${token}`)
       .send({ email: uniqueEmail('moved-again') });
@@ -244,11 +254,32 @@ describe('The email verification code is guess-limited on the account', () => {
     expect(res.status).toBe(423);
   });
 
+  it('destroys the code itself after five wrong guesses', async () => {
+    /*
+     * The account lockout above is one of two limits and only one of them
+     * survives a fresh code. This is the other: a live code has a budget of its
+     * own, so a guesser who waits out the lockout — or spreads the guesses far
+     * enough to avoid it — still finds the six digits they were working on gone
+     * rather than waiting for them.
+     */
+    expect(user.emailVerificationCode).toBeNull();
+    expect(user.emailVerificationExpires).toBeNull();
+  });
+
   it('clears the counter once the right code is accepted', async () => {
-    await user.update({ lockedUntil: null, failedLoginAttempts: 4 });
+    // A new code, because the six wrong guesses in `beforeEach` destroyed the
+    // seeded one — which is the behaviour the test above pins.
+    await user.update({
+      lockedUntil: null,
+      failedLoginAttempts: 4,
+      emailVerificationCode: '654321',
+      emailVerificationExpires: new Date(Date.now() + 15 * 60 * 1000),
+    });
+
     const res = await request(app).post('/api/auth/verify-email')
       .set('X-Forwarded-For', '10.9.9.8')
-      .send({ email, code: '123456' });
+      .send({ email, code: '654321' });
+
     expect(res.status).toBe(200);
     await user.reload();
     expect(user.failedLoginAttempts).toBe(0);

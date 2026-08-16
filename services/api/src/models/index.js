@@ -16,6 +16,8 @@ const Transaction = require('./Transaction');
 const Notification = require('./Notification');
 const SystemSetting = require('./SystemSetting');
 const PushToken = require('./PushToken');
+// Stands alone: a contact-form message comes from someone with no account.
+const ContactMessage = require('./ContactMessage');
 
 // Associations
 User.hasMany(Child, { foreignKey: 'parentId', as: 'children' });
@@ -78,5 +80,5 @@ PushToken.belongsTo(Device, { foreignKey: 'deviceId', as: 'device' });
 module.exports = {
   User, Child, Device, ActivityLog, ScreenTimeRule, AppRule, WebsiteRule, Alert, AuditLog,
   Location, SafeZone, Message, Contact, Session, Transaction, Notification, SystemSetting,
-  PushToken,
+  PushToken, ContactMessage,
 };

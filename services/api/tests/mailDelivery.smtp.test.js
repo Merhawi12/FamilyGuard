@@ -158,25 +158,33 @@ beforeEach(() => {
 });
 
 describe('the password reset email actually leaves the process', () => {
-  it('delivers a message carrying the reset link for the token it was given', async () => {
+  it('delivers a message carrying the six digits it was given', async () => {
     const { email } = loadMailer(LIVE);
-    const token = 'a1b2c3d4'.repeat(8); // 64 hex characters, as the controller mints
 
-    const sent = await email.sendPasswordResetEmail({ name: 'Reset User', email: 'reset@example.com', token });
+    const sent = await email.sendPasswordResetCodeEmail({
+      name: 'Reset User', email: 'reset@example.com', code: '074219',
+    });
     expect(sent).not.toBe(false);
 
     const { body } = await waitForMessage();
 
     expect(body).toMatch(/reset your Parentix password/i);
-    // The link is on the configured client origin and carries exactly the token
-    // the caller passed — which is the token the controller stored on the user.
-    expect(body).toContain(`${CLIENT_URL}/reset-password?token=${token}`);
+    expect(body).toContain('074219');
+    /**
+     * No link, and this is the assertion that keeps it that way.
+     *
+     * A reset URL is a credential in a URL: logged by every gateway and link
+     * scanner it passes, kept in browser history, and usable by whatever fetched
+     * it "to check" the message. The flow now carries six digits back to a
+     * screen instead, and a well-meaning re-added button would silently undo it.
+     */
+    expect(body).not.toContain('/reset-password?token=');
   });
 
   it('addresses the message to the account that asked for it', async () => {
     const { email } = loadMailer(LIVE);
 
-    await email.sendPasswordResetEmail({ name: 'Someone', email: 'recipient@example.com', token: 'f'.repeat(64) });
+    await email.sendPasswordResetCodeEmail({ name: 'Someone', email: 'recipient@example.com', code: '123456' });
     const { rcpt } = await waitForMessage();
 
     // Checked against the SMTP envelope rather than the To: header — the
@@ -199,10 +207,10 @@ describe('the password reset email actually leaves the process', () => {
   it('escapes a name so it cannot inject markup into the message', async () => {
     const { email } = loadMailer(LIVE);
 
-    await email.sendPasswordResetEmail({
+    await email.sendPasswordResetCodeEmail({
       name: '<img src=x onerror=alert(1)>',
       email: 'xss@example.com',
-      token: 'b'.repeat(64),
+      code: '000001',
     });
     const { body } = await waitForMessage();
 
@@ -219,8 +227,8 @@ describe('an unconfigured relay is not mistaken for a working one', () => {
 
     expect(mailer.isEnabled()).toBe(false);
 
-    const sent = await email.sendPasswordResetEmail({
-      name: 'Nobody', email: 'nowhere@example.com', token: 'c'.repeat(64),
+    const sent = await email.sendPasswordResetCodeEmail({
+      name: 'Nobody', email: 'nowhere@example.com', code: '000002',
     });
 
     // Reports that nothing went out, rather than claiming success…
@@ -236,8 +244,8 @@ describe('an unconfigured relay is not mistaken for a working one', () => {
     const { email, mailer } = loadMailer({ ...LIVE, SMTP_PORT: '5326' });
 
     expect(mailer.isEnabled()).toBe(true);
-    expect(await email.sendPasswordResetEmail({
-      name: 'Nobody', email: 'nowhere@example.com', token: 'd'.repeat(64),
+    expect(await email.sendPasswordResetCodeEmail({
+      name: 'Nobody', email: 'nowhere@example.com', code: '000003',
     })).toBe(false);
   });
 });

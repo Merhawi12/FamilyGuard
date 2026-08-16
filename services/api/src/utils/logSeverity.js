@@ -50,7 +50,16 @@ const LEVEL_RULES = [
       'auth.mfa_disabled', 'auth.password_reset', 'auth.password_reset_requested',
       'staff.created', 'staff.password_reset',
     ],
-    suffixes: ['_deleted', '_removed', '_revoked'],
+    /**
+     * `_throttled` is here rather than left as ordinary because the entries it
+     * covers are the only trace of one thing: somebody's inbox or handset being
+     * used as a target. A single one is a parent tapping Resend twice; a run of
+     * them against one account is an attack the platform has absorbed silently,
+     * and `forgot-password` in particular cannot report it to the caller
+     * without confirming that the address has an account. If it is not visible
+     * at a level operators filter on, it is not visible.
+     */
+    suffixes: ['_deleted', '_removed', '_revoked', '_throttled'],
   },
 ];
 

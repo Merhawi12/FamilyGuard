@@ -2,6 +2,8 @@ const { Device, Message, Child } = require('../models');
 const { createAlert } = require('../utils/alertHelper');
 const { detectCyberbullying } = require('../utils/cyberbullyingDetector');
 const { parseFix } = require('../utils/geo');
+const { notifyParentOfChildMessage } = require('../utils/childMessageNotice');
+const { track } = require('../utils/background');
 const logger = require('../utils/logger');
 
 // NOTE: socket.data is populated by the io.use() handshake-auth middleware in app.js.
@@ -50,20 +52,44 @@ const initSocketHandlers = (io) => {
       await createAlert(io, { parentId, childId, deviceId, type: 'screen_time_exceeded', message: 'Daily screen time limit has been reached', severity: 'high' });
     });
 
+    /*
+     * An app this phone has not seen the child open before.
+     *
+     * The device works this out from its own usage sync rather than from a
+     * PACKAGE_ADDED receiver — see the child app's services/newApps.js for why
+     * that is both simpler and the better question. The message says "used"
+     * rather than "installed" because that is what was observed.
+     */
     socket.on('alert:app_installed', async ({ appName, appPackage }) => {
       if (role !== 'child') return;
-      await createAlert(io, { parentId, childId, deviceId, type: 'app_installed', message: `New app installed: ${appName}`, severity: 'medium', metadata: { appName, appPackage } });
+      await createAlert(io, { parentId, childId, deviceId, type: 'app_installed', message: `${appName} was opened for the first time on a child device`, severity: 'medium', metadata: { appName, appPackage } });
     });
 
-    socket.on('alert:dangerous_content', async ({ url, category }) => {
-      if (role !== 'child') return;
-      await createAlert(io, { parentId, childId, deviceId, type: 'dangerous_content', message: `Dangerous content detected (${category})`, severity: 'high', metadata: { url, category } });
-    });
+    /*
+     * `alert:dangerous_content` is raised by the server now, not the device —
+     * see utils/riskyBrowsing.js. The phone reports the domains it resolves and
+     * the API knows which categories those belong to, which is the whole of what
+     * a DNS-level filter can honestly claim. There is nothing for the device to
+     * emit, so there is no handler for it to emit to.
+     */
 
-    socket.on('alert:unknown_contact', async ({ phoneNumber }) => {
-      if (role !== 'child') return;
-      await createAlert(io, { parentId, childId, deviceId, type: 'unknown_contact', message: `Unknown contact attempted to reach child`, severity: 'high', metadata: { phoneNumber } });
-    });
+    /*
+     * There is no `alert:unknown_contact` handler, and that is a decision.
+     *
+     * Matching a caller against the parent's approved list needs the number, and
+     * on Android 9+ that means READ_CALL_LOG (and RECEIVE_SMS for texts) — both
+     * on Google Play's restricted-permissions list, both requiring a declared
+     * and reviewed use case, on a product that has deliberately kept its
+     * permission set narrow enough to explain to a parent. Parentix is not going
+     * to ask a family for their child's call log.
+     *
+     * The handler used to exist and no device has ever emitted to it. Keeping a
+     * listener for an event nothing sends made the capability look present in
+     * every reading of this file. The approved-contact list itself stays and is
+     * still synced — it is the parent's record of who is in their child's life,
+     * and the child app now shows it to the child — but nothing claims it is
+     * enforced. See config/alertTypes.js.
+     */
 
     // ── Activity stream (child only → its own parent) ────────────────────────
     socket.on('activity:update', ({ data }) => {
@@ -108,6 +134,24 @@ const initSocketHandlers = (io) => {
 
         // Deliver to parent
         io.to(`parent:${parentId}`).emit('chat:message', message);
+
+        /**
+         * And to the parent's phone, which is where they actually are.
+         *
+         * This is the path the child app prefers whenever its socket is up, so
+         * without the same push the REST route sends, the *better-connected* the
+         * child's phone was the less likely their parent was to hear about the
+         * message at all. See utils/childMessageNotice.js — it looks the child's
+         * name up itself, so registering this costs no await and does not stand
+         * between the child and their delivery confirmation.
+         */
+        track(notifyParentOfChildMessage({
+          parentId,
+          childId,
+          text: message.text,
+          messageType,
+          messageId: message.id,
+        }));
 
         // Confirm delivery back to sender
         socket.emit('chat:delivered', { messageId: message.id });

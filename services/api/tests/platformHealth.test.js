@@ -235,7 +235,16 @@ describe('the alert catalogue', () => {
     for (const type of ALERT_TYPES) {
       expect(type.condition.length).toBeGreaterThan(10);
       expect(['high', 'medium']).toContain(type.severity);
-      expect(type.producer).toMatch(/\.(js|kt)$/);
+      /**
+       * A file path, or an explicit null.
+       *
+       * This required a path unconditionally, which is why three entries kept
+       * naming `sockets/deviceEvents.js` for a producer that does not exist —
+       * the only way to pass was to name *something*, so the check rewarded the
+       * claim it was meant to verify. `null` is now a legitimate answer, and
+       * alertCatalogue.test.js is what checks that a named producer is real.
+       */
+      if (type.producer !== null) expect(type.producer).toMatch(/\.(js|kt)$/);
     }
     expect(ALERT_LABELS).toBeNull(); // labels live in the shared constants file
   });

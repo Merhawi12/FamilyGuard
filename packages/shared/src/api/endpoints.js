@@ -26,7 +26,18 @@ export const auth = {
    */
   requestPhoneCode: (data) => api.post('/auth/phone/request', data),
   verifyPhoneCode: (data) => api.post('/auth/phone/verify', data),
+  /**
+   * Forgotten password, in three calls.
+   *
+   * `forgotPassword` emails a 6-digit code and always answers 200 — it says
+   * nothing about whether the address has an account, so the screen moves to the
+   * code step either way. `verifyResetCode` exchanges those digits for a
+   * single-use `resetToken`, and `resetPassword` spends it. The token is never
+   * emailed: it exists only between the second call's response and the third
+   * call's body.
+   */
   forgotPassword: (data) => api.post('/auth/forgot-password', data),
+  verifyResetCode: (data) => api.post('/auth/verify-reset-code', data),
   resetPassword: (data) => api.post('/auth/reset-password', data),
   logout: () => api.post('/auth/logout'),
   me: () => api.get('/auth/me'),

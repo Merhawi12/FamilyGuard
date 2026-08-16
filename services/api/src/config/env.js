@@ -69,7 +69,7 @@ const configured = (value) => {
  * The consequence is not a loud failure, it is a quiet one. The mailer builds an
  * SMTP transport pointed at the host " ", every send throws and is swallowed by
  * the catch that stops a notification from failing its request — and the branch
- * that would have logged the reset link instead is skipped, because the service
+ * that would have logged the reset code instead is skipped, because the service
  * believes it is configured. The caller is told the mail was sent. Nothing
  * arrives, and nothing says so.
  *
