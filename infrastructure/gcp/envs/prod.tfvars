@@ -102,7 +102,24 @@ client_link_origin = ""
 # VITE_GOOGLE_CLIENT_ID empty, which renders no button rather than a broken one.
 google_client_id = "648085611770-iqb08gu4omr6nkk049bj2dsgrc3166jd.apps.googleusercontent.com"
 
-email_from = "Parentix <no-reply@parentix.ca>"
+# A monitored address rather than a no-reply one, because two of the three
+# things sent from it — a password reset code and a safety alert — are exactly
+# what a worried parent replies to. Mail sent from an address that discards
+# replies is a support channel that silently drops its own customers.
+#
+# It has to be a real mailbox, not just a string: Gmail rewrites From to the
+# account that authenticated unless the address is a verified alias, and
+# verifying one means receiving a code at it.
+email_from = "Parentix <support@parentix.ca>"
+
+# The same mailbox receives. It is not only an internal destination: the
+# contact-form receipt sets Reply-To to this address, so whatever is here is
+# printed in front of a visitor and invited to be replied to. A personal
+# consumer mailbox in that position is both a support channel nobody else can
+# cover and, since these messages carry a visitor's name, address and message,
+# personal data sitting somewhere with no retention policy and no way to hand
+# over. See the variable's own description.
+admin_email = "support@parentix.ca"
 
 # Where monitoring alerts go. Set this before the first production apply — an
 # unmonitored production service is one where the first report of an outage

@@ -8,12 +8,26 @@
  * serve traffic with one.
  */
 
-// dotenv fills only missing keys, but tests/env.setup.js has already populated
-// the interesting ones, and a developer's services/api/.env would otherwise
-// change the outcome of these assertions. Neutralising it keeps the suite
-// hermetic on any machine.
+/**
+ * Belt and braces. `src/config/env.js` no longer reads `.env` at all under
+ * NODE_ENV=test, which is what actually makes this suite hermetic — mocking
+ * dotenv here only ever covered *this* file, and `process.env` is shared by
+ * every test file in a Jest worker, so one earlier suite calling the real
+ * `dotenv.config()` used to populate variables that these assertions then read.
+ * That is not hypothetical: `accepts a fully configured production environment`
+ * passed for months on SMTP_USER and SMTP_PASS that came from whoever's laptop
+ * was running it, and named neither.
+ */
 jest.mock('dotenv', () => ({ config: () => ({ parsed: {} }) }));
 
+/**
+ * Every variable `loadConfig` clears before applying its own.
+ *
+ * A key missing from this list is a key a test cannot control: it survives from
+ * the ambient environment into every `loadConfig` call, which is how the two
+ * SMTP credentials below came to be load-bearing without appearing anywhere.
+ * Anything `assertProductionConfig` reads belongs here.
+ */
 const CONFIG_KEYS = [
   'NODE_ENV',
   'CLIENT_URL',
@@ -26,6 +40,10 @@ const CONFIG_KEYS = [
   'FIELD_ENCRYPTION_KEY',
   'SMS_ECHO_CODE',
   'TWILIO_ACCOUNT_SID',
+  'EMAIL_PROVIDER',
+  'SMTP_HOST',
+  'SMTP_USER',
+  'SMTP_PASS',
 ];
 
 /** Loads src/config/env.js fresh under exactly the variables given. */
@@ -62,7 +80,13 @@ const PRODUCTION_BASE = {
   // complete without the emailed code, so an API that cannot send mail accepts
   // registrations and strands every one of them. See the SMTP_HOST case in
   // tests/signInHardening.test.js for the refusal itself.
+  //
+  // All three, because `assertProductionConfig` checks all three — a host with
+  // no login fails at the relay with `535` once per message, which is the same
+  // outage wearing a different error string.
   SMTP_HOST: 'smtp.example.com',
+  SMTP_USER: 'apikey',
+  SMTP_PASS: 'relay-password',
 };
 
 describe('CORS origins', () => {

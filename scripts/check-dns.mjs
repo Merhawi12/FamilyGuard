@@ -75,17 +75,21 @@ const webHosts = [domain, `www.${domain}`, `${tfvar('app_subdomain')}.${domain}`
  * IPv4 only. Every check below pins one address at a time, and a wrong A record
  * is what breaks — a correct AAAA cannot rescue a browser that picked the bad A.
  */
-const resolveA = async (name) => {
+const dnsAnswers = async (name, type) => {
   try {
-    const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=A`, {
+    const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${type}`, {
       signal: AbortSignal.timeout(10_000),
     });
     const body = await res.json();
-    return (body.Answer || []).filter((a) => a.type === 1).map((a) => a.data); // 1 = A; CNAMEs in the chain are ignored
+    return body.Answer || [];
   } catch {
     return [];
   }
 };
+
+const resolveA = async (name) => (await dnsAnswers(name, 'A'))
+  .filter((a) => a.type === 1) // 1 = A; CNAMEs in the chain are ignored
+  .map((a) => a.data);
 
 /**
  * Asks one specific address to serve one specific hostname — the equivalent of
@@ -189,6 +193,107 @@ if (apiAddrs.length === 0) {
     const allowed = await allowedOrigin(origin, apiAddrs[0]);
     if (allowed === origin) pass(`API accepts ${origin}`);
     else fail(`API does not accept ${origin}. Add it to extra_cors_origins and apply.`);
+  }
+}
+
+// ── Mail ─────────────────────────────────────────────────────────────────────
+//
+// The web checks above ask each address to prove what it is. The same question
+// applied to mail is "can this domain receive?", and it is worth asking because
+// configuring an address is not the same as owning a mailbox — the two are
+// edited in different places, months apart, and nothing connects them.
+//
+// Both directions break silently. `email_from` on a domain with no MX cannot be
+// verified as a Gmail alias, so Gmail rewrites the From header and every parent
+// sees whatever account authenticated instead; and a parent who replies to a
+// reset code or a safety alert gets a bounce. `admin_email` on one means the
+// contact-form receipt hands the visitor a Reply-To that does not accept mail.
+// Neither shows up in a log, because the sending side succeeded.
+const addressOf = (value) => (value.match(/<([^>]+)>/)?.[1] || value).trim();
+const mailRoles = [
+  ['email_from', 'outbound mail is sent as this address'],
+  ['admin_email', 'contact-form submissions and reply-to are addressed here'],
+];
+
+const mailDomains = new Map();
+for (const [key, role] of mailRoles) {
+  const value = tfvar(key);
+  if (!value) continue;
+  const mailDomain = addressOf(value).split('@')[1]?.toLowerCase();
+  // Only our own domain is ours to fix. A gmail.com or outlook.com address is
+  // someone else's MX and checking it would report a problem nobody can act on.
+  if (!mailDomain || (mailDomain !== domain && !mailDomain.endsWith(`.${domain}`))) continue;
+  if (!mailDomains.has(mailDomain)) mailDomains.set(mailDomain, []);
+  mailDomains.get(mailDomain).push(`${key} — ${role}`);
+}
+
+if (mailDomains.size > 0) {
+  console.log('Mail');
+  for (const [mailDomain, roles] of mailDomains) {
+    const mx = (await dnsAnswers(mailDomain, 'MX')).filter((a) => a.type === 15);
+    if (mx.length === 0) {
+      fail(`${mailDomain} has no MX record, so it cannot receive mail. Affected:
+       ${roles.join('\n       ')}
+       Set up a mailbox for the domain — Google Workspace mints the records —
+       or point these at an address that exists. docs/DEPLOYMENT.md §1.7.`);
+    } else {
+      pass(`${mailDomain} accepts mail (${mx.length} MX record${mx.length === 1 ? '' : 's'})`);
+    }
+
+    const txt = async (name) => (await dnsAnswers(name, 'TXT'))
+      .filter((a) => a.type === 16)
+      .map((a) => a.data.replace(/^"|"$/g, ''));
+
+    // SPF is not required to receive, so this is a warning rather than a
+    // failure: without it the mail sends and lands in spam, which is the more
+    // expensive outcome for a password reset than a clean bounce would be.
+    const spf = (await txt(mailDomain)).filter((t) => t.startsWith('v=spf1'));
+    if (spf.length === 0) {
+      console.log(`  ${yellow('warn')} ${mailDomain} publishes no SPF record. Reset codes will be filtered as spam by most providers.`);
+    } else if (spf.length > 1) {
+      // A domain may publish exactly one. A second does not add to the first —
+      // it invalidates both, and the usual cause is two relays each following
+      // their own setup guide.
+      fail(`${mailDomain} publishes ${spf.length} SPF records; a domain may have one. Merge them into a single 'v=spf1 …' record.`);
+    } else {
+      pass(`${mailDomain} publishes SPF (${spf[0]})`);
+    }
+
+    // The selector is the relay's, so it is only worth looking for one this
+    // domain's MX says is in use. Google publishes under `google._domainkey`
+    // and signs nothing until the record is live *and* authentication is
+    // started in the Admin console — the record alone is not the switch.
+    const usesGoogle = mx.some((a) => /aspmx\.l\.google\.com\.?$/i.test(a.data.split(/\s+/).pop() || ''));
+    const dkim = usesGoogle ? (await txt(`google._domainkey.${mailDomain}`)).filter((t) => t.includes('v=DKIM1')) : [];
+    if (usesGoogle && dkim.length === 0) {
+      console.log(`  ${yellow('warn')} ${mailDomain} publishes no DKIM key at google._domainkey — Google Workspace is not signing.`);
+    } else if (dkim.length > 0) {
+      pass(`${mailDomain} publishes a DKIM key`);
+    }
+
+    /*
+     * DMARC is what turns the two above from advisory into enforced, so it is
+     * read last and judged against them rather than on its own.
+     *
+     * A policy of quarantine or reject with only one mechanism passing is the
+     * combination worth failing on: it survives while nothing goes wrong and
+     * collapses the moment something does. SPF alone breaks on any forwarding
+     * hop — a parent whose work address forwards home, a school alias — and the
+     * message is then quarantined rather than delivered, which for a password
+     * reset is indistinguishable from the mail never being sent.
+     */
+    const dmarc = (await txt(`_dmarc.${mailDomain}`)).filter((t) => t.startsWith('v=DMARC1'));
+    const policy = dmarc[0]?.match(/\bp\s*=\s*(\w+)/)?.[1]?.toLowerCase();
+    if (!policy) {
+      console.log(`  ${yellow('warn')} ${mailDomain} publishes no DMARC record.`);
+    } else if (policy !== 'none' && dkim.length === 0 && usesGoogle) {
+      fail(`${mailDomain} enforces DMARC (p=${policy}) but publishes no DKIM key.
+       Delivery then rests on SPF alignment alone, and any forwarding hop breaks it —
+       the message is quarantined, not bounced, so nobody is told. Turn on DKIM:
+       Admin console → Apps → Google Workspace → Gmail → Authenticate email.`);
+    } else {
+      pass(`${mailDomain} publishes DMARC (p=${policy})`);
+    }
   }
 }
 

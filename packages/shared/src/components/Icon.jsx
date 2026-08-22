@@ -353,8 +353,6 @@ const ICONS = {
   ),
 };
 
-export const ICON_NAMES = Object.keys(ICONS);
-
 export default function Icon({
   name,
   size = 20,

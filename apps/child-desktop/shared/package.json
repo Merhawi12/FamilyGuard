@@ -1,0 +1,27 @@
+{
+  "name": "@parentix/child-desktop-shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Parentix Child Desktop — the agent, the child-facing windows and the platform contract that Windows and macOS each implement.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./host": "./src/host/index.js",
+    "./preload.cjs": "./preload.cjs",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test:e2e": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/e2e.mjs"
+  },
+  "peerDependencies": {
+    "axios": "^1.6.2",
+    "electron": ">=33",
+    "socket.io-client": "^4.6.2"
+  },
+  "peerDependenciesMeta": {
+    "electron": {
+      "optional": true
+    }
+  }
+}

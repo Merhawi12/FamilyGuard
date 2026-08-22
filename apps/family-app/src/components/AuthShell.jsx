@@ -19,6 +19,8 @@
  * screen: a sign-up form on a short phone scrolls, and without it the last
  * field ends under the gesture bar.
  */
+import { BrandLogo } from '@parentix/shared';
+
 export default function AuthShell({ children }) {
   // The wash behind the card is built from brand tokens rather than a stock
   // hue. It was a blue-to-indigo gradient when the app was blue, and because a
@@ -31,7 +33,7 @@ export default function AuthShell({ children }) {
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
           <a href="/" aria-label="Parentix home">
-            <img src="/logo.png" alt="Parentix" className="h-16 sm:h-20 w-auto mx-auto" />
+            <BrandLogo className="h-16 sm:h-20 w-auto mx-auto" />
           </a>
           <p className="text-sm text-gray-500 mt-3">Parental Control &amp; Digital Safety</p>
         </div>

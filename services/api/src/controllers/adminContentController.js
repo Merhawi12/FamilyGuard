@@ -2,6 +2,7 @@ const { Op, fn, col } = require('sequelize');
 const { ActivityLog, WebsiteRule, Child, Device } = require('../models');
 const { blindIndex } = require('../utils/crypto');
 const { normalizeDomain } = require('../utils/domain');
+const { countDistinct, countDistinctGrouped } = require('../utils/aggregate');
 const { auditLog } = require('../utils/auditLogger');
 const {
   CONTENT_CATEGORIES, CATEGORY_KEYS, categoryCatalogue, categoryForDomain, domainsForCategory,
@@ -98,24 +99,40 @@ const blockedAttempts = async (policy) => {
  * it is linked and active, because that is the population that fetches rules.
  */
 const coverage = async () => {
-  const [children, devices, ruleRows] = await Promise.all([
-    Child.count(),
-    Device.count({ where: { isActive: true, isLinked: true } }),
-    WebsiteRule.findAll({ attributes: ['childId', 'url', 'category', 'action'], raw: true }),
-  ]);
+  /**
+   * Six aggregates rather than one table scan.
+   *
+   * This used to select every website rule on the platform with four columns
+   * projected and derive all five figures from the array with `Set` and
+   * `filter().length`. Every one of them is a `COUNT` the database can do
+   * without sending a row back, and the array grows with every rule any parent
+   * has ever written while the answer stays five integers.
+   *
+   * `url: null` is the exact SQL equivalent of the `!r.url` test it replaces:
+   * `addWebsiteRule` stores either NULL or a normalised non-empty hostname, so
+   * there are no empty strings for the two to disagree about.
+   */
+  const [children, devices, childrenWithRules, categoryChildren, customDomains, allowances] =
+    await Promise.all([
+      Child.count(),
+      Device.count({ where: { isActive: true, isLinked: true } }),
+      countDistinct(WebsiteRule, 'childId'),
+      countDistinctGrouped(WebsiteRule, 'category', 'childId', { url: null }),
+      WebsiteRule.count({ where: { url: { [Op.not]: null }, action: 'block' } }),
+      WebsiteRule.count({ where: { action: 'allow' } }),
+    ]);
 
-  const familiesWithRules = new Set(ruleRows.map((r) => r.childId)).size;
   const categoryUsage = CONTENT_CATEGORIES.map((c) => ({
     key: c.key,
-    children: new Set(ruleRows.filter((r) => !r.url && r.category === c.key).map((r) => r.childId)).size,
+    children: categoryChildren.get(c.key) || 0,
   }));
 
   return {
     children,
     devices,
-    childrenWithRules: familiesWithRules,
-    customDomains: ruleRows.filter((r) => r.url && r.action === 'block').length,
-    allowances: ruleRows.filter((r) => r.action === 'allow').length,
+    childrenWithRules,
+    customDomains,
+    allowances,
     categoryUsage,
   };
 };

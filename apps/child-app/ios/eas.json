@@ -1,0 +1,24 @@
+{
+  "cli": {
+    "version": ">= 5.0.0"
+  },
+  "build": {
+    "simulator": {
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "buildConfiguration": "Release"
+      }
+    },
+    "production": {
+      "ios": {
+        "buildConfiguration": "Release"
+      }
+    }
+  }
+}

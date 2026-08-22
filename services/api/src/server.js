@@ -66,6 +66,29 @@ const start = async () => {
     );
   }
 
+  /**
+   * A TLS connection to the database that verifies nothing, said out loud.
+   *
+   * `DB_SSL` on with `rejectUnauthorized` off encrypts the link and accepts any
+   * certificate on the other end of it, which means the transport is confidential
+   * against a passive listener and worthless against anything that can answer on
+   * that address — and what it would be handed is the database password followed
+   * by every query. Supplying DB_SSL_CA turns verification on by itself (see
+   * `env.db.sslCa`), so this line exists to make the gap between the two states
+   * visible rather than to nag.
+   *
+   * Not fatal, and not for the usual reason: the recommended topology is the
+   * Cloud SQL Unix socket, where the connection never leaves the instance
+   * sandbox and TLS is not in the picture at all. This only concerns TCP.
+   */
+  if (env.isProduction && env.db.ssl && !env.db.sslRejectUnauthorized) {
+    logger.warn(
+      'Database TLS is not verifying the server certificate. Set the db-ssl-ca secret to the '
+      + "instance's server CA (gcloud sql instances describe <instance> "
+      + "--format='value(serverCaCert.cert)') — see docs/DEPLOYMENT.md.",
+    );
+  }
+
   assertProductionConfig();
 
   await initializeDatabase();

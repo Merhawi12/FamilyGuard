@@ -16,22 +16,29 @@ import PageIntro from '../components/PageIntro';
 /**
  * The platforms a link code can actually be redeemed on.
  *
- * This offered iPhone, Windows and Mac as well. There is no Parentix client for
- * any of them — the child app is Android-only, down to the Kotlin accessibility
- * service and VPN service it is built on — so choosing one produced a link code
- * nothing could consume and a device row that stayed "never connected" forever,
- * with no indication anywhere that it never could.
+ * The rule for this list is that a Parentix client has to exist and be
+ * installable for the type — otherwise choosing one produces a link code nothing
+ * can consume and a device row that stays "never connected" for ever, with no
+ * indication anywhere that it never could. That is what this list was for when
+ * it held Android alone.
+ *
+ * Windows and Mac join it because `apps/child-desktop` ships an agent for both,
+ * and it redeems a code through the same `POST /devices/confirm` the phones use.
+ * iPhone is still absent for the original reason: the iOS child app builds, but
+ * it is not in the App Store, so there is nothing for a family to install.
  *
  * Editing an existing device keeps the wider list, because rows created before
  * this must still be able to name what they are.
  */
-const DEVICE_TYPES = [{ value: 'android', label: 'Android phone or tablet' }];
+const DEVICE_TYPES = [
+  { value: 'android', label: 'Android phone or tablet' },
+  { value: 'windows', label: 'Windows computer' },
+  { value: 'mac', label: 'Mac' },
+];
 
 const EDITABLE_DEVICE_TYPES = [
   ...DEVICE_TYPES,
   { value: 'ios', label: 'iPhone or iPad' },
-  { value: 'windows', label: 'Windows' },
-  { value: 'mac', label: 'Mac' },
 ];
 
 /**
@@ -73,6 +80,8 @@ export default function Children() {
    */
   const [linkedDevice, setLinkedDevice] = useState(null);
   const [saving, setSaving] = useState(false);
+  // The device whose pause is in flight, so only that row's button disables.
+  const [blocking, setBlocking] = useState(null);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
@@ -243,6 +252,29 @@ export default function Children() {
       setError(errorMessage(err, 'Could not save that device'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Pause or unpause one device, leaving its siblings alone.
+   *
+   * No confirmation, unlike Remove: this is reversible with the same tap that
+   * applied it, and a dialog in front of it would make an everyday action feel
+   * like a dangerous one. The id is held in `blocking` so the row's button can
+   * disable itself — the call is fast, but tapping it twice would otherwise send
+   * a block and an unblock and leave the device in whichever arrived last.
+   */
+  const toggleDeviceBlock = async (device) => {
+    setError('');
+    setBlocking(device.id);
+    try {
+      if (device.blockedAt) await devicesApi.unblock(device.id);
+      else await devicesApi.block(device.id);
+      await load();
+    } catch (err) {
+      setError(errorMessage(err, `Could not ${device.blockedAt ? 'unpause' : 'pause'} that device`));
+    } finally {
+      setBlocking(null);
     }
   };
 
@@ -429,6 +461,8 @@ export default function Children() {
                       onRemove={removeDevice}
                       onConnect={connectDevice}
                       onEdit={openDeviceEdit}
+                      onToggleBlock={toggleDeviceBlock}
+                      busy={blocking === d.id}
                     />
                   ))}
                 </div>
@@ -590,10 +624,14 @@ export default function Children() {
             {/* A dropdown holding one option is not a choice, and reads as a
                 broken control: it opens, shows the thing already selected, and
                 closes having changed nothing. The sign-in screen hides its
-                method tabs on the same rule. Only Android can be linked today,
-                so the form says so instead of offering to pick it. The
-                condition, rather than deleting the field, is what makes the
-                dropdown come back on its own the day a second type is added. */}
+                method tabs on the same rule. When Android was the only platform
+                with a client, this form stated it rather than offering to pick
+                it — and the condition, rather than deleting the field, is what
+                made the dropdown come back on its own the day a second type was
+                added. It has: the desktop agent covers Windows and macOS, so
+                the select renders and the sentence below is the branch nothing
+                takes any more. Both are kept, because the list is a function of
+                which clients exist and that has now moved in both directions. */}
             {DEVICE_TYPES.length > 1 ? (
               <label className="field">
                 <span className="field-label">Device type</span>

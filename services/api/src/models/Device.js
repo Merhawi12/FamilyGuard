@@ -12,6 +12,24 @@ const Device = sequelize.define('Device', {
   isLinked: { type: DataTypes.BOOLEAN, defaultValue: false },
   lastSeen: { type: DataTypes.DATE },
   isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
+  /**
+   * When the parent paused this one device. NULL means it is not paused.
+   *
+   * Deliberately not the same flag as `isActive`, and deliberately a timestamp.
+   *
+   * `isActive: false` means *removed*: the row is a tombstone, the token is dead
+   * for ever, and the child app is told `device_unlinked` so it forgets its
+   * credentials and returns to the linking screen. There is no way back from it
+   * except a fresh code. A block is the opposite in every respect — reversible
+   * in one tap, and the device must stay authenticated so that the unblock can
+   * reach it and so the parent keeps seeing where the phone is while it is
+   * locked. Overloading `isActive` would have made "pause the tablet for an
+   * hour" indistinguishable from "throw the tablet away".
+   *
+   * A timestamp rather than a boolean because the lock screen says *when* it
+   * happened, and because "blocked since" is the question a parent asks next.
+   */
+  blockedAt: { type: DataTypes.DATE, allowNull: true },
   pushToken: { type: DataTypes.STRING },
 }, {
   underscored: true,

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { vendorChunks } from '@parentix/shared/vendor-chunks';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,11 +96,11 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          charts: ['recharts'],
-          maps: ['@react-google-maps/api'],
-        },
+        // Shared with the Admin Dashboard. See packages/shared/vendor-chunks.mjs
+        // for why this is a function rather than the object Rollup also takes:
+        // the object form silently pinned the whole Google Maps bundle to the
+        // sign-in screen.
+        manualChunks: vendorChunks(['react', 'charts', 'maps']),
       },
     },
   },

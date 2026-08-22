@@ -21,6 +21,7 @@ const { notifyNewSignIn } = require('../utils/signInNotice');
 const { track } = require('../utils/background');
 const { blocksSignIn, MAINTENANCE_MESSAGE } = require('../utils/maintenance');
 const { env } = require('../config/env');
+const { JWT_VERIFY_OPTIONS } = require('../utils/jwtOptions');
 
 const APP_NAME = 'Parentix';
 const BACKUP_CODE_COUNT = 8;
@@ -158,7 +159,7 @@ const validate = async (req, res, next) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(preAuthToken, env.auth.jwtSecret);
+      decoded = jwt.verify(preAuthToken, env.auth.jwtSecret, JWT_VERIFY_OPTIONS);
     } catch {
       return res.status(401).json({ error: 'Invalid or expired pre-auth token' });
     }

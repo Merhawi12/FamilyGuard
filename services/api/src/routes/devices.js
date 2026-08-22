@@ -4,6 +4,7 @@ const { authenticate, authenticateDevice } = require('../middleware/auth');
 const {
   getDevices, generateLink, regenerateLink, confirmLink, updateDevice, removeDevice,
   getDeviceRules, getDeviceContacts, deviceHeartbeat, deviceLogActivity, deviceLogWebHistory,
+  blockDevice, unblockDevice,
 } = require('../controllers/deviceController');
 const { registerDeviceToken, removeDeviceToken } = require('../controllers/pushController');
 
@@ -64,6 +65,10 @@ router.post('/link', authenticate, generateLink);
 router.patch('/:id', authenticate, updateDevice);
 // Re-issues a linking code for a device that never connected.
 router.post('/:id/link', reissueLimiter, authenticate, regenerateLink);
+// Pausing one device. Separate verbs rather than a body flag, so the audit log
+// records what was asked for and each is idempotent on its own.
+router.post('/:id/block', authenticate, blockDevice);
+router.post('/:id/unblock', authenticate, unblockDevice);
 router.delete('/:id', authenticate, removeDevice);
 
 module.exports = router;

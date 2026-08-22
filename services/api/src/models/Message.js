@@ -11,6 +11,12 @@ const Message = sequelize.define('Message', {
   // normal | emergency | check_in
   messageType: { type: DataTypes.STRING, defaultValue: 'normal' },
   isRead: { type: DataTypes.BOOLEAN, defaultValue: false },
-}, { underscored: true, updatedAt: false });
+}, {
+  underscored: true,
+  updatedAt: false,
+  // One child's conversation, oldest first — a chat transcript. Same reasoning as
+  // Notification: the ordering column belongs in the index.
+  indexes: [{ fields: ['child_id', 'created_at'] }],
+});
 
 module.exports = Message;

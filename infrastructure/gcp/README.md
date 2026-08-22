@@ -213,7 +213,7 @@ the client side — an app registered in the Firebase project, and its
 | App | Package | File goes in |
 |---|---|---|
 | Family (parent) | `ca.parentix.family` | `apps/family-app/android/app/` |
-| Child | `com.parentix.child` | `apps/child-app/android/app/` |
+| Child | `com.parentix.child` | `apps/child-app/android/android/app/` |
 
 Both Gradle projects apply the `google-services` plugin only when that file is
 present, so a build without it succeeds and then cannot receive a single

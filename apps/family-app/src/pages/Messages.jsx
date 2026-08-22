@@ -169,14 +169,24 @@ export default function Messages() {
           <div className="border-t border-gray-100 bg-gray-50 p-3 shrink-0 space-y-2">
             {error && <p className="notice-error">{error}</p>}
 
-            <div className="flex gap-2">
+            {/*
+              * `min-w-0` and `flex-wrap` together, and both are needed.
+              *
+              * A flex item defaults to `min-width: auto`, so `flex-1` alone will
+              * not shrink a button below its own content — the `truncate` on the
+              * label never engaged, and at 320px "Emergency" ran to 335px, past
+              * the edge of the screen. `min-w-0` lets them shrink; wrapping with
+              * a sensible basis means they drop to a second row instead of
+              * shrinking to the point where the labels are unreadable.
+              */}
+            <div className="flex flex-wrap gap-2">
               {MESSAGE_TYPES.map(({ value, label, icon }) => (
                 <button
                   key={value}
                   type="button"
                   onClick={() => setMsgType(value)}
                   aria-pressed={msgType === value}
-                  className={`btn btn-sm flex-1 ${
+                  className={`btn btn-sm flex-1 min-w-0 basis-[7rem] ${
                     msgType === value
                       ? value === 'emergency'
                         ? 'bg-danger text-white'

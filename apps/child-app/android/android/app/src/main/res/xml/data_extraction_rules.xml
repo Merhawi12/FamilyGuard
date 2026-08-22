@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nothing this app stores leaves the device.
+
+  `android:allowBackup="false"` on the application tag already turns off cloud
+  backup, but on Android 12 and later that flag no longer governs device-to-device
+  transfer — this file does, and the two have to say the same thing or a phone
+  restored from another phone carries data the cloud path refuses.
+
+  The device token itself is in `expo-secure-store`, whose Keystore key is never
+  backed up, so a restored copy would not be usable as a credential. What backup
+  does carry is everything beside it: the cached rules, the web-history backlog
+  waiting to upload, the approved-contact list, and the set of apps this child has
+  been seen to open. That is a record of a minor's behaviour, and it belongs on
+  the phone it was collected on and on the parent's account — not in a third
+  party's backup of a device that may since have changed hands.
+
+  It is also the wrong thing to restore. A link belongs to one physical device;
+  a copy of this state landing on a different handset describes monitoring that
+  is not happening. The app re-links and re-syncs from the server instead, which
+  is the only version of that state anyone should trust.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+        <exclude domain="device_root" />
+        <exclude domain="device_database" />
+        <exclude domain="device_sharedpref" />
+        <exclude domain="device_file" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+        <exclude domain="device_root" />
+        <exclude domain="device_database" />
+        <exclude domain="device_sharedpref" />
+        <exclude domain="device_file" />
+    </device-transfer>
+</data-extraction-rules>

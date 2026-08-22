@@ -1,13 +1,24 @@
 /**
- * The child app ships to two stores from one codebase, and the two halves of its
- * configuration live in files that cannot see each other.
+ * The child app ships to two stores from one shared codebase, and the parts of
+ * its configuration that have to agree live in files that cannot see each other.
  *
- * `app.json` is the source of truth for iOS, because there is no committed
- * `ios/` directory and EAS runs `expo prebuild` on its own machines. It is
- * *not* the source of truth for Android: `apps/child-app/android` is committed
- * source holding the accessibility, VPN and usage-stats modules, and prebuild
- * would delete it, so it is never run there and `AndroidManifest.xml` is what
- * actually ships. Two files, one app, no build step that reconciles them.
+ * Since the platform split there are two Expo projects —
+ * `apps/child-app/android` and `apps/child-app/ios` — each with its own
+ * `app.config.js`, and the native truth is somewhere different again on each:
+ *
+ *   Android  `android/android/` is committed source holding the accessibility,
+ *            VPN and usage-stats modules, and `expo prebuild` would delete it,
+ *            so prebuild is never run and `AndroidManifest.xml` is what ships.
+ *            The config is largely inert.
+ *   iOS      no committed native project, so EAS prebuilds on its own machines
+ *            and `ios/app.config.js` is the whole of the configuration.
+ *
+ * The split made the pairs that must match — bundle identifier vs. package name,
+ * the URL scheme on both sides, the version — two files apart rather than two
+ * keys apart. `shared/app.config.base.js` is what closes that: both configs
+ * spread it, so those values still have one home. These tests hold the rest
+ * together: the base against the hand-written manifest, and the config against
+ * the generated Info.plist when there is one.
  *
  * Everything asserted here is something that drifts silently. Nothing throws
  * when a bundle identifier stops matching a package name or a URL scheme is
@@ -16,19 +27,23 @@
  * only surface at an App Store upload, which is the most expensive place to find
  * out.
  *
- * Read as text rather than imported, matching familyBrandColors.test.js: this
- * suite is CommonJS and reaching into another workspace's tooling to parse XML
- * would cost more than four regexes.
+ * The XML is read as text rather than imported, matching familyBrandColors.test.js:
+ * this suite is CommonJS and reaching into another workspace's tooling to parse
+ * it would cost more than four regexes.
  */
 const fs = require('node:fs');
 const path = require('node:path');
 
 const REPO = path.join(__dirname, '../../..');
 const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
-const CHILD_RES = 'apps/child-app/android/app/src/main/res';
+const CHILD = 'apps/child-app';
+const CHILD_RES = `${CHILD}/android/android/app/src/main/res`;
 
-const appConfig = JSON.parse(read('apps/child-app/app.json')).expo;
-const manifest = read('apps/child-app/android/app/src/main/AndroidManifest.xml');
+// Required rather than parsed as JSON: these are CommonJS modules now, so that
+// they can share a base. Both export the app.json shape, `{ expo: … }`.
+const androidConfig = require(path.join(REPO, CHILD, 'android/app.config.js')).expo;
+const iosConfig = require(path.join(REPO, CHILD, 'ios/app.config.js')).expo;
+const manifest = read(`${CHILD}/android/android/app/src/main/AndroidManifest.xml`);
 
 /** PNG header: width at byte 16, height at 20, colour type at 25. */
 const png = (p) => {
@@ -46,20 +61,36 @@ describe('child app — Android and iOS agree', () => {
     // support conversation, every Firebase app registration and every push
     // credential is filed under one of these two strings, and having them differ
     // buys nothing while making all three ambiguous.
-    expect(appConfig.ios.bundleIdentifier).toBe(appConfig.android.package);
+    expect(iosConfig.ios.bundleIdentifier).toBe(androidConfig.android.package);
   });
 
-  test('both platforms are declared buildable', () => {
-    expect(appConfig.platforms).toEqual(expect.arrayContaining(['android', 'ios']));
+  test('each project declares exactly the platform it can build', () => {
+    // A stray platform here is not harmless: `expo start` offers it, and EAS
+    // will accept a build for it from a project that has neither the native
+    // directory nor the config to produce a working one.
+    expect(androidConfig.platforms).toEqual(['android']);
+    expect(iosConfig.platforms).toEqual(['ios']);
+  });
+
+  test('the shared base really is shared', () => {
+    // The version and scheme are the two that a release actually turns on, and
+    // the reason app.config.base.js exists. Asserted on the loaded configs
+    // rather than on the base module, so this fails if a platform config ever
+    // overrides them after spreading it — which is the only way they can now
+    // diverge, and it would look perfectly reasonable in a diff.
+    expect(iosConfig.version).toBe(androidConfig.version);
+    expect(iosConfig.scheme).toBe(androidConfig.scheme);
+    expect(iosConfig.slug).toBe(androidConfig.slug);
+    expect(iosConfig.extra.eas.projectId).toBe(androidConfig.extra.eas.projectId);
   });
 
   test('both platforms are locked to portrait', () => {
     // The child app is a phone agent with a fixed layout. Android states this on
-    // the activity; iOS gets it from app.json, and Expo's default would also
+    // the activity; iOS gets it from its config, and Expo's default would also
     // allow upside-down.
-    expect(appConfig.orientation).toBe('portrait');
+    expect(androidConfig.orientation).toBe('portrait');
     expect(manifest).toMatch(/android:screenOrientation="portrait"/);
-    expect(appConfig.ios.infoPlist.UISupportedInterfaceOrientations)
+    expect(iosConfig.ios.infoPlist.UISupportedInterfaceOrientations)
       .toEqual(['UIInterfaceOrientationPortrait']);
   });
 });
@@ -67,10 +98,10 @@ describe('child app — Android and iOS agree', () => {
 describe('child app — deep links', () => {
   /**
    * The scheme is written twice: by hand in the manifest's intent filter, and as
-   * `scheme` in app.json for the iOS project EAS generates. If they diverge, a
-   * link works on one platform and silently does nothing on the other — the app
-   * still opens, just on whatever screen it would have opened on anyway, which
-   * is why this is easy to miss.
+   * `scheme` in app.config.base.js for the iOS project EAS generates. If they
+   * diverge, a link works on one platform and silently does nothing on the other
+   * — the app still opens, just on whatever screen it would have opened on
+   * anyway, which is why this is easy to miss.
    */
   test('the URL scheme is the same on both platforms', () => {
     /**
@@ -87,15 +118,16 @@ describe('child app — deep links', () => {
 
     const androidScheme = /<data android:scheme="([^"]+)"\s*\/>/.exec(activity[0]);
     expect(androidScheme).not.toBeNull();
-    expect(appConfig.scheme).toBe(androidScheme[1]);
+    expect(androidConfig.scheme).toBe(androidScheme[1]);
   });
 
   test('the app actually consumes the scheme it registers', () => {
     // A registered scheme with no linking config is the state this was found in:
     // declared on Android since the project was scaffolded, and wired to nothing.
-    const app = read('apps/child-app/App.js');
+    // In the shared package, so this covers both platforms at once.
+    const app = read(`${CHILD}/shared/App.js`);
     expect(app).toMatch(/prefixes:/);
-    expect(app).toContain(`${appConfig.scheme}://`);
+    expect(app).toContain(`${androidConfig.scheme}://`);
   });
 });
 
@@ -107,7 +139,7 @@ describe('child app — icons and launch screens', () => {
    * the first upload and blurry if it had not been.
    */
   test('the iOS icon is 1024 square with no alpha channel', () => {
-    expect(png('apps/child-app/assets/icon.png')).toEqual({
+    expect(png(`${CHILD}/ios/assets/icon.png`)).toEqual({
       width: 1024, height: 1024, colourType: NO_ALPHA,
     });
   });
@@ -117,8 +149,55 @@ describe('child app — icons and launch screens', () => {
     // silhouette, so only the alpha channel carries the shape. An adaptive
     // foreground is composited over a separate background layer for the same
     // reason. Either one flattened to opaque becomes a solid teal square.
-    expect(png('apps/child-app/assets/adaptive-icon.png').colourType).toBe(HAS_ALPHA);
-    expect(png('apps/child-app/assets/notification-icon.png').colourType).toBe(HAS_ALPHA);
+    expect(png(`${CHILD}/android/assets/adaptive-icon.png`).colourType).toBe(HAS_ALPHA);
+    expect(png(`${CHILD}/android/assets/notification-icon.png`).colourType).toBe(HAS_ALPHA);
+    expect(png(`${CHILD}/ios/assets/notification-icon.png`).colourType).toBe(HAS_ALPHA);
+  });
+
+  /**
+   * The split gave each project its own `assets/`, because Expo resolves
+   * `icon` and `splash.image` from the project root and there are two roots.
+   * scripts/build-brand-assets.mjs writes both from one source mark — but
+   * nothing at build time compares them, so a hand-edit or a half-finished
+   * `npm run assets` would put one icon on Play and a different one on the App
+   * Store, with both builds green.
+   */
+  test('both projects carry the same mark', () => {
+    for (const name of ['icon.png', 'splash.png', 'notification-icon.png']) {
+      const onAndroid = fs.readFileSync(path.join(REPO, CHILD, 'android/assets', name));
+      const onIos = fs.readFileSync(path.join(REPO, CHILD, 'ios/assets', name));
+      expect({ name, identical: onAndroid.equals(onIos) }).toEqual({ name, identical: true });
+    }
+  });
+
+  /**
+   * `app.config.base.js` names asset paths like `./assets/icon.png`, and Expo
+   * resolves them from the project root — so one string has to point at a real
+   * file under `android/` *and* under `ios/`. That is the failure mode the split
+   * introduced: add an asset to the shared base, drop the file into the project
+   * you happened to be working in, and find out when the other platform builds.
+   */
+  test.each([
+    ['android', () => androidConfig],
+    ['ios', () => iosConfig],
+  ])('every asset the %s config names exists under its own project root', (platform, config) => {
+    const notifications = config().plugins
+      .find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-notifications')[1];
+
+    const referenced = [
+      config().icon,
+      config().splash.image,
+      notifications.icon,
+      config().android?.adaptiveIcon?.foregroundImage,
+    ].filter(Boolean);
+
+    expect(referenced.length).toBeGreaterThan(2);
+    for (const asset of referenced) {
+      // Reported as an object so a failure names the file rather than saying
+      // `false is not true` about an unidentifiable path.
+      const exists = fs.existsSync(path.join(REPO, CHILD, platform, asset));
+      expect({ asset, exists }).toEqual({ asset, exists: true });
+    }
   });
 
   test('every Android density has all three launcher icons', () => {
@@ -164,14 +243,14 @@ describe('child app — icons and launch screens', () => {
   });
 
   test('iOS is given a launch image rather than a bare colour', () => {
-    expect(appConfig.splash.image).toBeTruthy();
-    expect(fs.existsSync(path.join(REPO, 'apps/child-app', appConfig.splash.image))).toBe(true);
+    expect(iosConfig.splash.image).toBeTruthy();
+    expect(iosConfig.splash.backgroundColor).toBeTruthy();
   });
 });
 
 /* ── The committed iOS project, if there is one ───────────────────────────────
  *
- * There is normally no `apps/child-app/ios`: EAS prebuilds it from app.json on
+ * There is normally no `apps/child-app/ios/ios`: EAS prebuilds it from the config on
  * its own machines, because `expo prebuild --platform ios` refuses to run on the
  * Windows development machine at all.
  *
@@ -189,7 +268,7 @@ describe('child app — icons and launch screens', () => {
  * Info.plist still says what app.json says. Regenerating is the fix, and the
  * failure names that.
  */
-const IOS_DIR = path.join(REPO, 'apps/child-app/ios');
+const IOS_DIR = path.join(REPO, CHILD, 'ios/ios');
 const iosInfoPlist = (() => {
   if (!fs.existsSync(IOS_DIR)) return null;
   // Prebuild writes one Info.plist, but the app directory's name follows the
@@ -227,12 +306,12 @@ describeCommittedIos('child app — the committed iOS project agrees with app.js
   const regenerate = 'Re-run .github/workflows/ios-child-prebuild.yml and commit the result.';
 
   test(`the URL scheme matches — ${regenerate}`, () => {
-    expect(plistArray(iosInfoPlist, 'CFBundleURLSchemes')).toContain(appConfig.scheme);
+    expect(plistArray(iosInfoPlist, 'CFBundleURLSchemes')).toContain(iosConfig.scheme);
   });
 
   test(`the background modes match — ${regenerate}`, () => {
     expect(plistArray(iosInfoPlist, 'UIBackgroundModes').sort())
-      .toEqual([...appConfig.ios.infoPlist.UIBackgroundModes].sort());
+      .toEqual([...iosConfig.ios.infoPlist.UIBackgroundModes].sort());
   });
 
   test(`App Transport Security is still locked down — ${regenerate}`, () => {
@@ -243,7 +322,7 @@ describeCommittedIos('child app — the committed iOS project agrees with app.js
     // These come from the expo-location plugin rather than `infoPlist`, which is
     // the pairing most likely to drift: the plugin's config and the generated
     // plist are two files apart with a build step between them.
-    const plugin = appConfig.plugins.find((p) => Array.isArray(p) && p[0] === 'expo-location')[1];
+    const plugin = iosConfig.plugins.find((p) => Array.isArray(p) && p[0] === 'expo-location')[1];
     expect(plistValue(iosInfoPlist, 'NSLocationWhenInUseUsageDescription'))
       .toBe(plugin.locationWhenInUsePermission);
     expect(plistValue(iosInfoPlist, 'NSLocationAlwaysAndWhenInUseUsageDescription'))
@@ -263,7 +342,7 @@ describe('child app — transport security', () => {
    * address, which is the case the exemption exists for.
    */
   test('App Transport Security is not disabled wholesale', () => {
-    const ats = appConfig.ios.infoPlist.NSAppTransportSecurity;
+    const ats = iosConfig.ios.infoPlist.NSAppTransportSecurity;
     expect(ats).toBeDefined();
     expect(ats.NSAllowsArbitraryLoads).toBe(false);
     expect(ats.NSAllowsLocalNetworking).toBe(true);
@@ -275,7 +354,7 @@ describe('child app — transport security', () => {
     // scrutiny. They are absent from the committed manifest; `blockedPermissions`
     // is what stops Expo's defaults reintroducing them if anyone ever prebuilds.
     expect(manifest).not.toMatch(/EXTERNAL_STORAGE/);
-    expect(appConfig.android.blockedPermissions).toEqual(expect.arrayContaining([
+    expect(androidConfig.android.blockedPermissions).toEqual(expect.arrayContaining([
       'android.permission.READ_EXTERNAL_STORAGE',
       'android.permission.WRITE_EXTERNAL_STORAGE',
     ]));

@@ -1,14 +1,22 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { GoogleMap, useLoadScript, Marker, Circle, InfoWindow } from '@react-google-maps/api';
 import {
   children as childrenApi, locations as locationsApi, safeZones as safeZonesApi,
-  errorMessage, EmptyState, Icon, Modal, Toggle, useSocket,
+  errorMessage, isStaff, EmptyState, Icon, Modal, Toggle, useAuth, useSocket,
 } from '@parentix/shared';
 import ChildTabs from '../components/ChildTabs';
 import PageIntro from '../components/PageIntro';
 import { PRIMARY } from '../brand';
 import { mapsAuthFailed, onMapsAuthFailure } from '../services/mapsAuth';
+import { geocode } from '../services/geocode';
+
+/* The two renderers, each loaded only if it is the one that draws. They take the
+   same normalised props and expose the same `panTo`, so everything else on this
+   page is written once. Whichever a deployment does not use costs it nothing:
+   without a key the Google wrapper is never fetched, and with one Leaflet is
+   never fetched. */
+const GoogleMapPane = lazy(() => import('../components/GoogleMapPane'));
+const OpenMap = lazy(() => import('../components/OpenMap'));
 
 /* Home is the brand teal because it is the zone every family has and the one
    the map is usually centred on; the other two only have to stay clearly
@@ -19,20 +27,12 @@ const ZONE_COLORS = {
   custom: '#8b5cf6',
 };
 
-const MAP_STYLES = [{ featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] }];
-
 /* Where the map looks before anything has been reported. Parentix is a Canadian
    service, so an empty map opens on Canada rather than nowhere in particular —
    but nothing here is restricted to it. A family on holiday, or a child at
    school abroad, still reports and geocodes normally. */
 const DEFAULT_CENTER = { lat: 56.1304, lng: -106.3468 }; // geographic centre of Canada
 const DEFAULT_ZOOM = 4; // the whole country; a reported fix overrides this with 15
-
-/* Address lookup is biased to Canada, not limited to it: an address is tried
-   against Canada first, and only when that finds nothing is it retried against
-   the rest of the world. So "127 Main St" resolves at home instead of in Ohio,
-   while "10 Downing Street, London" still works. */
-const HOME_COUNTRY = 'CA';
 
 const MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY || '';
 
@@ -55,18 +55,43 @@ const readPosition = (options) => new Promise((resolve, reject) => {
   navigator.geolocation.getCurrentPosition(resolve, reject, options);
 });
 
+/* A browser key is public, so the only thing protecting it is an allowlist of
+   the hostnames that may use it — and a correctly restricted one therefore
+   refuses `localhost`. Google saying no here is the *right* configuration
+   working, not a fault, so the notice that calls it a fault is not shown at a
+   development origin. The console line below still explains the map. */
+const LOCAL_ORIGIN = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i
+  .test(typeof window === 'undefined' ? '' : window.location.host);
+
 export default function Location() {
-  // An empty key still loads the Maps script successfully, so `loadError` stays
-  // null and Google paints its own "can't load Google Maps" overlay instead.
-  // Catch the missing key ourselves and explain it rather than showing that.
+  // Whether this deployment was built with a Maps key at all. Most are not: a
+  // Maps key is a billing-backed secret someone has to create in the Cloud
+  // console, and the map below has to work regardless.
   const mapsKeyMissing = !MAPS_API_KEY;
-  const { isLoaded, loadError } = useLoadScript({ googleMapsApiKey: MAPS_API_KEY });
 
   // A key that is present and still refused — the usual cause being a referrer
-  // allowlist that does not cover this host. Neither flag above sees it; see
-  // services/mapsAuth.js.
+  // allowlist that does not cover this host. Nothing in the loader reports it;
+  // see services/mapsAuth.js.
   const [mapsRefused, setMapsRefused] = useState(mapsAuthFailed);
   useEffect(() => onMapsAuthFailure(setMapsRefused), []);
+
+  // A script that never arrived. Google's own renderer reports it up here,
+  // because the fallback belongs to the page rather than to that component.
+  const [mapsLoadFailed, setMapsLoadFailed] = useState(false);
+  const onMapsLoadError = useCallback(() => setMapsLoadFailed(true), []);
+
+  // Said once, wherever the page runs, because a developer whose map is not the
+  // one they configured should not have to guess why — including on localhost,
+  // where the notice below is deliberately silent.
+  useEffect(() => {
+    if (!mapsRefused && !mapsLoadFailed) return;
+    console.warn(
+      mapsRefused
+        ? `Google refused the Maps key for ${window.location.host}; drawing OpenStreetMap instead. `
+          + 'Add this host to the key\'s referrer allowlist, or check that the Maps JavaScript API and billing are on.'
+        : 'The Google Maps script did not load; drawing OpenStreetMap instead.',
+    );
+  }, [mapsRefused, mapsLoadFailed]);
 
   const [childList, setChildList] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -77,7 +102,6 @@ export default function Location() {
   const [locLoading, setLocLoading] = useState(false);
   // Distinct from "no position yet" — see loadLocation.
   const [locError, setLocError] = useState('');
-  const [activeInfo, setActiveInfo] = useState(null); // 'child' | zone.id
   const [pickingOnMap, setPickingOnMap] = useState(false);
   const [showZoneForm, setShowZoneForm] = useState(false);
   const [zoneForm, setZoneForm] = useState(EMPTY_ZONE);
@@ -86,13 +110,9 @@ export default function Location() {
   const [simForm, setSimForm] = useState({ address: '', lat: '', lng: '' });
   const [error, setError] = useState('');
 
-  // Google can refuse the key after the parent has already tapped "Safe zone",
-  // which leaves them in a mode whose only instruction is to tap a map that is
-  // no longer there. Drop out of it rather than let the banner keep asking.
-  useEffect(() => { if (mapsRefused) setPickingOnMap(false); }, [mapsRefused]);
-
   const mapRef = useRef(null);
   const { socket } = useSocket();
+  const { user } = useAuth();
 
   useEffect(() => {
     childrenApi.list()
@@ -154,13 +174,11 @@ export default function Location() {
     }
   }, [currentLoc]);
 
-  const handleMapClick = useCallback((e) => {
+  /* Both renderers report a tap; only the shape of the event differs, so each
+     unwraps its own and this decides what a tap means. */
+  const placeZoneAt = useCallback((lat, lng) => {
     if (!pickingOnMap) return;
-    setZoneForm((f) => ({
-      ...f,
-      latitude: e.latLng.lat().toFixed(6),
-      longitude: e.latLng.lng().toFixed(6),
-    }));
+    setZoneForm((f) => ({ ...f, latitude: lat.toFixed(6), longitude: lng.toFixed(6) }));
     setPickingOnMap(false);
     setShowZoneForm(true);
   }, [pickingOnMap]);
@@ -222,52 +240,26 @@ export default function Location() {
     }
   };
 
+  /* Google's geocoder when the key works, OpenStreetMap's when it does not —
+     see services/geocode.js. Either way this needs no key of its own, so the
+     field is offered in every deployment. */
   const geocodeAddress = async () => {
     const address = simForm.address.trim();
     if (!address) return;
-    if (!window.google?.maps?.Geocoder) {
-      setError('Google Maps has not loaded, so an address cannot be looked up.');
-      return;
-    }
 
     setSimulating(true);
     setError('');
-
-    const geocoder = new window.google.maps.Geocoder();
-    // `region` alone only nudges the ranking, which is not enough to stop a bare
-    // street address landing in the States. Restricting the first pass and
-    // dropping the restriction on the second gives a firm preference without
-    // ever making an address outside Canada unreachable.
-    const lookup = (request) => new Promise((resolve) => {
-      geocoder.geocode(request, (results, status) => resolve({ results, status }));
-    });
-
     try {
-      let { results, status } = await lookup({
-        address,
-        componentRestrictions: { country: HOME_COUNTRY },
+      // `allowGoogle` is about the key, not about whether the script happens to
+      // be loaded yet — the service checks that for itself.
+      const match = await geocode(address, { allowGoogle: !mapsKeyMissing && !mapsRefused });
+      await setLocation({
+        latitude: match.latitude,
+        longitude: match.longitude,
+        address: match.formatted,
       });
-
-      if (status === 'ZERO_RESULTS') {
-        ({ results, status } = await lookup({ address, region: HOME_COUNTRY }));
-      }
-
-      if (status === 'OK' && results?.[0]) {
-        const loc = results[0].geometry.location;
-        await setLocation({
-          latitude: loc.lat(),
-          longitude: loc.lng(),
-          address: results[0].formatted_address,
-        });
-        return;
-      }
-
-      const reasons = {
-        REQUEST_DENIED: 'The Geocoding API is not enabled for this Maps key.',
-        ZERO_RESULTS: 'No match anywhere in the world. Check the spelling, or add a city and country.',
-        OVER_QUERY_LIMIT: 'The Maps geocoding quota has been used up.',
-      };
-      setError(reasons[status] || `The address lookup failed (${status}).`);
+    } catch (err) {
+      setError(err.message || 'The address lookup failed.');
     } finally {
       setSimulating(false);
     }
@@ -322,6 +314,33 @@ export default function Location() {
     ? { lat: parseFloat(currentLoc.latitude), lng: parseFloat(currentLoc.longitude) }
     : DEFAULT_CENTER;
 
+  /* The same two things the Google branch renders as children, in the shape the
+     keyless renderer takes. Memoised because that one rebuilds its layers when
+     these change, and `zones.filter(…)` is a fresh array on every keystroke in
+     the dialog below it. */
+  const activeZones = useMemo(() => zones.filter((z) => z.isActive).map((zone) => ({
+    id: zone.id,
+    lat: parseFloat(zone.latitude),
+    lng: parseFloat(zone.longitude),
+    radiusMeters: zone.radiusMeters,
+    color: ZONE_COLORS[zone.type] || ZONE_COLORS.custom,
+    title: zone.name,
+    subtitle: `${zone.type} · ${zone.radiusMeters}m`,
+  })), [zones]);
+
+  const mapMarker = useMemo(() => (currentLoc && selected ? {
+    lat: parseFloat(currentLoc.latitude),
+    lng: parseFloat(currentLoc.longitude),
+    title: selected.name,
+    initial: selected.name[0].toUpperCase(),
+    color: PRIMARY,
+    lines: [
+      currentLoc.address,
+      `${parseFloat(currentLoc.latitude).toFixed(5)}, ${parseFloat(currentLoc.longitude).toFixed(5)}`,
+      currentLoc.accuracy != null ? `±${Math.round(currentLoc.accuracy)}m accuracy` : null,
+    ],
+  } : null), [currentLoc, selected]);
+
   if (loading) return <p className="text-sm text-gray-400 py-8">Loading…</p>;
 
   if (childList.length === 0) {
@@ -337,7 +356,19 @@ export default function Location() {
     );
   }
 
-  const mapUnavailable = mapsKeyMissing || loadError || mapsRefused;
+  /* Which renderer draws the map. Google when this deployment has a key it can
+     actually use; OpenStreetMap otherwise — a missing key, a script that never
+     arrived, or a key Google refused all end in the same place, and none of them
+     is a reason for a parent to lose the map. */
+  const keyFailed = mapsRefused || mapsLoadFailed;
+  const drawWithGoogle = !mapsKeyMissing && !keyFailed;
+
+  /* A configured key that does not work is a job for whoever configured it, and
+     for nobody else: the map is already drawn, so to a parent the notice is a
+     sentence about billing and referrer allowlists in the middle of finding
+     their child. Staff see it in the app they can act from; everyone else gets
+     the working map, and the console carries the reason either way. */
+  const explainKeyFailure = keyFailed && isStaff(user) && !LOCAL_ORIGIN;
 
   return (
     <div className="space-y-5">
@@ -368,12 +399,26 @@ export default function Location() {
                 <button
                   onClick={() => { setPickingOnMap((v) => !v); setShowZoneForm(false); }}
                   className={`btn-secondary btn-sm shrink-0 ${pickingOnMap ? 'border-primary-500 text-primary-600' : ''}`}
-                  disabled={mapUnavailable}
                 >
                   <Icon name={pickingOnMap ? 'close' : 'plus'} size={15} />
                   {pickingOnMap ? 'Cancel' : 'Safe zone'}
                 </button>
               </div>
+
+              {/* Only when a key was configured and did not work — and only for
+                  the people who can fix it, see `explainKeyFailure`. Without a
+                  key Google's script is never loaded, so neither flag can be set
+                  by a deployment that simply has none. */}
+              {explainKeyFailure && (
+                <p className="notice-warning rounded-none border-x-0 border-t-0">
+                  <Icon name="warning" size={16} className="mt-0.5" />
+                  <span>
+                    {mapsRefused
+                      ? `Google rejected the map key for ${window.location.host} — showing OpenStreetMap instead. Its allowed referrers, the Maps JavaScript API, or billing need attention in the Google Cloud console.`
+                      : 'Google Maps failed to load — showing OpenStreetMap instead.'}
+                  </span>
+                </p>
+              )}
 
               {pickingOnMap && (
                 <p className="notice-info rounded-none border-x-0 border-t-0">
@@ -383,111 +428,33 @@ export default function Location() {
               )}
 
               <div className="h-[300px] sm:h-[380px] lg:h-[460px] bg-gray-50">
-                {mapsKeyMissing ? (
-                  <EmptyState
-                    icon="location"
-                    title="Map unavailable"
-                    description="No Google Maps key is configured for this deployment. Everything below still works."
-                  />
-                ) : mapsRefused ? (
-                  <EmptyState
-                    icon="warning"
-                    title="Google rejected the map key"
-                    description={`The key is configured but not accepted for ${window.location.host}. Its allowed referrers, the Maps JavaScript API, or billing need attention in the Google Cloud console. Safe zones still work by address or coordinates.`}
-                  />
-                ) : loadError ? (
-                  <EmptyState
-                    icon="warning"
-                    title="Google Maps failed to load"
-                    description="Check the Maps API key for this deployment."
-                  />
-                ) : !isLoaded ? (
-                  <p className="h-full flex items-center justify-center text-sm text-gray-400">Loading map…</p>
-                ) : (
-                  <GoogleMap
-                    mapContainerStyle={{ width: '100%', height: '100%' }}
-                    center={mapCenter}
-                    zoom={currentLoc ? 15 : DEFAULT_ZOOM}
-                    onLoad={(map) => { mapRef.current = map; }}
-                    onClick={handleMapClick}
-                    options={{
-                      styles: MAP_STYLES,
-                      streetViewControl: false,
-                      mapTypeControl: false,
-                      fullscreenControl: true,
-                      zoomControl: true,
-                      // The default control cluster crowds a phone screen.
-                      gestureHandling: 'greedy',
-                      draggableCursor: pickingOnMap ? 'crosshair' : undefined,
-                    }}
-                  >
-                    {currentLoc && (
-                      <>
-                        <Marker
-                          position={{ lat: parseFloat(currentLoc.latitude), lng: parseFloat(currentLoc.longitude) }}
-                          title={selected.name}
-                          onClick={() => setActiveInfo('child')}
-                          icon={{
-                            url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
-                              <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
-                                <circle cx="20" cy="20" r="17" fill="${PRIMARY}" stroke="white" stroke-width="3"/>
-                                <text x="20" y="26" text-anchor="middle" font-family="sans-serif" font-size="17" fill="white">${selected.name[0].toUpperCase()}</text>
-                              </svg>`)}`,
-                            scaledSize: { width: 40, height: 40 },
-                            anchor: { x: 20, y: 20 },
-                          }}
-                        />
-                        {activeInfo === 'child' && (
-                          <InfoWindow
-                            position={{ lat: parseFloat(currentLoc.latitude), lng: parseFloat(currentLoc.longitude) }}
-                            onCloseClick={() => setActiveInfo(null)}
-                          >
-                            <div className="text-sm min-w-[140px]">
-                              <p className="font-bold text-gray-900">{selected.name}</p>
-                              {currentLoc.address && <p className="text-gray-600 mt-1">{currentLoc.address}</p>}
-                              <p className="text-gray-400 text-xs mt-1">
-                                {parseFloat(currentLoc.latitude).toFixed(5)}, {parseFloat(currentLoc.longitude).toFixed(5)}
-                              </p>
-                              {currentLoc.accuracy && (
-                                <p className="text-gray-400 text-xs">±{Math.round(currentLoc.accuracy)}m accuracy</p>
-                              )}
-                            </div>
-                          </InfoWindow>
-                        )}
-                      </>
-                    )}
-
-                    {zones.filter((z) => z.isActive).map((zone) => {
-                      const color = ZONE_COLORS[zone.type] || ZONE_COLORS.custom;
-                      return (
-                        <Fragment key={zone.id}>
-                          <Circle
-                            center={{ lat: parseFloat(zone.latitude), lng: parseFloat(zone.longitude) }}
-                            radius={zone.radiusMeters}
-                            options={{
-                              strokeColor: color, strokeOpacity: 0.9, strokeWeight: 2,
-                              fillColor: color, fillOpacity: 0.15, clickable: true,
-                            }}
-                            onClick={() => setActiveInfo(zone.id)}
-                          />
-                          {activeInfo === zone.id && (
-                            <InfoWindow
-                              position={{ lat: parseFloat(zone.latitude), lng: parseFloat(zone.longitude) }}
-                              onCloseClick={() => setActiveInfo(null)}
-                            >
-                              <div className="text-sm min-w-[120px]">
-                                <p className="font-bold text-gray-900">{zone.name}</p>
-                                <p className="text-gray-500 capitalize text-xs mt-0.5">
-                                  {zone.type} · {zone.radiusMeters}m
-                                </p>
-                              </div>
-                            </InfoWindow>
-                          )}
-                        </Fragment>
-                      );
-                    })}
-                  </GoogleMap>
-                )}
+                <Suspense
+                  fallback={<p className="h-full flex items-center justify-center text-sm text-gray-400">Loading map…</p>}
+                >
+                  {drawWithGoogle ? (
+                    <GoogleMapPane
+                      ref={mapRef}
+                      apiKey={MAPS_API_KEY}
+                      center={mapCenter}
+                      zoom={currentLoc ? 15 : DEFAULT_ZOOM}
+                      marker={mapMarker}
+                      circles={activeZones}
+                      picking={pickingOnMap}
+                      onClick={({ lat, lng }) => placeZoneAt(lat, lng)}
+                      onLoadError={onMapsLoadError}
+                    />
+                  ) : (
+                    <OpenMap
+                      ref={mapRef}
+                      center={mapCenter}
+                      zoom={currentLoc ? 15 : DEFAULT_ZOOM}
+                      marker={mapMarker}
+                      circles={activeZones}
+                      picking={pickingOnMap}
+                      onClick={({ lat, lng }) => placeZoneAt(lat, lng)}
+                    />
+                  )}
+                </Suspense>
               </div>
             </div>
 
@@ -735,22 +702,20 @@ export default function Location() {
                 onChange={(e) => setSimForm({ ...simForm, address: e.target.value })}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); geocodeAddress(); } }}
               />
-              {/* Geocoding runs on the same key, so a key Google refused cannot
-                  look an address up either. */}
+              {/* Google's geocoder needs a key that works; without one the
+                  lookup goes to OpenStreetMap's, so the button is never dead. */}
               <button
                 type="button"
                 onClick={geocodeAddress}
-                disabled={simulating || !simForm.address.trim() || !isLoaded || mapsKeyMissing || mapsRefused}
+                disabled={simulating || !simForm.address.trim()}
                 className="btn-primary px-4 shrink-0"
               >
                 {simulating ? '…' : 'Find'}
               </button>
             </div>
-            {(mapsKeyMissing || mapsRefused) && (
+            {!drawWithGoogle && (
               <span className="field-hint">
-                {mapsRefused
-                  ? 'Address lookup uses the same key Google refused; use coordinates instead.'
-                  : 'Address lookup needs a Google Maps key; use coordinates instead.'}
+                Looked up with OpenStreetMap. If nothing matches, add a city and country — or enter coordinates below.
               </span>
             )}
           </label>

@@ -54,7 +54,16 @@ const urlConfig = () => ({
   dialectOptions: {
     connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
     ...(env.db.ssl
-      ? { ssl: { require: true, rejectUnauthorized: env.db.sslRejectUnauthorized } }
+      ? {
+        ssl: {
+          require: true,
+          rejectUnauthorized: env.db.sslRejectUnauthorized,
+          // Present only when DB_SSL_CA is configured; `ca: undefined` would
+          // fall back to the system store, which does not contain Cloud SQL's
+          // per-instance CA and so fails every connection.
+          ...(env.db.sslCa ? { ca: env.db.sslCa } : {}),
+        },
+      }
       : {}),
   },
 });

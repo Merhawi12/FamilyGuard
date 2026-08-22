@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   notifications as notificationsApi,
   alertLabel,
+  timeAgo,
   useDismissable,
   useSocket,
   EmptyState,
@@ -21,15 +22,8 @@ const TYPE_ACCENT = {
   success: 'bg-success',
 };
 
-const timeAgo = (value) => {
-  const seconds = Math.round((Date.now() - new Date(value)) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return new Date(value).toLocaleDateString();
-};
+/** The panel is phone-width, so the units are short and a day back is a date. */
+const sent = (value) => timeAgo(value, { compact: true });
 
 /**
  * One bell for both kinds of message.
@@ -48,13 +42,37 @@ export default function NotificationsBell() {
   const { open, setOpen, toggle, ref } = useDismissable();
   const navigate = useNavigate();
 
+  /**
+   * The updates list, refreshed while someone is actually looking at it.
+   *
+   * Still polled: the socket covers a dashboard that is open, and this covers
+   * one that was asleep, offline, or missed a delivery while reconnecting.
+   *
+   * But it used to poll unconditionally, so a dashboard left open in a
+   * background tab asked the API for its notifications every minute for as long
+   * as the browser stayed alive — on a phone that is a request a minute against
+   * the radio and the battery, for a panel nobody can see. A hidden tab is
+   * skipped and refreshed the moment it comes back instead, which is both
+   * cheaper and *fresher* than the old behaviour: a parent returning to the tab
+   * used to wait up to a minute for the next tick.
+   */
   useEffect(() => {
     const load = () => notificationsApi.list().then((r) => setUpdates(r.data)).catch(() => {});
     load();
-    // Still polled: the socket covers a dashboard that is open, and this covers
-    // one that was asleep, offline, or missed a delivery while reconnecting.
-    const interval = setInterval(load, 60000);
-    return () => clearInterval(interval);
+
+    const interval = setInterval(() => {
+      if (!document.hidden) load();
+    }, 60000);
+
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   /**
@@ -157,7 +175,7 @@ export default function NotificationsBell() {
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm text-gray-900">{a.message}</span>
                       <span className="block text-xs text-gray-400 mt-1">
-                        {alertLabel(a.type)} · {timeAgo(a.createdAt)}
+                        {alertLabel(a.type)} · {sent(a.createdAt)}
                       </span>
                     </span>
                   </button>
@@ -178,7 +196,7 @@ export default function NotificationsBell() {
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-gray-900">{n.title}</span>
                     <span className="block text-xs text-gray-500 mt-0.5">{n.message}</span>
-                    <span className="block text-xs text-gray-400 mt-1">{timeAgo(n.createdAt)}</span>
+                    <span className="block text-xs text-gray-400 mt-1">{sent(n.createdAt)}</span>
                   </span>
                 </button>
               ))

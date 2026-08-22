@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { User, Session, Device, Child } = require('../models');
 const { env } = require('../config/env');
 const { DEVICE_UNLINKED, ACCOUNT_SUSPENDED } = require('../utils/deviceAccess');
+const { JWT_VERIFY_OPTIONS } = require('../utils/jwtOptions');
 
 const authenticate = async (req, res, next) => {
   const header = req.headers.authorization;
@@ -9,7 +10,7 @@ const authenticate = async (req, res, next) => {
 
   try {
     const token = header.split(' ')[1];
-    const decoded = jwt.verify(token, env.auth.jwtSecret);
+    const decoded = jwt.verify(token, env.auth.jwtSecret, JWT_VERIFY_OPTIONS);
 
     /**
      * The MFA pre-auth token is not a credential for anything but `/mfa/validate`.
@@ -50,7 +51,7 @@ const authenticateDevice = async (req, res, next) => {
 
   try {
     const token = header.split(' ')[1];
-    const decoded = jwt.verify(token, env.auth.jwtSecret);
+    const decoded = jwt.verify(token, env.auth.jwtSecret, JWT_VERIFY_OPTIONS);
     if (!decoded.deviceId || !decoded.childId) return res.status(401).json({ error: 'Invalid device token' });
 
     /**
@@ -90,12 +91,31 @@ const authenticateDevice = async (req, res, next) => {
     if (!device || !device.isActive || !device.child) {
       return res.status(401).json({ error: 'This device is no longer linked', code: DEVICE_UNLINKED });
     }
+    /**
+     * The child in the token has to be the child on the device row.
+     *
+     * Both claims are signed, so today they always agree — `confirmLink` mints
+     * them from one row. The check is here because the whole of this service's
+     * child-scoping downstream reads `req.childId`, and it was being taken from
+     * the token while every authorisation decision above it was made against the
+     * device: `getDeviceRules`, `getDeviceContacts`, `postLocation`,
+     * `receiveFromChild` and `getMyMessages` all trust it to name the child this
+     * device belongs to. That is one signing-key mistake, one future
+     * re-link-to-a-different-child feature, or one token minted by hand away
+     * from being a cross-family read, and the device row is the authority for
+     * the question in any case. Answered as an unlinked device, which is what a
+     * token that does not describe a real pairing is.
+     */
+    if (device.childId !== device.child.id || decoded.childId !== device.childId) {
+      return res.status(401).json({ error: 'This device is no longer linked', code: DEVICE_UNLINKED });
+    }
     if (!device.child.isActive || !device.child.parent?.isActive) {
       return res.status(401).json({ error: 'Device access is suspended', code: ACCOUNT_SUSPENDED });
     }
 
-    req.deviceId = decoded.deviceId;
-    req.childId = decoded.childId;
+    req.deviceId = device.id;
+    // From the row, not the claim — see above.
+    req.childId = device.childId;
     req.parentId = device.child.parentId;
     next();
   } catch {

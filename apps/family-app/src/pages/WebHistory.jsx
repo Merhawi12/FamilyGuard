@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   children as childrenApi, activity as activityApi,
-  EmptyState, Icon, Pagination,
+  EmptyState, errorMessage, Icon, Pagination,
 } from '@parentix/shared';
 import ChildTabs from '../components/ChildTabs';
 import PageIntro from '../components/PageIntro';
@@ -28,6 +28,7 @@ export default function WebHistory() {
   const [search, setSearch] = useState('');
   const [showDates, setShowDates] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -69,11 +70,74 @@ export default function WebHistory() {
   useEffect(() => { load(); }, [load]);
 
   const hasFilters = !!(filters.from || filters.to || filters.search);
+  const hasDateRange = !!(filters.from || filters.to);
 
   const clearAll = () => {
     setSearch('');
     setFilters(EMPTY_FILTERS);
     setOffset(0);
+  };
+
+  /**
+   * Delete one recorded lookup.
+   *
+   * The domain goes in the prompt because the rows are dense and near-identical
+   * — a list of `*.googleapis.com` a few pixels apart is exactly where a mis-tap
+   * happens, and naming the row is what makes the dialog worth showing.
+   */
+  const removeRow = async (row) => {
+    if (!confirm([
+      'Delete this entry?',
+      `${row.url || 'Unknown site'}\n${new Date(row.startTime).toLocaleString()}`,
+      'This cannot be undone.',
+    ].join('\n\n'))) return;
+    setError('');
+    try {
+      await activityApi.removeEntry(selected.id, row.id);
+      load();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not delete that entry.'));
+    }
+  };
+
+  /**
+   * Clear the history — the date range included, and the search deliberately not.
+   *
+   * A search runs over decrypted values and a capped scan, so a search-scoped
+   * delete could only remove what that scan happened to reach while reporting
+   * success. The button is hidden while a search is active rather than offering
+   * one that is quietly partial; the copy says to clear the search first.
+   *
+   * The prompt states that this also removes the rows from the Activity Log,
+   * because it does — the two screens read one table — and a parent who found
+   * out afterwards could not tell a deletion from a device that stopped
+   * reporting.
+   */
+  const clearHistory = async () => {
+    const scope = hasDateRange
+      ? `the web history between ${filters.from || 'the beginning'} and ${filters.to || 'now'}`
+      : "this child's entire web history";
+    if (!confirm([
+      `Delete ${scope}?`,
+      'These entries also disappear from the Activity Log — they are the same records.',
+      'This cannot be undone.',
+    ].join('\n\n'))) return;
+
+    setDeleting(true);
+    setError('');
+    try {
+      const { data } = await activityApi.clearWebHistory(selected.id, {
+        from: filters.from || undefined,
+        to: filters.to || undefined,
+      });
+      setOffset(0);
+      load();
+      if (!data?.deleted) setError('There was nothing to delete.');
+    } catch (err) {
+      setError(errorMessage(err, 'Could not clear the web history.'));
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -83,6 +147,18 @@ export default function WebHistory() {
           <Icon name="refresh" size={15} />
           {loading ? 'Refreshing…' : 'Refresh'}
         </button>
+        {/* Hidden while a search is on: a search-scoped delete cannot be
+            complete, so the button that promises one is not offered. */}
+        {selected && rows.length > 0 && !filters.search && (
+          <button
+            onClick={clearHistory}
+            disabled={deleting}
+            className="btn-secondary btn-sm text-danger border-red-200 hover:bg-red-50 disabled:opacity-50"
+          >
+            <Icon name="trash" size={15} />
+            {hasDateRange ? 'Clear range' : 'Clear all'}
+          </button>
+        )}
       </PageIntro>
 
       <ChildTabs
@@ -204,6 +280,14 @@ export default function WebHistory() {
                       ×{row.visitCount}
                     </span>
                   )}
+                  <button
+                    onClick={() => removeRow(row)}
+                    className="icon-btn w-11 h-11 shrink-0 text-gray-400 hover:text-danger hover:bg-red-50"
+                    aria-label={`Delete history entry for ${row.url || 'unknown site'}`}
+                    title="Delete this entry"
+                  >
+                    <Icon name="trash" size={17} />
+                  </button>
                 </div>
               ))}
             </div>

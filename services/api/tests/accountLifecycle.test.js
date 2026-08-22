@@ -17,7 +17,7 @@ const Stripe = require('stripe'); // the manual mock in __mocks__/stripe.js
 const { app } = require('../src/app');
 const {
   User, Session, Child, Device, ActivityLog, Location, AppRule, WebsiteRule,
-  ScreenTimeRule, Message, Contact, Alert, SafeZone, Notification, AuditLog,
+  ScreenTimeRule, Message, Contact, Alert, SafeZone, Notification, AuditLog, ContactMessage,
 } = require('../src/models');
 const { createUser, createChild, createDevice, DEFAULT_PASSWORD } = require('./helpers');
 
@@ -160,6 +160,74 @@ describe('staff deleting a client erases the same things the client would', () =
     expect(await ActivityLog.count({ where: { childId: child.id } })).toBe(0);
     expect(await Location.count({ where: { childId: child.id } })).toBe(0);
     expect(await Contact.count({ where: { childId: child.id } })).toBe(0);
+  });
+
+  /**
+   * The two tables the erasure did not reach.
+   *
+   * `eraseAccount` says it removes "everything one account owns", and left the
+   * person's email, name, phone, IP address and user-agent in `audit_logs` —
+   * nineteen call sites write an address into `metadata` — plus their name,
+   * address and message body in `contact_messages`. Both survive a deletion that
+   * reports success, which is the worst version of this: the operator believes
+   * the data is gone.
+   */
+  it('leaves no personal data behind in the audit trail', async () => {
+    const staff = await createUser({ role: 'super_admin' });
+    const staffToken = jwt.sign({ id: staff.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    const client = await createUser();
+    await AuditLog.create({
+      userId: client.id,
+      action: 'auth.login',
+      entity: 'User',
+      entityId: client.id,
+      metadata: { email: client.email },
+      ipAddress: '203.0.113.9',
+      userAgent: 'Mozilla/5.0',
+    });
+
+    const res = await request(app)
+      .delete(`/api/admin/clients/${client.id}`)
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(res.status).toBe(200);
+
+    // The row survives — deleting it would erase the record that the deletion
+    // happened, and let anyone drop their own history by closing their account.
+    const rows = await AuditLog.findAll({ where: { action: 'auth.login' } });
+    const orphaned = rows.filter((r) => r.entityId === client.id);
+    expect(orphaned).toHaveLength(1);
+
+    // What survives is the shape, not the person.
+    const [row] = orphaned;
+    expect(row.action).toBe('auth.login');
+    expect(row.userId).toBeNull();
+    expect(row.metadata).toBeNull();
+    expect(row.ipAddress).toBeNull();
+    expect(row.userAgent).toBeNull();
+  });
+
+  it('takes the contact-form messages that carry the same address', async () => {
+    const staff = await createUser({ role: 'super_admin' });
+    const staffToken = jwt.sign({ id: staff.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    const client = await createUser();
+    // Matched on address rather than user id: the form takes no account, so a
+    // message can predate the signup it shares an address with.
+    await ContactMessage.create({
+      name: 'A Parent', email: client.email, message: 'How does linking work?', status: 'sent',
+    });
+    await ContactMessage.create({
+      name: 'Somebody Else', email: 'other@example.com', message: 'Unrelated', status: 'sent',
+    });
+
+    await request(app)
+      .delete(`/api/admin/clients/${client.id}`)
+      .set('Authorization', `Bearer ${staffToken}`)
+      .expect(200);
+
+    expect(await ContactMessage.count({ where: { email: client.email } })).toBe(0);
+    expect(await ContactMessage.count({ where: { email: 'other@example.com' } })).toBe(1);
   });
 
   it('still refuses to touch a staff account through this door', async () => {

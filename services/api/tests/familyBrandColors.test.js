@@ -26,7 +26,7 @@ const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
 
 const tailwindConfig = read('apps/family-app/tailwind.config.js');
 const brand = read('apps/family-app/src/brand.js');
-const childTheme = read('apps/child-app/src/theme.js');
+const childTheme = read('apps/child-app/shared/src/theme.js');
 
 /** `600: '#0E7C86',` → `#0e7c86`, searched from `after` so the two ramps in the
  *  Tailwind config can be told apart — both declare a `50`. */
@@ -215,8 +215,11 @@ describe('the family app is drawn in one teal', () => {
    * source and whoever retints the app has to bring the native side along.
    */
   it('paints the child app’s native chrome in the same teal its screens use', () => {
-    const nativeColors = read('apps/child-app/android/app/src/main/res/values/colors.xml');
-    const appConfig = JSON.parse(read('apps/child-app/app.json'));
+    const nativeColors = read('apps/child-app/android/android/app/src/main/res/values/colors.xml');
+    // The Android project's Expo config. A CommonJS module since the platform
+    // split, so that it and the iOS one can share a base — see
+    // apps/child-app/shared/app.config.base.js.
+    const appConfig = require(path.join(REPO, 'apps/child-app/android/app.config.js'));
 
     const xml = (name) =>
       new RegExp(`<color name="${name}">(#[0-9a-fA-F]{6})</color>`).exec(nativeColors)?.[1]?.toLowerCase();
@@ -260,7 +263,7 @@ describe('the family app is drawn in one teal', () => {
   it('has no unconverted blue left in the child app either', () => {
     // The foreground-service notification and the Android channel's light both
     // carried the old primary as a bare hex, outside anything theme.js governs.
-    const stragglers = sourcesUnder('apps/child-app/src')
+    const stragglers = sourcesUnder('apps/child-app/shared/src')
       .filter(([, source]) => /#2563eb/i.test(source))
       .map(([file]) => file);
 

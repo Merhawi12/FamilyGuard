@@ -1,5 +1,20 @@
 import api from './client.js';
 
+/**
+ * Every call the two web apps make, in one place.
+ *
+ * These are object literals, which is worth knowing before adding to them: a
+ * bundler cannot drop one property of an object it keeps, so an entry nothing
+ * calls is shipped to every browser that touches its group. Seven such entries
+ * were removed in one pass — bindings for `POST /activity` and
+ * `POST /devices/confirm` (both written by the *device* agents, which have their
+ * own client in apps/child-app and apps/child-desktop and never load this file),
+ * `GET /locations/:id/history`, and four admin routes that outlived the screens
+ * that called them. Each of those server routes still exists and still answers;
+ * only the unused client binding went.
+ *
+ * So: add a binding when a screen is ready to call it, not in advance.
+ */
 export const auth = {
   register: (data) => api.post('/auth/register', data),
   verifyEmail: (data) => api.post('/auth/verify-email', data),
@@ -78,14 +93,27 @@ export const devices = {
   generateLink: (data) => api.post('/devices/link', data),
   // A fresh code for a device that was created but never connected.
   regenerateLink: (id) => api.post(`/devices/${id}/link`),
-  confirmLink: (data) => api.post('/devices/confirm', data),
   update: (id, data) => api.patch(`/devices/${id}`, data),
+  // Pausing one device. Not the same as `remove`, which cannot be undone — see
+  // the API's utils/deviceAccess.js.
+  block: (id) => api.post(`/devices/${id}/block`),
+  unblock: (id) => api.post(`/devices/${id}/unblock`),
   remove: (id) => api.delete(`/devices/${id}`),
 };
 
 export const screenTime = {
-  get: (childId) => api.get(`/screen-time/${childId}`),
-  update: (childId, data) => api.put(`/screen-time/${childId}`, data),
+  /**
+   * `deviceId` is optional throughout. Omitted, these read and write the child's
+   * rule — every device they own obeys it, which is what this page did before
+   * per-device limits existed. Given one, they read and write that device's
+   * exception, which overrides the child's rule for that device alone.
+   */
+  get: (childId, deviceId) => api.get(`/screen-time/${childId}`, { params: deviceId ? { deviceId } : undefined }),
+  update: (childId, data, deviceId) =>
+    api.put(`/screen-time/${childId}`, data, { params: deviceId ? { deviceId } : undefined }),
+  // Drops a device's exception so it follows the child's rule again.
+  clearDeviceRule: (childId, deviceId) =>
+    api.delete(`/screen-time/${childId}`, { params: { deviceId } }),
 };
 
 export const blocking = {
@@ -102,19 +130,41 @@ export const blocking = {
 
 export const activity = {
   get: (childId, params) => api.get(`/activity/${childId}`, { params }),
-  log: (data) => api.post('/activity', data),
   webHistory: (childId, params) => api.get(`/activity/${childId}/web-history`, { params }),
+
+  /**
+   * Deleting recorded activity.
+   *
+   * Web History and the Activity Log read the same table — a browsing row is an
+   * activity row — so `removeEntry` serves both screens, and clearing either one
+   * is visible on the other. The API's activityController explains the whole of
+   * it; the confirmation copy on both pages says it in words.
+   *
+   * The two clears take `{ from, to }` so they remove what the screen is
+   * showing rather than silently all of history.
+   */
+  removeEntry: (childId, entryId) => api.delete(`/activity/${childId}/entries/${entryId}`),
+  clearWebHistory: (childId, params) => api.delete(`/activity/${childId}/web-history`, { params }),
+  clear: (childId, params) => api.delete(`/activity/${childId}`, { params }),
 };
 
 export const reports = {
   daily: (childId, date) => api.get(`/reports/${childId}/daily`, { params: { date } }),
   weekly: (childId) => api.get(`/reports/${childId}/weekly`),
+  // Every child's week, summed, in one request — what the dashboard's chart
+  // needs. Calling `weekly` once per child instead made the home screen's load
+  // time scale with the size of the family.
+  familyWeekly: () => api.get('/reports/weekly'),
 };
 
 export const alerts = {
   list: (unreadOnly) => api.get('/alerts', { params: { unreadOnly } }),
   markRead: (id) => api.put(`/alerts/${id}/read`),
   markAllRead: () => api.put('/alerts/read-all'),
+  remove: (id) => api.delete(`/alerts/${id}`),
+  // Takes the same filters the list does, so a clear removes what the screen is
+  // showing. No filters clears everything the account owns.
+  clear: (params) => api.delete('/alerts', { params }),
 };
 
 export const notifications = {
@@ -146,7 +196,6 @@ export const chats = {
 
 export const locations = {
   getCurrent: (childId) => api.get(`/locations/${childId}/current`),
-  getHistory: (childId, params) => api.get(`/locations/${childId}/history`, { params }),
   /** Parent-set position: `{ latitude, longitude, accuracy?, address? }`. */
   setManual: (childId, data) => api.post(`/locations/${childId}/manual`, data),
 };
@@ -171,6 +220,12 @@ export const contacts = {
   remove: (id) => api.delete(`/contacts/${id}`),
 };
 
+/**
+ * The public contact form. Unauthenticated by design — someone who cannot sign
+ * in has to be able to say so — and rate limited to 5 per 15 minutes per IP.
+ * The in-app Support screen posts here too, so both doors reach one inbox and
+ * one spam classifier.
+ */
 export const contactForm = {
   send: (data) => api.post('/contact', data),
 };
@@ -182,9 +237,7 @@ export const uploads = {
 
 /** Staff-only surface — every call is additionally gated server-side by role. */
 export const admin = {
-  listClients: () => api.get('/admin/clients'),
   toggleBlock: (id) => api.patch(`/admin/clients/${id}/toggle-block`),
-  updatePlan: (id, plan) => api.patch(`/admin/clients/${id}/plan`, { plan }),
   deleteClient: (id) => api.delete(`/admin/clients/${id}`),
 
   /** Staff accounts — Super Admin only. */
@@ -204,7 +257,6 @@ export const admin = {
   resetUserPassword: (id, data = {}) => api.post(`/admin/users/${id}/reset-password`, data),
 
   listActiveSessions: (params) => api.get('/admin/sessions/active', { params }),
-  listUserSessions: (id) => api.get(`/admin/users/${id}/sessions`),
   forceLogoutSession: (sessionId) => api.delete(`/admin/sessions/${sessionId}`),
   forceLogoutUser: (id) => api.delete(`/admin/users/${id}/sessions`),
 
@@ -217,7 +269,6 @@ export const admin = {
    * filter — it describes the business, not the page.
    */
   listTransactions: (params) => api.get('/admin/transactions', { params }),
-  listUserTransactions: (id) => api.get(`/admin/users/${id}/transactions`),
 
   getSettings: () => api.get('/admin/settings'),
   updateSettings: (data) => api.put('/admin/settings', data),

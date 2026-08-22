@@ -29,6 +29,53 @@ describe('Device linking flow', () => {
     expect(rules.body).toHaveProperty('appRules');
   });
 
+  /*
+   * A parent picks the device type on a dashboard that is, by definition, not
+   * the computer being set up — so a household with a Windows laptop and a
+   * MacBook can hand the Mac's code to the PC without anything looking wrong,
+   * and the row then carries the wrong icon and label for ever because nothing
+   * revisits it. The desktop agent knows what it is running on and says so as it
+   * links.
+   */
+  it('lets the device correct its own type as it links', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+
+    const gen = await request(app)
+      .post('/api/devices/link')
+      .set('Authorization', `Bearer ${tokenFor(parent)}`)
+      .send({ childId: child.id, deviceName: "Ada's Laptop", type: 'android' });
+
+    const confirm = await request(app)
+      .post('/api/devices/confirm')
+      .send({ code: gen.body.code, type: 'windows', osVersion: 'Windows 11 Pro 10.0.26200' });
+
+    expect(confirm.status).toBe(200);
+    expect(confirm.body.device.type).toBe('windows');
+    expect(confirm.body.device.osVersion).toBe('Windows 11 Pro 10.0.26200');
+    expect((await Device.findByPk(gen.body.device.id)).type).toBe('windows');
+  });
+
+  /* An unrecognised value is ignored rather than refused. This field only picks
+     an icon, and a client sending something this build has not heard of must
+     not be unable to link because of it. */
+  it('ignores an unknown declared type and keeps the parent\'s choice', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+
+    const gen = await request(app)
+      .post('/api/devices/link')
+      .set('Authorization', `Bearer ${tokenFor(parent)}`)
+      .send({ childId: child.id, deviceName: 'Kid Pixel', type: 'android' });
+
+    const confirm = await request(app)
+      .post('/api/devices/confirm')
+      .send({ code: gen.body.code, type: 'chromebook' });
+
+    expect(confirm.status).toBe(200);
+    expect(confirm.body.device.type).toBe('android');
+  });
+
   it('rejects an invalid linking code (404) and a re-link of an already-linked device (400)', async () => {
     const bad = await request(app).post('/api/devices/confirm').send({ code: 'NOPE' });
     expect(bad.status).toBe(404);

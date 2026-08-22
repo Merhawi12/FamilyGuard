@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   children as childrenApi, activity as activityApi,
-  EmptyState, Icon, Pagination, errorMessage,
+  EmptyState, Icon, Pagination, errorMessage, formatMinutes,
 } from '@parentix/shared';
 import ChildTabs from '../components/ChildTabs';
 import PageIntro from '../components/PageIntro';
@@ -17,9 +17,6 @@ const CATEGORY_ICON = {
 
 const LIMIT = 20;
 
-const formatDuration = (min) =>
-  (min < 60 ? `${Math.round(min)}m` : `${Math.floor(min / 60)}h ${Math.round(min % 60)}m`);
-
 export default function ActivityLog() {
   const [childList, setChildList] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -28,7 +25,10 @@ export default function ActivityLog() {
   const [offset, setOffset] = useState(0);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
+  // Bumped to re-run the load effect after a delete, without duplicating it.
+  const [reloads, setReloads] = useState(0);
 
   useEffect(() => {
     childrenApi.list()
@@ -50,13 +50,82 @@ export default function ActivityLog() {
         setTotal(0);
       })
       .finally(() => setLoading(false));
-  }, [selected, offset, dateRange]);
+  }, [selected, offset, dateRange, reloads]);
 
   const hasFilters = !!(dateRange.from || dateRange.to);
 
+  /**
+   * Delete one record.
+   *
+   * Named in the prompt because the rows are dense and repetitive — several
+   * "Microsoft Edge" entries minutes apart is exactly where the wrong one gets
+   * tapped.
+   */
+  const removeRow = async (log) => {
+    const label = log.appName || log.url || 'Unknown';
+    if (!confirm([
+      'Delete this record?',
+      `${label}\n${new Date(log.startTime).toLocaleString()}`,
+      'This cannot be undone.',
+    ].join('\n\n'))) return;
+    setError('');
+    try {
+      await activityApi.removeEntry(selected.id, log.id);
+      setReloads((n) => n + 1);
+    } catch (err) {
+      setError(errorMessage(err, 'Could not delete that record.'));
+    }
+  };
+
+  /**
+   * Clear the log, honouring the date range on screen.
+   *
+   * The prompt names the browsing consequence explicitly. This screen shows app
+   * usage *and* browsing — they are one table — so clearing it takes the web
+   * history with it. A parent who discovered that afterwards would have no way
+   * to tell it apart from a device that had stopped reporting.
+   */
+  const clearLog = async () => {
+    const scope = hasFilters
+      ? `the activity between ${dateRange.from || 'the beginning'} and ${dateRange.to || 'now'}`
+      : "this child's entire activity log";
+    if (!confirm([
+      `Delete ${scope}?`,
+      'This includes the browsing records, so their Web History goes too — they are the same records.',
+      'This cannot be undone.',
+    ].join('\n\n'))) return;
+
+    setDeleting(true);
+    setError('');
+    try {
+      const { data } = await activityApi.clear(selected.id, {
+        from: dateRange.from || undefined,
+        to: dateRange.to || undefined,
+      });
+      setOffset(0);
+      setReloads((n) => n + 1);
+      if (!data?.deleted) setError('There was nothing to delete.');
+    } catch (err) {
+      setError(errorMessage(err, 'Could not clear the activity log.'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
-      <PageIntro description="App usage and browsing recorded on your child's devices." />
+      <PageIntro description="App usage and browsing recorded on your child's devices.">
+        {selected && logs.length > 0 && (
+          <button
+            onClick={clearLog}
+            disabled={deleting}
+            className="btn-secondary btn-sm text-danger border-red-200 hover:bg-red-50 disabled:opacity-50"
+          >
+            <Icon name="trash" size={15} />
+            {hasFilters ? 'Clear range' : 'Clear all'}
+          </button>
+        )}
+      </PageIntro>
 
       <ChildTabs
         items={childList}
@@ -133,8 +202,16 @@ export default function ActivityLog() {
                   </p>
                 </div>
                 <span className="text-sm font-medium text-gray-700 shrink-0">
-                  {formatDuration(log.durationMinutes)}
+                  {formatMinutes(log.durationMinutes)}
                 </span>
+                <button
+                  onClick={() => removeRow(log)}
+                  className="icon-btn w-11 h-11 shrink-0 text-gray-400 hover:text-danger hover:bg-red-50"
+                  aria-label={`Delete record: ${log.appName || log.url || 'Unknown'}`}
+                  title="Delete this record"
+                >
+                  <Icon name="trash" size={17} />
+                </button>
               </div>
             ))}
           </div>

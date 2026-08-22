@@ -224,6 +224,14 @@ resource "google_cloud_run_v2_service" "api" {
           VAPID_PUBLIC_KEY        = google_secret_manager_secret.supplied["vapid-public-key"].secret_id
           VAPID_PRIVATE_KEY       = google_secret_manager_secret.supplied["vapid-private-key"].secret_id
 
+          # The database server's certificate, for a deployment that reaches
+          # Postgres over TCP instead of the Cloud SQL socket. Mounted
+          # unconditionally like the Twilio block below: until a real version is
+          # added it is the single-space placeholder, which `env.db.sslCa` trims
+          # to empty, so nothing changes. Adding the version is the whole of
+          # turning certificate verification on.
+          DB_SSL_CA               = google_secret_manager_secret.supplied["db-ssl-ca"].secret_id
+
           # Phone sign-in. Mounted unconditionally: until a real version is
           # added each of these is the single-space placeholder, which `secret()`
           # trims to empty, so `isEnabled()` stays false and the API reports

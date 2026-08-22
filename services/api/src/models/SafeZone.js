@@ -14,6 +14,9 @@ const SafeZone = sequelize.define('SafeZone', {
   isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
   notifyOnEnter: { type: DataTypes.BOOLEAN, defaultValue: true },
   notifyOnLeave: { type: DataTypes.BOOLEAN, defaultValue: true },
-}, { underscored: true });
+}, {
+  underscored: true,
+  indexes: [{ fields: ['parent_id'] }],
+});
 
 module.exports = SafeZone;

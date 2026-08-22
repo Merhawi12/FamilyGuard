@@ -1,8 +1,15 @@
-# Generates, compiles and commits `apps/child-app/ios/`.
+# Generates, compiles and commits `apps/child-app/ios/ios/`.
+#
+# Note the doubled path, and that it is not a typo. The child app is split into
+# a project per platform, so `apps/child-app/ios` is an Expo **project root** —
+# package.json, app.config.js, eas.json, its own lockfile — and the Xcode
+# project it owns is the `ios/` inside it, the ordinary React Native arrangement
+# one level down. `apps/child-app/android` is the same shape.
 #
 # The child app has no committed iOS project by default — EAS prebuilds one from
-# app.json on its own machines at build time. This workflow is for the other
-# choice: keeping the Xcode project in the repository the way `android/` is.
+# app.config.js on its own machines at build time. This workflow is for the other
+# choice: keeping the Xcode project in the repository the way the Android half
+# keeps its Gradle project.
 #
 # It exists as CI rather than as a local script because `expo prebuild
 # --platform ios` refuses to run on Windows ("run again from macOS or Linux"),
@@ -13,18 +20,19 @@
 #
 # ── Read this before running it ──────────────────────────────────────────────
 #
-# Committing `ios/` changes how every later build behaves. EAS decides a
-# platform's workflow by looking for its native directory: with `ios/` present it
-# stops prebuilding and builds what is committed. From then on **app.json's iOS
-# keys stop taking effect on their own** — an edit to a permission string, a
-# background mode or the URL scheme changes nothing until this workflow is re-run
-# and the result committed.
+# Committing the native project changes how every later build behaves. EAS
+# decides a platform's workflow by looking for its native directory: with `ios/`
+# present it stops prebuilding and builds what is committed. From then on
+# **app.config.js's iOS keys stop taking effect on their own** — an edit to a
+# permission string, a background mode or the URL scheme changes nothing until
+# this workflow is re-run and the result committed.
 #
 # `childAppPlatforms.test.js` guards exactly that: once the directory exists, it
-# reads the committed Info.plist and asserts it still agrees with app.json, so
+# reads the committed Info.plist and asserts it still agrees with the config, so
 # the drift fails a test run rather than a store submission.
 #
-# Re-run this whenever the iOS half of app.json changes, or the Expo SDK moves.
+# Re-run this whenever apps/child-app/ios/app.config.js or the shared
+# app.config.base.js changes, or the Expo SDK moves.
 
 name: iOS — Child App prebuild
 
@@ -62,12 +70,17 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: apps/child-app/ios/package-lock.json
 
-      # The child app is not an npm workspace — it keeps its own lockfile,
-      # because Metro resolves from the app directory rather than the hoisted
-      # root. `npm ci` at the repo root would not install it.
+      # Neither child app project is an npm workspace — each keeps its own
+      # lockfile, because Metro resolves from the app directory rather than the
+      # hoisted root, and because the root resolves a React that React Native
+      # will not run against. `npm ci` at the repo root would not install this.
+      #
+      # It also links `../shared` (`file:` dependency), which is where every
+      # screen and service actually lives.
       - name: Install
-        working-directory: apps/child-app
+        working-directory: apps/child-app/ios
         run: npm ci
 
       # `--clean` so the result is the config's output and not a merge with
@@ -77,15 +90,17 @@ jobs:
       # `--no-install` skips CocoaPods here; it runs as its own step below so a
       # pod failure is distinguishable from a prebuild failure in the log.
       - name: Prebuild iOS
-        working-directory: apps/child-app
+        working-directory: apps/child-app/ios
         env:
           EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url }}/api
           EXPO_PUBLIC_SOCKET_URL: ${{ github.event.inputs.api_url }}
         run: npx expo prebuild --platform ios --clean --no-install
 
-      # Android must come out of this untouched. `--platform ios` should
-      # guarantee it, and this is cheap insurance against a future Expo release
-      # deciding otherwise — the Kotlin modules in there are not regenerable.
+      # The Android project must come out of this untouched. Since the split it
+      # is a different project entirely — prebuild is running one directory over
+      # and cannot reach it — so this should now be impossible rather than merely
+      # unlikely. Kept because the Kotlin modules in there are not regenerable
+      # and the check costs a second.
       - name: Fail if Android was touched
         run: |
           if ! git diff --quiet -- apps/child-app/android; then
@@ -95,7 +110,7 @@ jobs:
           fi
 
       - name: Install Pods
-        working-directory: apps/child-app/ios
+        working-directory: apps/child-app/ios/ios
         run: pod install
 
       # The point of committing a project rather than generating one: proof it
@@ -105,7 +120,7 @@ jobs:
       # guess that only fails once someone renames the app — and it would fail
       # here, on the runner, long after the rename looked successful.
       - name: Compile for Simulator
-        working-directory: apps/child-app
+        working-directory: apps/child-app/ios
         run: |
           WORKSPACE="$(ls -d ios/*.xcworkspace | head -1)"
           SCHEME="$(basename "$WORKSPACE" .xcworkspace)"
@@ -120,14 +135,14 @@ jobs:
             build
 
       - name: Show what would be committed
-        run: git status --short -- apps/child-app/ios
+        run: git status --short -- apps/child-app/ios/ios
 
       - name: Commit
         if: ${{ github.event.inputs.commit == 'true' }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/child-app/ios
+          git add apps/child-app/ios/ios
           # Nothing to do on a re-run that produced an identical tree, which is
           # the expected outcome most of the time.
           if git diff --cached --quiet; then

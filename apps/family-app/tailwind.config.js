@@ -5,7 +5,7 @@ import preset from '../../packages/shared/tailwind-preset.cjs';
  *
  * Everything a parent sees was already teal except this app: the marketing site
  * at the apex is built on `--current: #0C6478` → `--tide: #15B8C9`, and the
- * child app ships the full ramp in `apps/child-app/src/theme.js`. The dashboard
+ * child app ships the full ramp in `apps/child-app/shared/src/theme.js`. The dashboard
  * was the one surface still on the preset's business blue, so a parent moved
  * from a teal landing page, signed in, and arrived somewhere that looked like a
  * different product.

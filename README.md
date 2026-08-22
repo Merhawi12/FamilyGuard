@@ -1,13 +1,14 @@
 # Parentix
 
-Parental control and digital safety platform. Three applications share one API:
+Parental control and digital safety platform. Four applications share one API:
 
-| Application         | Path                     | What it is                                                            |
-| ------------------- | ------------------------ | --------------------------------------------------------------------- |
-| **Admin Dashboard** | `apps/admin-dashboard`   | Staff console — users, devices, billing, sessions, settings, audit logs |
-| **Family App**      | `apps/family-app`        | Parent-facing dashboard plus the public marketing site                 |
-| **Child App**       | `apps/child-app`         | The monitored Android device agent (Expo + native modules)             |
-| API                 | `services/api`           | Express + Sequelize + Socket.IO backend, runs on Cloud Run             |
+| Application          | Path                     | What it is                                                            |
+| -------------------- | ------------------------ | --------------------------------------------------------------------- |
+| **Admin Dashboard**  | `apps/admin-dashboard`   | Staff console — users, devices, billing, sessions, settings, audit logs |
+| **Family App**       | `apps/family-app`        | Parent-facing dashboard plus the public marketing site                 |
+| **Child App**        | `apps/child-app`         | The monitored phone agent — separate Expo projects for Android and iOS |
+| **Child Desktop**    | `apps/child-desktop`     | The monitored laptop agent — separate Electron projects for Windows and macOS |
+| API                  | `services/api`           | Express + Sequelize + Socket.IO backend, runs on Cloud Run             |
 
 ## Repository layout
 
@@ -15,7 +16,14 @@ Parental control and digital safety platform. Three applications share one API:
 apps/
   admin-dashboard/     React + Vite  → Firebase Hosting
   family-app/          React + Vite  → Firebase Hosting
-  child-app/           Expo (React Native) + Kotlin native modules
+  child-app/           Expo (React Native), one project per platform
+    shared/            @parentix/child-shared — screens, services, native bridges
+    android/           Expo project root + Kotlin native modules
+    ios/               Expo project root; EAS prebuilds the Xcode project
+  child-desktop/       Electron, one project per platform
+    shared/            @parentix/child-desktop-shared — the agent, the windows, the resolver
+    windows/           Electron project root + PowerShell platform modules → NSIS
+    macos/             Electron project root + shell/launchd platform modules → pkg
 services/
   api/                 Express, Sequelize, Socket.IO  → Artifact Registry → Cloud Run
 packages/
@@ -30,9 +38,13 @@ docs/                  Architecture, deployment, operations
 ```
 
 The two web apps and `packages/shared` form an npm workspace, so one `npm install`
-at the root covers all three. `services/api` and `apps/child-app` keep their own
-lockfiles — the API so its container image builds from a single directory, and
-the child app because Metro does not cope well with hoisted dependencies.
+at the root covers all three. `services/api` and each of the four device-agent
+platform projects keep their own lockfiles — the API so its container image builds
+from a single directory, the child app because Metro does not cope well with
+hoisted dependencies and because React Native pins a React the web tier does not
+use, and the desktop projects because each ships its own Electron runtime and
+installer toolchain. See [apps/child-app/README.md](apps/child-app/README.md) and
+[apps/child-desktop/README.md](apps/child-desktop/README.md).
 
 ## Getting started
 
@@ -46,7 +58,9 @@ docker compose up -d
 # 2. Dependencies
 npm install                      # shared package + both web apps
 npm --prefix services/api ci
-npm --prefix apps/child-app ci
+npm --prefix apps/child-app/android ci
+npm --prefix apps/child-app/ios ci
+npm --prefix apps/child-desktop/windows ci     # or macos, on a Mac
 
 # 3. Configuration
 cp services/api/.env.example        services/api/.env
@@ -68,6 +82,7 @@ npm run dev:api        # http://localhost:5000
 npm run dev:family     # http://localhost:3000
 npm run dev:admin      # http://localhost:3001
 npm run dev:child      # Expo dev server
+npm run dev:desktop    # Electron, Windows
 ```
 
 Both web dev servers proxy `/api` and `/socket.io` to the API, so
@@ -165,4 +180,8 @@ Full instructions, including the one-time Google Cloud setup, are in
 - [Architecture](docs/ARCHITECTURE.md) — how the pieces fit together, on Google Cloud and in the code
 - [Deployment](docs/DEPLOYMENT.md) — first-time Google Cloud setup and the release process
 - [Operations](docs/OPERATIONS.md) — secrets, migrations, rollback, monitoring, incident response
+- [Security](docs/SECURITY.md) — the auth model, what is encrypted and where, the CSP the web apps ship, and what is knowingly accepted
 - [API reference](docs/API.md) — endpoints, auth model, realtime events
+- [Child app platforms](docs/CHILD-APP-PLATFORMS.md) — the phone agent's Android and iOS projects
+- [Child desktop](docs/CHILD-DESKTOP.md) — the laptop agent's Windows and macOS projects
+- [iOS](docs/IOS.md) — what the two iOS apps can and cannot do

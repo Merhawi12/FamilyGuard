@@ -47,9 +47,9 @@ The Android agent has seven jobs. Four cross to iOS unchanged; three do not.
 | **Resist uninstall** | ⚠️ | ❌ | Needs supervision/MDM |
 
 Each of the three stubbed native modules carries the same explanation at the top
-of its file — [`UsageStats.js`](../apps/child-app/src/native/UsageStats.js),
-[`AppBlocker.js`](../apps/child-app/src/native/AppBlocker.js),
-[`VpnControl.js`](../apps/child-app/src/native/VpnControl.js).
+of its file — [`UsageStats.js`](../apps/child-app/shared/src/native/UsageStats.js),
+[`AppBlocker.js`](../apps/child-app/shared/src/native/AppBlocker.js),
+[`VpnControl.js`](../apps/child-app/shared/src/native/VpnControl.js).
 
 ### Why screen time cannot be reported
 
@@ -102,7 +102,7 @@ history.
 
 ### What the UI already does about it
 
-[`PermissionsScreen.jsx`](../apps/child-app/src/screens/PermissionsScreen.jsx)
+[`PermissionsScreen.jsx`](../apps/child-app/shared/src/screens/PermissionsScreen.jsx)
 filters its steps on `<module>.supported`, so an iPhone shows two rows — Location
 and Notifications — instead of five, three of which could never turn green and
 whose instructions name Android settings screens. `monitoring.js` needed no
@@ -144,7 +144,7 @@ and nothing is ever delivered.
 Expo's push service relays to APNs and needs the same key:
 
 ```bash
-cd apps/child-app
+cd apps/child-app/ios
 npx eas-cli credentials        # Platform: iOS → Push Notifications → upload the .p8
 ```
 

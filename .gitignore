@@ -6,11 +6,24 @@ node_modules/
 .env.local
 .env.*.local
 
+# The EAS CLI writes an app.json here when it is run from the repo root instead
+# of from an app directory. The real Expo config is
+# apps/child-app/{android,ios}/app.config.js; a root one configures nothing and
+# only confuses the next person who runs eas.
+/app.json
+
 # Build output
 dist/
 build/
 .vite/
 *.tsbuildinfo
+
+# …except the desktop projects' `build/`, which is electron-builder's
+# *buildResources* directory rather than build output: the installer script, the
+# entitlements, the launchd plists and the generated icons all live there and
+# all have to be committed. The directory has to be re-included explicitly —
+# git will not look inside an excluded directory to find a negated file.
+!apps/child-desktop/*/build/
 
 # Firebase CLI upload cache. firebase.json and .firebaserc are committed —
 # they are the hosting configuration; this is only a per-machine hash index of
@@ -46,11 +59,13 @@ Thumbs.db
 .vscode/
 
 # React Native / Expo generated
-apps/child-app/.expo/
-apps/child-app/android/.gradle/
-apps/child-app/android/app/build/
-apps/child-app/android/build/
-apps/child-app/android/local.properties
+# One entry per platform project: apps/child-app/{android,ios} are each an Expo
+# project root, and the Android one nests its Gradle project a level further in.
+apps/child-app/*/.expo/
+apps/child-app/android/android/.gradle/
+apps/child-app/android/android/app/build/
+apps/child-app/android/android/build/
+apps/child-app/android/android/local.properties
 *.apk
 *.aab
 

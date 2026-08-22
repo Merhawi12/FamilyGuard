@@ -11,9 +11,9 @@
  *
  * Nothing in the loader reports that. `loadError` stays null and `isLoaded` goes
  * true, so as far as the page is concerned the map is fine — while Google paints
- * its own grey "Oops! Something went wrong." inside the container. The page then
- * went on offering "Safe zone", which puts the parent in a mode whose only
- * instruction is to tap a map that is not there.
+ * its own grey "Oops! Something went wrong." inside the container. This is what
+ * tells the Location page to draw its keyless OpenStreetMap map instead, and to
+ * put the reason above it where whoever configured the key will see it.
  *
  * `window.gm_authFailure` is Google's documented hook for exactly this, and it
  * is a single global with no unsubscribe, so it is claimed once here at module

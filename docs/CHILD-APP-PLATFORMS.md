@@ -1,7 +1,8 @@
 # Child App — Android and iOS
 
-One Expo codebase, two stores. This is what differs between them, where each
-platform's configuration actually lives, and how to build both.
+Two Expo projects, one shared body of JavaScript, two stores. This is what
+differs between them, where each platform's configuration actually lives, and
+how to build both.
 
 For what the app *can* do on each platform — which is a much sharper difference
 than anything here — see [IOS.md §2](IOS.md). This document is about
@@ -9,27 +10,54 @@ configuration; that one is about capability.
 
 ---
 
+## 0. The layout
+
+```
+apps/child-app/
+├── shared/        @parentix/child-shared — every screen, service and native
+│                  bridge, plus app.config.base.js
+├── android/       Expo project root; its Gradle project is android/android/
+└── ios/           Expo project root; EAS prebuilds its native project
+```
+
+Each platform owns its `package.json`, `app.config.js`, `eas.json`,
+`metro.config.js`, `assets/`, lockfile and `node_modules`. Neither owns business
+logic; `shared/` owns no dependencies. The doubled `android/android/` is not a
+typo — React Native requires a project's native code at `<projectRoot>/android`,
+so naming the project root after its platform puts the Gradle project one level
+in. [`apps/child-app/README.md`](../apps/child-app/README.md) covers the
+mechanics, including why these cannot be npm workspaces.
+
+---
+
 ## 1. The thing that surprises everyone
 
-**`app.json` is the source of truth for iOS and is mostly inert for Android.**
+**The Expo config is the source of truth for iOS and is mostly inert for
+Android.**
 
-`apps/child-app/android/` is committed source. It holds the accessibility
-service, the VPN service, the usage-stats module and the DNS reporter, and
-`expo prebuild` would delete all of it — so prebuild is **never run for
-Android**, and `AndroidManifest.xml` is what actually ships. Editing
-`android.permissions` in `app.json` changes nothing on a device.
+`apps/child-app/android/android/` is committed source. It holds the
+accessibility service, the VPN service, the usage-stats module and the DNS
+reporter, and `expo prebuild` would delete all of it — so prebuild is **never
+run for Android**, and `AndroidManifest.xml` is what actually ships. Editing
+`android.permissions` in `android/app.config.js` changes nothing on a device.
+That project has no `prebuild` script at all, deliberately.
 
-There is no committed `ios/`, so EAS *does* run prebuild for iOS on its own
-machines, and `app.json` is the whole of the iOS configuration.
+There is no committed native project on the iOS side, so EAS *does* run prebuild
+for iOS on its own machines, and `ios/app.config.js` is the whole of the iOS
+configuration.
+
+What both configs share — name, version, slug, URL scheme, splash, EAS project
+id — comes from `shared/app.config.base.js`, which both spread. Change a version
+in one place; change a permission in the platform that owns it.
 
 | Change | Android | iOS |
 | --- | --- | --- |
-| Permissions | `AndroidManifest.xml` | `app.json` → `ios.infoPlist` |
-| Deep-link scheme | `AndroidManifest.xml` intent filter | `app.json` → `scheme` |
-| Launcher icon | `android/…/res/mipmap-*` | `app.json` → `icon` |
-| Launch screen | `res/drawable/splashscreen.xml` + `res/drawable-*` | `app.json` → `splash` |
+| Permissions | `AndroidManifest.xml` | `ios/app.config.js` → `ios.infoPlist` |
+| Deep-link scheme | `AndroidManifest.xml` intent filter | `shared/app.config.base.js` → `scheme` |
+| Launcher icon | `android/android/…/res/mipmap-*` | `shared/app.config.base.js` → `icon` |
+| Launch screen | `res/drawable/splashscreen.xml` + `res/drawable-*` | `shared/app.config.base.js` → `splash` |
 | Notification icon | `res/drawable-*/notification_icon.png` | n/a — iOS uses the app icon |
-| Orientation | activity `android:screenOrientation` | `app.json` → `orientation` |
+| Orientation | activity `android:screenOrientation` | `shared/app.config.base.js` → `orientation` |
 
 Get that backwards and a change appears on one platform only, silently. The
 pairs that must agree are asserted in
@@ -37,13 +65,15 @@ pairs that must agree are asserted in
 bundle identifier vs package name, URL scheme on both sides, portrait on both
 sides — because nothing throws when they drift.
 
-> **Never run `expo prebuild` without `--platform ios`.** It deletes `android/`.
-> On Windows it refuses to generate iOS at all ("run again from macOS or Linux"),
+> **Never run `expo prebuild` in `apps/child-app/android`.** It deletes that
+> project's `android/`, and the Kotlin modules with it. There is no `prebuild`
+> script there for exactly this reason; only the iOS project has one. On Windows
+> prebuild refuses to generate iOS at all ("run again from macOS or Linux"),
 > which is fine: EAS does it.
 
-### Committing `ios/` instead
+### Committing a native iOS project instead
 
-The default above — no `ios/` in the repo, EAS prebuilds it — is not the only
+The default above — no native project in the repo, EAS prebuilds it — is not the only
 option, and [`ios-child-prebuild.yml`](../.github/workflows/ios-child-prebuild.yml)
 is the other one. It runs on a macOS runner, generates the project with
 `--clean`, installs Pods, **compiles it for the Simulator**, and only then
@@ -53,21 +83,25 @@ project nobody has built is a liability, not an asset.
 It has to be CI rather than a script because `expo prebuild --platform ios` will
 not run on Windows, and WSL is not installed on the development machine either.
 
+It writes `apps/child-app/ios/ios/` — the Xcode project inside the iOS *project
+root*, the same shape as `android/android/`.
+
 Understand the trade before running it. EAS decides a platform's workflow by
-looking for its native directory, so **a committed `ios/` stops EAS prebuilding**
-and it builds what is in the repo. From then on the iOS half of `app.json` is
-inert until the workflow is re-run: change a permission string, a background mode
-or the URL scheme and the next build still carries the old one, with nothing to
-say so.
+looking for its native directory, so **a committed `ios/ios/` stops EAS
+prebuilding** and it builds what is in the repo. From then on `ios/app.config.js`
+is inert until the workflow is re-run: change a permission string, a background
+mode or the URL scheme and the next build still carries the old one, with nothing
+to say so.
 
 `childAppPlatforms.test.js` covers exactly that gap. The four
 `the committed iOS project agrees with app.json` tests skip while there is no
-`ios/` and start asserting the moment one appears — comparing the generated
+`ios/ios/` and start asserting the moment one appears — comparing the generated
 Info.plist's URL scheme, background modes, ATS setting and location strings
 against the config that is supposed to own them. Their failure message is the
 fix: re-run the workflow.
 
-Re-run it whenever the iOS half of `app.json` changes or the Expo SDK moves.
+Re-run it whenever `ios/app.config.js` or the shared `app.config.base.js`
+changes, or the Expo SDK moves.
 
 ---
 
@@ -80,8 +114,9 @@ npm run assets          # write them
 npm run assets:check    # verify they are current, write nothing
 ```
 
-[`scripts/build-brand-assets.mjs`](../scripts/build-brand-assets.mjs) draws 44
-files across both apps. Three rules it encodes, each of which was a live bug:
+[`scripts/build-brand-assets.mjs`](../scripts/build-brand-assets.mjs) draws 47
+files across both apps — the child app's `assets/` is written into each platform
+project, because Expo resolves those paths from the project root. Three rules it encodes, each of which was a live bug:
 
 - **Icons crop to the shield, dropping the wordmark.** At 48dp/60pt "Parentix"
   is a grey smear and squeezes the shield to half the tile. The child app shipped
@@ -101,11 +136,11 @@ files across both apps. Three rules it encodes, each of which was a live bug:
 ## 3. Deep links
 
 Scheme: **`com.parentix.child://`**, registered on Android in the manifest's
-intent filter and on iOS via `scheme` in `app.json`.
+intent filter and on iOS via `scheme` in `shared/app.config.base.js`.
 
 It was declared on Android from the day the project was scaffolded and consumed
 by nothing — the app opened on whatever screen it would have opened on anyway.
-[`App.js`](../apps/child-app/App.js) now maps it:
+[`App.js`](../apps/child-app/shared/App.js) now maps it:
 
 | Link | Goes to |
 | --- | --- |
@@ -143,7 +178,7 @@ reach APNs and FCM through Expo's service. No server change was needed for iOS.
   creates it and no-ops elsewhere.
 - Android needs `POST_NOTIFICATIONS` from API 33. It is in the manifest.
 - iOS needs `remote-notification` in `UIBackgroundModes` and the `aps-environment`
-  entitlement — both come from `app.json`, the entitlement automatically.
+  entitlement — both come from `ios/app.config.js`, the entitlement automatically.
 - **Upload the APNs key to EAS** or iOS registers a token and never receives
   anything: `npx eas-cli credentials` → iOS → Push Notifications.
 
@@ -162,11 +197,35 @@ API_URL=https://api.parentix.ca bash scripts/build-apk.sh child            # APK
 API_URL=https://api.parentix.ca bash scripts/build-apk.sh child --bundle   # AAB for Play
 ```
 
-Two traps, both real:
+Three traps, all real, all Windows:
 
 - **`npm run apk:child` does not work from Git Bash on Windows.** npm runs it
   through cmd.exe, which cannot execute a `.sh` and **exits 0 without building**.
   Call it with `bash` — which is what `npm run ios:child` does.
+- **A clean build on Windows fails inside Metro until `postinstall` has run.**
+
+  ```
+  ENOENT: no such file or directory, mkdir '…\.expo\metro\externals\node:sea'
+  ```
+
+  `@expo/cli` writes one shim directory per Node standard-library module, named
+  after the module, and its list is `module.builtinModules` filtered to drop
+  anything containing a `/`. That filter predates the builtins reachable *only*
+  through the `node:` prefix — Node 24 reports `node:sea`, `node:sqlite`,
+  `node:test` and `node:test/reporters`, and only the last is dropped. The rest
+  become directory names containing a colon, which NTFS reads as an
+  alternate-data-stream separator rather than part of a filename.
+
+  [`scripts/patch-expo-windows.mjs`](../scripts/patch-expo-windows.mjs) adds `:`
+  to that filter in the installed copy. It runs from this app's `postinstall`,
+  no-ops off Windows, and warns rather than rewrites if the upstream line moves.
+  Dropping those three modules costs nothing — they cannot be imported from a
+  React Native bundle in any case.
+
+  Worth knowing *why it looked fine for years*: the shim is written only when
+  missing and Gradle caches the bundle task, so a warm tree never runs that code.
+  It surfaces on the first genuinely clean build, which is when a toolchain bug
+  is least expected. A fresh clone on Windows could not build an APK at all.
 - **Gradle will package a stale JS bundle.** Verify what shipped rather than
   trusting the build:
 
@@ -185,7 +244,7 @@ and Play will reject it. `android/generate-release-keystore.sh` makes one.
 No Mac needed — EAS builds on Expo's.
 
 **The EAS project is `@familyguard/familyguard-child`,** not `parentix-anything`.
-`app.json` claimed `owner: "parentix"` and `slug: "parentix-child"` — the product
+The config claimed `owner: "parentix"` and `slug: "parentix-child"` — the product
 rename reached the config and never reached Expo — and the two mismatches
 together made *every* EAS command fail before it started, Android included:
 
@@ -252,7 +311,7 @@ per-platform: `android/` exists so those keys do not reach Android — which is 
 `AndroidManifest.xml` and `res/` are edited directly — while `ios/` does not
 exist, so prebuild does sync them. That is not an assumption; the built
 `Info.plist` in §8 carries `arm64`, the ATS setting, portrait and the URL scheme,
-all of which come from `app.json`.
+all of which come from the Expo config.
 
 Committing `ios/` is what would make the warning true for both halves.
 

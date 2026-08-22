@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Parentix — the DNS helper daemon.
+
+  Installed to /Library/LaunchDaemons by the .pkg's postinstall script, owned by
+  root:wheel with mode 644 (launchd refuses a daemon plist that anyone else can
+  write, and the failure is silent).
+
+  `WatchPaths` is the whole design: launchd starts the helper when the agent
+  writes a request file and lets it exit immediately afterwards. No socket, no
+  resident daemon, no privileged process sitting idle between the two moments of
+  the day when the resolver actually changes.
+
+  `RunAtLoad` is deliberately **true**. A Mac that was shut down while the
+  resolver pointed at 127.0.0.1 comes up with no working DNS, and the agent — a
+  login item — has not started yet. Running once at boot lets the helper see a
+  leftover snapshot and put the machine back before anyone notices, which is the
+  macOS half of what `repairSystemDns` does inside the agent.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ca.parentix.child-desktop.helper</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/Application Support/Parentix/dns-helper.sh</string>
+  </array>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/Shared/Parentix/dns-request.json</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>StandardErrorPath</key>
+  <string>/var/log/parentix-dns-helper.log</string>
+</dict>
+</plist>

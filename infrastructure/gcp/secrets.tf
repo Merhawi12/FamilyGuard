@@ -45,6 +45,17 @@ locals {
     # so generate once and keep them.
     "vapid-public-key",
     "vapid-private-key",
+    # The Cloud SQL instance's server certificate, so a TCP connection can
+    # actually verify the server rather than merely encrypt to it. Not needed by
+    # the socket topology this config deploys — it is here for a deployment that
+    # reaches Postgres over private IP, where without it `rejectUnauthorized`
+    # has to be off and TLS authenticates nothing. Supplying it turns
+    # verification on by itself; see docs/SECURITY.md.
+    #
+    #   gcloud sql instances describe <instance> \
+    #     --format='value(serverCaCert.cert)' \
+    #     | gcloud secrets versions add parentix-<env>-db-ssl-ca --data-file=-
+    "db-ssl-ca",
     # Read by scripts/deploy-web.sh and compiled into the Family App bundle.
     # Unlike the rest of this list it is not confidential — a Maps browser key
     # ships in public JavaScript by design and is protected by HTTP-referrer

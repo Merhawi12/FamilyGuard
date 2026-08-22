@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { env } = require('../config/env');
 const { User, Child, Device, Session } = require('../models');
 const { DEVICE_UNLINKED, ACCOUNT_SUSPENDED } = require('../utils/deviceAccess');
+const { JWT_VERIFY_OPTIONS } = require('../utils/jwtOptions');
 
 /**
  * A handshake refusal the client can branch on.
@@ -31,7 +32,7 @@ const attachSocketAuth = (io) => {
       const token = socket.handshake.auth?.token;
       if (!token) return next(new Error('Authentication required'));
 
-      const decoded = jwt.verify(token, env.auth.jwtSecret);
+      const decoded = jwt.verify(token, env.auth.jwtSecret, JWT_VERIFY_OPTIONS);
 
       if (decoded.deviceId && decoded.childId) {
         const device = await Device.findByPk(decoded.deviceId);
@@ -39,7 +40,15 @@ const attachSocketAuth = (io) => {
           return next(refuse('This device is no longer linked', DEVICE_UNLINKED));
         }
 
-        const child = await Child.findByPk(decoded.childId, { attributes: ['id', 'parentId', 'isActive'] });
+        // Loaded from the *device row*, not from the token's `childId`. The two
+        // always agree today, and the row is the authority for which child this
+        // socket may join — see the same reasoning in middleware/auth.js. A
+        // token that disagrees describes a pairing that does not exist.
+        if (decoded.childId !== device.childId) {
+          return next(refuse('This device is no longer linked', DEVICE_UNLINKED));
+        }
+
+        const child = await Child.findByPk(device.childId, { attributes: ['id', 'parentId', 'isActive'] });
         // A token whose child no longer exists is as dead as one whose device
         // does not, and the phone should treat it the same way.
         if (!child) return next(refuse('This device is no longer linked', DEVICE_UNLINKED));
@@ -58,8 +67,8 @@ const attachSocketAuth = (io) => {
         }
 
         socket.data.role = 'child';
-        socket.data.deviceId = decoded.deviceId;
-        socket.data.childId = decoded.childId;
+        socket.data.deviceId = device.id;
+        socket.data.childId = child.id;
         socket.data.parentId = child.parentId;
         return next();
       }

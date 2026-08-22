@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { useAuth, errorMessage, isStaff } from '@parentix/shared';
+import { useAuth, errorMessage, isStaff, BrandLogo } from '@parentix/shared';
 
 export default function Login() {
   const { user, loading, login, completeMfa } = useAuth();
@@ -60,9 +60,7 @@ export default function Login() {
             (it is the page's only h1) and its accessible name comes from the alt.
           */}
           <h1>
-            <img
-              src="/logo.png"
-              alt="Parentix"
+            <BrandLogo
               width="500"
               height="500"
               className="h-28 w-auto mx-auto [filter:brightness(0)_invert(1)]"

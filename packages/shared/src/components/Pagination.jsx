@@ -80,7 +80,7 @@ export default function Pagination({ offset, limit, count, onChange, label = 'ro
               disabled={disabled}
               aria-current={target === page ? 'page' : undefined}
               aria-label={`Page ${target}`}
-              className={`inline-flex items-center justify-center min-w-[36px] min-h-[36px] px-2 rounded-lg
+              className={`inline-flex items-center justify-center min-w-[44px] min-h-[44px] px-2 rounded-lg
                           text-xs font-semibold transition disabled:opacity-40 ${
                 target === page
                   ? 'bg-primary-600 text-white'

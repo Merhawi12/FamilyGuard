@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+    <title>Parentix</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!--
+      One window, four views, and which one is showing is decided by the agent's
+      status rather than by anything the child clicks: an unlinked computer can
+      only reach the link view, and a linked one never sees it again. The same
+      rule the mobile app applies to its navigator, for the same reason — a
+      half-linked state is not something a child can be asked to reason about.
+    -->
+    <div id="app" class="app" data-view="loading">
+      <aside class="rail">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">P</span>
+          <span class="brand-name">Parentix</span>
+        </div>
+        <nav class="nav" id="nav" hidden>
+          <button class="nav-item" data-tab="home" type="button">My day</button>
+          <button class="nav-item" data-tab="messages" type="button">Messages</button>
+          <button class="nav-item" data-tab="settings" type="button">This computer</button>
+        </nav>
+        <div class="rail-foot">
+          <span class="dot" id="conn-dot"></span>
+          <span id="conn-label">Connecting…</span>
+        </div>
+      </aside>
+
+      <main class="main">
+        <!-- Loading -->
+        <section class="view" data-view="loading">
+          <p class="muted">Starting Parentix…</p>
+        </section>
+
+        <!-- Link this computer -->
+        <section class="view" data-view="link">
+          <div class="hero">
+            <p class="eyebrow">Set up</p>
+            <h1>Link this computer</h1>
+            <p class="lead">
+              Ask your parent to open Parentix, add this computer to your profile,
+              and read you the eight-character code.
+            </p>
+          </div>
+          <form id="link-form" class="card link-card" autocomplete="off">
+            <label class="field">
+              <span class="field-label">Linking code</span>
+              <input id="link-code" class="code-input" maxlength="8" spellcheck="false"
+                     placeholder="A1B2C3D4" aria-describedby="link-error" />
+            </label>
+            <button class="btn-primary" type="submit" id="link-submit">Link this computer</button>
+            <p class="error" id="link-error" role="alert" hidden></p>
+            <!--
+              Which backend this build talks to, shown rather than assumed.
+              A linking code is a row in one database, so a parent whose
+              dashboard is pointed at a different deployment hands over a
+              perfectly good code that this computer's server has never seen —
+              an eternal "not recognised" with no defect anywhere. Printing both
+              hostnames is the only way anyone finds that.
+            -->
+            <p class="fineprint">This computer talks to <span id="api-host">…</span></p>
+          </form>
+        </section>
+
+        <!-- My day -->
+        <section class="view" data-view="home">
+          <div class="hero">
+            <p class="eyebrow" id="home-eyebrow">Today</p>
+            <h1 id="home-greeting">My day</h1>
+          </div>
+
+          <div class="grid">
+            <div class="card stat">
+              <p class="stat-label">Screen time today</p>
+              <p class="stat-value" id="today-used">—</p>
+              <div class="meter"><div class="meter-fill" id="today-meter"></div></div>
+              <p class="stat-foot" id="today-foot">No daily limit set.</p>
+            </div>
+
+            <div class="card stat">
+              <p class="stat-label">Right now</p>
+              <p class="stat-value" id="now-state">Open</p>
+              <p class="stat-foot" id="now-foot">Everything on this computer is open.</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Paused right now</h2>
+            <ul class="list" id="blocked-list"></ul>
+            <p class="empty" id="blocked-empty" hidden>
+              Every app and website on this computer is open right now.
+            </p>
+          </div>
+        </section>
+
+        <!-- Messages -->
+        <section class="view" data-view="messages">
+          <div class="hero compact">
+            <h1>Messages</h1>
+            <p class="lead">Talk to your parent from this computer.</p>
+          </div>
+          <div class="thread" id="thread" aria-live="polite"></div>
+          <form id="message-form" class="composer" autocomplete="off">
+            <input id="message-text" class="input" placeholder="Write a message…" maxlength="1000" />
+            <button class="btn-primary" type="submit">Send</button>
+            <button class="btn-danger" type="button" id="sos">SOS</button>
+          </form>
+          <p class="error" id="message-error" role="alert" hidden></p>
+        </section>
+
+        <!-- This computer -->
+        <section class="view" data-view="settings">
+          <div class="hero compact">
+            <h1>This computer</h1>
+            <!--
+              The premise the mobile app settled on and this keeps: a child is
+              entitled to know what is being kept about them. Every monitor,
+              every blocked app and every blocked site is listed.
+            -->
+            <p class="lead">Everything Parentix is doing here, and everything it cannot do.</p>
+          </div>
+
+          <div class="card">
+            <h2>What is being monitored</h2>
+            <ul class="list" id="monitor-list"></ul>
+          </div>
+
+          <div class="card" id="permissions-card">
+            <h2>Permissions</h2>
+            <ul class="list" id="permission-list"></ul>
+          </div>
+
+          <div class="card">
+            <h2>Approved contacts</h2>
+            <ul class="list" id="contact-list"></ul>
+            <p class="empty" id="contact-empty" hidden>
+              When your parent adds someone here, you will see them on this list.
+            </p>
+          </div>
+
+          <div class="card">
+            <h2>This device</h2>
+            <dl class="facts" id="device-facts"></dl>
+            <label class="toggle">
+              <input type="checkbox" id="autostart" />
+              <span>Start Parentix when I sign in</span>
+            </label>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

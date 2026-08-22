@@ -1,22 +1,28 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   children as childrenApi, reports as reportsApi,
-  alertLabel, lastLocalDays, Avatar, EmptyState, Icon, StatsCard, useSocket,
+  alertLabel, lastLocalDays, formatMinutes, Avatar, EmptyState, Icon, StatsCard, useSocket,
 } from '@parentix/shared';
 import PageIntro from '../components/PageIntro';
-import { PRIMARY } from '../brand';
+
+/**
+ * The only thing on this screen that needs a charting library, kept out of the
+ * page's own chunk.
+ *
+ * Recharts is 390 kB, and importing it here made every other card on the
+ * dashboard — the four tiles, the child list, the alert feed — wait for it
+ * before any of them could paint. This is the screen a parent lands on after
+ * signing in, and none of what they came for is the bar chart.
+ */
+const WeeklyUsageChart = lazy(() => import('../components/WeeklyUsageChart'));
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-const SEVERITY_DOT = { high: 'bg-danger', medium: 'bg-warning', low: 'bg-success' };
+/** Held by the placeholder too, so the card does not jump as the chart lands. */
+const CHART_HEIGHT = 180;
 
-function formatMinutes(total) {
-  const h = Math.floor(total / 60);
-  const m = total % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
+const SEVERITY_DOT = { high: 'bg-danger', medium: 'bg-warning', low: 'bg-success' };
 
 export default function Dashboard() {
   const [childList, setChildList] = useState([]);
@@ -28,26 +34,38 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  /**
+   * Two requests, side by side, and neither waits on the other.
+   *
+   * This screen used to list the children, then fan out one `/reports/:id/weekly`
+   * call per child and sum the results here — so the chart could not begin
+   * loading until the child list had arrived, and a family with four children
+   * paid five serial round trips to draw seven bars. `/reports/weekly` returns
+   * the same sum from one query, and it does not need the child list to do it,
+   * so both requests now leave together and the screen renders when the slower
+   * one lands rather than after a chain of them.
+   */
   useEffect(() => {
-    childrenApi.list()
-      .then(async (c) => {
-        const children = Array.isArray(c.data) ? c.data : [];
+    Promise.all([
+      childrenApi.list(),
+      // The chart is the least important thing here: a parent opens this screen
+      // for the alert count and the child list. So a failed report is absorbed
+      // rather than failing the whole screen, and the week draws flat — which is
+      // exactly what happened before, when each of the per-child calls carried
+      // its own `.catch(() => null)`.
+      reportsApi.familyWeekly().catch(() => null),
+    ])
+      .then(([childResponse, weeklyResponse]) => {
+        const children = Array.isArray(childResponse.data) ? childResponse.data : [];
         setChildList(children);
 
+        // An account with no children has no week to draw. Left as an empty
+        // array so the card below keeps showing its empty state rather than
+        // seven bars of zero, which reads as "nothing happened this week"
+        // instead of "there is nobody to report on yet".
         if (children.length === 0) return;
 
-        const weeklyReports = await Promise.all(
-          children.map((child) => reportsApi.weekly(child.id).catch(() => null))
-        );
-
-        const minutesByDay = {};
-        weeklyReports.forEach((r) => {
-          const breakdown = r?.data?.dailyBreakdown;
-          if (!breakdown) return;
-          Object.entries(breakdown).forEach(([day, minutes]) => {
-            minutesByDay[day] = (minutesByDay[day] || 0) + minutes;
-          });
-        });
+        const minutesByDay = weeklyResponse?.data?.dailyBreakdown || {};
 
         /**
          * Keyed on the local calendar day, not the UTC one.
@@ -131,25 +149,21 @@ export default function Dashboard() {
               description="Usage appears once a linked device starts reporting."
             />
           ) : (
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={weeklyUsage} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} />
-                <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} width={44} />
-                <Tooltip
-                  cursor={{ fill: '#f3f4f6' }}
-                  formatter={(v) => [`${v} min`, 'Screen time']}
-                  contentStyle={{ borderRadius: 12, border: '1px solid #f3f4f6', fontSize: 12 }}
-                />
-                <Bar dataKey="minutes" fill={PRIMARY} radius={[6, 6, 0, 0]} maxBarSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
+            // The fallback is empty rather than a spinner, and exactly the
+            // chart's height: this card sits above the child list, so anything
+            // that changed size here would shove the rest of the page down as
+            // the chunk lands. An empty box for a fraction of a second reads as
+            // a chart still drawing; a jumping page does not.
+            <Suspense fallback={<div style={{ height: CHART_HEIGHT }} aria-hidden="true" />}>
+              <WeeklyUsageChart data={weeklyUsage} height={CHART_HEIGHT} />
+            </Suspense>
           )}
         </div>
 
         <div className="card">
           <div className="flex items-center justify-between gap-3 mb-4">
             <h2 className="section-title">Children</h2>
-            <Link to="/dashboard/children" className="text-sm font-medium text-primary-600 hover:underline">
+            <Link to="/dashboard/children" className="link-action">
               Manage
             </Link>
           </div>
@@ -189,7 +203,7 @@ export default function Dashboard() {
       <div className="card">
         <div className="flex items-center justify-between gap-3 mb-4">
           <h2 className="section-title">Recent alerts</h2>
-          <Link to="/dashboard/alerts" className="text-sm font-medium text-primary-600 hover:underline">
+          <Link to="/dashboard/alerts" className="link-action">
             View all
           </Link>
         </div>

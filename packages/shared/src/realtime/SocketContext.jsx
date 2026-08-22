@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { io } from 'socket.io-client';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getToken, errorMessage } from '../api/client.js';
 import { alerts as alertsApi } from '../api/endpoints.js';
@@ -63,36 +62,74 @@ export const SocketProvider = ({ children }) => {
     };
   }, [user, alertReloads]);
 
+  /**
+   * The connection, and the library that makes it.
+   *
+   * socket.io-client is imported here rather than at the top of the file, and
+   * that placement is the point: it is ~40 kB of transports, parsers and
+   * reconnection logic, and a static import put all of it in the Family App's
+   * entry chunk — downloaded and parsed by every visitor arriving at /login, to
+   * open a connection that cannot exist until they have signed in. This effect
+   * is the only code in the package that touches it, and it returns early
+   * without a session, so the fetch happens exactly when the socket is about to
+   * be opened and never before. (The Admin Dashboard imports the barrel this
+   * provider sits in but has no realtime feature at all; tree-shaking now drops
+   * the module there entirely.)
+   *
+   * Everything after the `await` is guarded by `cancelled`, because an effect
+   * can be torn down while the chunk is still in flight — a sign-out, or React
+   * Strict Mode's double-invoke in development. Without that guard the late
+   * arrival would open a socket nothing holds a reference to and never close it.
+   */
   useEffect(() => {
     if (!user) return undefined;
     const token = getToken();
     if (!token) return undefined;
 
-    // The server derives identity from this JWT and ignores any client-supplied
-    // ids, so room membership cannot be spoofed from the browser.
-    const s = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-    });
+    let cancelled = false;
+    let socketInstance = null;
 
-    socketRef.current = s;
-    setSocket(s);
+    import('socket.io-client')
+      .then(({ io }) => {
+        if (cancelled) return;
 
-    s.on('connect', () => setConnected(true));
-    s.on('disconnect', () => setConnected(false));
-    s.on('connect_error', (err) => console.warn('[socket] connect error:', err.message));
-    // Guard against a duplicate: a reconnect can re-deliver an alert the initial
-    // load already put in the list.
-    s.on('alert:new', (alert) =>
-      setAlerts((prev) => (prev.some((a) => a.id === alert.id) ? prev : [alert, ...prev]))
-    );
-    s.on('chat:message', (msg) => setMessages((prev) => [...prev, msg]));
+        // The server derives identity from this JWT and ignores any
+        // client-supplied ids, so room membership cannot be spoofed from the
+        // browser.
+        const s = io(SOCKET_URL, {
+          auth: { token },
+          transports: ['websocket', 'polling'],
+          reconnectionAttempts: 10,
+          reconnectionDelay: 1000,
+        });
+
+        socketInstance = s;
+        socketRef.current = s;
+        setSocket(s);
+
+        s.on('connect', () => setConnected(true));
+        s.on('disconnect', () => setConnected(false));
+        s.on('connect_error', (err) => console.warn('[socket] connect error:', err.message));
+        // Guard against a duplicate: a reconnect can re-deliver an alert the
+        // initial load already put in the list.
+        s.on('alert:new', (alert) =>
+          setAlerts((prev) => (prev.some((a) => a.id === alert.id) ? prev : [alert, ...prev]))
+        );
+        s.on('chat:message', (msg) => setMessages((prev) => [...prev, msg]));
+      })
+      .catch((err) => {
+        // A chunk that will not load is a broken deploy, not a dead session, so
+        // it must not sign anyone out. The alert history above is fetched over
+        // HTTP and still renders; only live delivery is lost.
+        if (!cancelled) console.warn('[socket] could not load the realtime client:', err.message);
+      });
 
     return () => {
-      s.removeAllListeners();
-      s.disconnect();
+      cancelled = true;
+      if (socketInstance) {
+        socketInstance.removeAllListeners();
+        socketInstance.disconnect();
+      }
       socketRef.current = null;
       setSocket(null);
       setConnected(false);
@@ -127,16 +164,52 @@ export const SocketProvider = ({ children }) => {
     }
   }, [alerts]);
 
+  /**
+   * Deleting lives here for the same reason marking read does: this list is also
+   * the header bell's list. A page that removed a row from its own copy would
+   * leave the bell counting an alert nobody can reach any more.
+   *
+   * Optimistic, and put back on failure — but note the asymmetry with marking
+   * read. A row that reappears is a visible, correctable surprise; a row that
+   * vanished from the screen while still existing on the server is one a parent
+   * has no way to notice at all. So the restore matters more here, and the
+   * caller is given the error to show rather than it being swallowed.
+   */
+  const deleteAlert = useCallback(async (id) => {
+    const previous = alerts;
+    setAlerts((prev) => prev.filter((a) => a.id !== id));
+    try {
+      await alertsApi.remove(id);
+    } catch (err) {
+      setAlerts(previous);
+      throw err;
+    }
+  }, [alerts]);
+
+  /**
+   * Clear in bulk, narrowed by the same filter the screen is showing.
+   *
+   * Not optimistic: the server decides what matched, and the count it returns is
+   * the honest answer — this list holds at most 50 rows and the account may own
+   * many more, so guessing from what is loaded would under-report every time.
+   * The reload is what makes the bell agree.
+   */
+  const clearAlerts = useCallback(async (params) => {
+    const { data } = await alertsApi.clear(params);
+    reloadAlerts();
+    return data?.deleted ?? 0;
+  }, [reloadAlerts]);
+
   const value = useMemo(
     () => ({
       socket, connected, emit,
       alerts, alertsLoading, alertsError, reloadAlerts,
-      setAlerts, markAlertRead, markAllAlertsRead,
+      setAlerts, markAlertRead, markAllAlertsRead, deleteAlert, clearAlerts,
       messages, setMessages,
     }),
     [
       socket, connected, emit, alerts, alertsLoading, alertsError, reloadAlerts,
-      markAlertRead, markAllAlertsRead, messages,
+      markAlertRead, markAllAlertsRead, deleteAlert, clearAlerts, messages,
     ]
   );
 

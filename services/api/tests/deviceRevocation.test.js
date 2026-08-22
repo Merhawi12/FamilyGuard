@@ -10,7 +10,7 @@
 const request = require('supertest');
 const { io: Client } = require('socket.io-client');
 const { app, httpServer, io } = require('../src/app');
-const { Device } = require('../src/models');
+const { Device, PushToken } = require('../src/models');
 const { createUser, tokenFor, createChild, createDevice, deviceToken } = require('./helpers');
 
 let baseUrl;
@@ -296,5 +296,96 @@ describe('A child device is not in the family broadcast room', () => {
       .send({ text: 'dinner time' }).expect(201);
 
     expect((await gotMessage).text).toBe('dinner time');
+  });
+});
+
+/**
+ * The third step of a revocation, which two of the three callers used to skip.
+ *
+ * A push token is a bearer credential: whoever holds it can put a notification
+ * on that handset. Removing a device and removing a child both cut the socket
+ * and left the token registered and active, indefinitely — while
+ * `accountErasure.js` destroyed exactly the same rows. Nothing was ever
+ * delivered to a removed device, because `sendToChild` joins through
+ * `Device.isActive`; that one filter, in one function, a long way from either
+ * removal, was the entire defence.
+ *
+ * These assert the rows, not the delivery. Delivery is already guarded, and a
+ * test that only checked "nothing was sent" would keep passing on the day
+ * somebody adds a second way to reach a child device.
+ */
+describe('Revoking a device retires its push token', () => {
+  const registerPush = (device, token) =>
+    request(app)
+      .post('/api/devices/me/push-token')
+      .set('Authorization', `Bearer ${deviceToken(device)}`)
+      .send({ token, label: 'Pixel 8' })
+      .expect(201);
+
+  it('destroys it when the parent removes the device', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+    const device = await createDevice(child.id, { isLinked: true });
+    await registerPush(device, 'ExponentPushToken[remove-device]');
+    expect(await PushToken.count({ where: { deviceId: device.id } })).toBe(1);
+
+    await request(app)
+      .delete(`/api/devices/${device.id}`)
+      .set('Authorization', `Bearer ${tokenFor(parent)}`)
+      .expect(200);
+
+    expect(await PushToken.count({ where: { deviceId: device.id } })).toBe(0);
+  });
+
+  it('destroys it when the parent removes the child', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+    const device = await createDevice(child.id, { isLinked: true });
+    await registerPush(device, 'ExponentPushToken[remove-child]');
+
+    await request(app)
+      .delete(`/api/children/${child.id}`)
+      .set('Authorization', `Bearer ${tokenFor(parent)}`)
+      .expect(200);
+
+    expect(await PushToken.count({ where: { deviceId: device.id } })).toBe(0);
+  });
+
+  /* A household is one account with several handsets on it. Retiring one must
+     not silence the others, which is the way an over-broad `destroy` would
+     fail — and it would fail quietly, as missing notifications always do. */
+  it('leaves the family\'s other devices registered', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+    const going = await createDevice(child.id, { isLinked: true });
+    const staying = await createDevice(child.id, { isLinked: true });
+    await registerPush(going, 'ExponentPushToken[going]');
+    await registerPush(staying, 'ExponentPushToken[staying]');
+
+    await request(app)
+      .delete(`/api/devices/${going.id}`)
+      .set('Authorization', `Bearer ${tokenFor(parent)}`)
+      .expect(200);
+
+    expect(await PushToken.count({ where: { deviceId: going.id } })).toBe(0);
+    expect(await PushToken.count({ where: { deviceId: staying.id, isActive: true } })).toBe(1);
+  });
+
+  /* The column `confirmLink` accepts from a client. Neither shipping agent sends
+     it, but it can hold a token, and a removal that leaves any credential behind
+     is not a removal. */
+  it('clears the token column on the device row itself', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+    const device = await createDevice(child.id, { isLinked: true, pushToken: 'legacy-token' });
+
+    await request(app)
+      .delete(`/api/devices/${device.id}`)
+      .set('Authorization', `Bearer ${tokenFor(parent)}`)
+      .expect(200);
+
+    const row = await Device.findByPk(device.id);
+    expect(row.isActive).toBe(false);
+    expect(row.pushToken).toBeNull();
   });
 });

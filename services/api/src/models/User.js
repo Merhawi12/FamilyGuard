@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const { normalizeEmail } = require('../utils/normalizeEmail');
 const { normalizePhone } = require('../utils/normalizePhone');
 const { hashCode } = require('../utils/otp');
+const { encrypt, decrypt } = require('../utils/crypto');
 
 /**
  * A one-time code is stored the way a password is: never as the thing itself.
@@ -81,6 +82,25 @@ const User = sequelize.define('User', {
   trialEndsAt: { type: DataTypes.DATE },
   isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
   mfaEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+  /**
+   * The TOTP seed, encrypted at rest — see the hooks at the foot of this file.
+   *
+   * It sat here in plain base32, which made it the last credential on the
+   * platform that a database read handed over whole. Everything beside it had
+   * already been dealt with: passwords are bcrypt, one-time codes are a keyed
+   * HMAC, push tokens are AES-GCM, browsing URLs are AES-GCM. A TOTP seed is
+   * worse than any of them, because it does not expire and it does not change —
+   * whoever reads it can mint a valid second factor for that account for as long
+   * as MFA stays on, and nothing the account holder can see would say so.
+   *
+   * That also inverts what MFA is for here. Staff accounts are the ones told to
+   * turn it on, so the accounts whose seeds were readable were exactly the
+   * accounts that open the customer directory.
+   *
+   * `mfaBackupCodes` needs no such treatment: those are already bcrypt hashes
+   * (see mfaController.enable), which is the right storage for a secret that is
+   * only ever compared.
+   */
   mfaSecret: { type: DataTypes.STRING },
   mfaBackupCodes: { type: DataTypes.TEXT },
   emailVerified: { type: DataTypes.BOOLEAN, defaultValue: false },
@@ -99,6 +119,12 @@ const User = sequelize.define('User', {
    */
   passwordResetCode: codeColumn('passwordResetCode'),
   passwordResetCodeExpires: { type: DataTypes.DATE },
+  /**
+   * A keyed digest of the ticket, never the ticket. Hashed at the two call sites
+   * rather than in a setter here, because the ticket is already 64 hex
+   * characters and `hashCode`'s already-hashed passthrough would mistake it for
+   * its own output and store it verbatim — see `otp.hashTicket`.
+   */
   passwordResetToken: { type: DataTypes.STRING },
   passwordResetExpires: { type: DataTypes.DATE },
   /**
@@ -152,6 +178,61 @@ User.prototype.comparePassword = async function (plain) {
 User.beforeSave(async (user) => {
   if (user.changed('passwordHash') && user.passwordHash) {
     user.passwordHash = await bcrypt.hash(user.passwordHash, 12);
+  }
+});
+
+/* ── The TOTP seed, encrypted at rest ─────────────────────────────────────────
+ *
+ * Hooks rather than a getter/setter pair, mirroring `models/PushToken.js`, and
+ * for the same reason: a getter that decrypted on every read would also run
+ * against rows Sequelize builds with `raw: true` and against attribute-limited
+ * selects that never fetched the column, and the failure would be a throw deep
+ * inside a query rather than anything a caller could see.
+ *
+ * `decrypt` returns a value that carries no `:` unchanged, so a row written
+ * before this existed still reads back as its plain base32 seed and keeps
+ * working. Migration 0017 converts them; this is what keeps the two orderings
+ * safe in between.
+ */
+const ENCRYPTED = Symbol('encryptedMfaSecret');
+
+User.beforeSave((user) => {
+  if (!user.mfaSecret) return;
+  /**
+   * The double-encryption trap PushToken documents, which is not hypothetical:
+   * `afterFind` assigns the decrypted seed, which marks the attribute changed,
+   * so an unrelated `user.update({ lastLoginAt })` on a loaded instance saves
+   * `mfaSecret` too. Encrypting unconditionally is correct there — plaintext in,
+   * ciphertext out — but a second pass over the same instance would encrypt the
+   * ciphertext, and the seed would then be unrecoverable and every subsequent
+   * code wrong, with MFA the only way into the account.
+   */
+  if (user[ENCRYPTED] === user.mfaSecret) return;
+  user.mfaSecret = encrypt(user.mfaSecret);
+  user[ENCRYPTED] = user.mfaSecret;
+});
+
+User.afterFind((results) => {
+  if (!results) return;
+  const rows = Array.isArray(results) ? results : [results];
+  for (const row of rows) {
+    // `undefined` means the column was not selected — most reads of this table
+    // ask for a handful of attributes and must not be disturbed.
+    if (!row || typeof row.getDataValue !== 'function' || !row.mfaSecret) continue;
+    try {
+      row.mfaSecret = decrypt(row.mfaSecret);
+    } catch {
+      /**
+       * A seed this deployment's key cannot open — a restored dump from another
+       * environment, or a key that was rotated without re-wrapping. Left as it
+       * is rather than thrown: this hook runs on `authenticate`'s user lookup,
+       * so a throw would take down every authenticated request on the service
+       * over one unreadable row. `isValidTotp` answers false for a seed that
+       * does not verify, which fails the sign-in it should fail and leaves the
+       * rest of the platform up.
+       */
+    }
+    row[ENCRYPTED] = undefined;
   }
 });
 

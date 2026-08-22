@@ -3,6 +3,7 @@ const { sequelize } = require('../config/db');
 const { Device, Child, User, AppRule, WebsiteRule, ScreenTimeRule } = require('../models');
 const { parsePagination } = require('../utils/pagination');
 const { likeOperator } = require('../utils/queryOperators');
+const { countGrouped } = require('../utils/aggregate');
 
 /**
  * The console's view of the device fleet — every linked phone, tablet and laptop
@@ -70,24 +71,30 @@ const policiesFor = async (childIds) => {
  */
 const fleetSummary = async (onlineSince) => {
   const active = { isActive: true };
-  const [total, online, pending, syncedRecently, platformRows] = await Promise.all([
+  const [total, online, pending, syncedRecently, platformCounts] = await Promise.all([
     Device.count({ where: active }),
     Device.count({ where: { ...active, isLinked: true, lastSeen: { [Op.gte]: onlineSince } } }),
     Device.count({ where: { ...active, isLinked: false } }),
     Device.count({
       where: { ...active, isLinked: true, lastSeen: { [Op.gte]: new Date(Date.now() - SYNCED_WINDOW_MS) } },
     }),
-    Device.findAll({ where: active, attributes: ['type'] }),
+    // Grouped in the database. This used to select every active device in the
+    // fleet with its `type` projected and count the four platforms with
+    // `filter().length` — a full table scan whose cost grows with the customer
+    // base every time an operator opens this screen, to produce four integers.
+    countGrouped(Device, 'type', active),
   ]);
 
   const linked = total - pending;
   const byPlatform = PLATFORMS.map((platform) => ({
     platform,
-    count: platformRows.filter((d) => d.type === platform).length,
+    count: platformCounts.get(platform) || 0,
   }));
   // Anything the apps do not offer still has to be counted somewhere, or the
-  // breakdown silently adds up to less than the fleet.
-  const other = platformRows.length - byPlatform.reduce((sum, p) => sum + p.count, 0);
+  // breakdown silently adds up to less than the fleet. Derived from `total`
+  // rather than from the sum of the grouped rows so a NULL `type` — which forms
+  // its own group and matches no platform — is still counted here.
+  const other = total - byPlatform.reduce((sum, p) => sum + p.count, 0);
   if (other > 0) byPlatform.push({ platform: 'other', count: other });
 
   return {
@@ -172,8 +179,12 @@ const listDevices = async (req, res, next) => {
       subQuery: false,
     });
 
-    const policies = await policiesFor([...new Set(rows.map((d) => d.childId))]);
-    const summary = await fleetSummary(onlineSince);
+    // Independent of each other, so they overlap rather than queue: the summary
+    // is fleet-wide and the policies are for this page's children only.
+    const [policies, summary] = await Promise.all([
+      policiesFor([...new Set(rows.map((d) => d.childId))]),
+      fleetSummary(onlineSince),
+    ]);
 
     res.json({
       count,

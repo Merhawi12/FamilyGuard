@@ -1,0 +1,71 @@
+/*
+ * The lock screen.
+ *
+ * Deep teal rather than the danger red the palette also offers: reaching a
+ * bedtime is not a child doing something wrong, and a full-screen red window
+ * that appears without warning reads as an accusation. Red stays reserved for
+ * the SOS, which is the one thing on this screen the child chose.
+ *
+ * The tokens are written in by `lock.js` from `../theme.js`, so this file has no
+ * hexes of its own either.
+ */
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: var(--teal-900);
+  color: var(--teal-100);
+  /* Nothing on this window is selectable, draggable, or a right-click away from
+     a context menu the child could use to reload it into something else. */
+  user-select: none;
+  cursor: default;
+  overflow: hidden;
+}
+
+.lock {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-lg);
+  padding: var(--space-xxl);
+  text-align: center;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 12px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
+  color: var(--teal-400);
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(32px, 6vw, 64px);
+  font-weight: 800;
+  letter-spacing: -1.2px;
+  color: var(--white);
+}
+
+.lead { margin: 0; max-width: 44ch; font-size: clamp(15px, 1.6vw, 19px); line-height: 1.5; color: var(--teal-200); }
+
+.actions { display: flex; gap: var(--space-lg); margin-top: var(--space-xl); flex-wrap: wrap; justify-content: center; }
+
+.btn-primary, .btn-danger {
+  min-height: 52px;
+  padding: 0 var(--space-xxl);
+  border: 0;
+  border-radius: var(--radius-pill);
+  font: inherit; font-size: 15px; font-weight: 700;
+  cursor: pointer;
+}
+.btn-primary { background: var(--teal-400); color: var(--teal-900); }
+.btn-primary:hover { background: var(--teal-300); }
+.btn-primary:disabled { background: var(--teal-800); color: var(--teal-300); cursor: not-allowed; }
+.btn-danger { background: var(--danger); color: var(--white); }
+
+.sent { margin: 0; font-size: 14px; font-weight: 600; color: var(--teal-300); }
+.clock { margin: var(--space-xxl) 0 0; font-size: 13px; color: var(--teal-500); }

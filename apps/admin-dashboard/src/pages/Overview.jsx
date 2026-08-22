@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import {
-  admin as adminApi, errorMessage, EmptyState, Icon, StatsCard, Toggle,
+  admin as adminApi, errorMessage, timeAgo, EmptyState, Icon, StatsCard, Toggle,
   useAuth, hasPermission, PERMISSIONS,
 } from '@parentix/shared';
 import DataTable from '../components/DataTable';
@@ -53,19 +53,6 @@ const actionText = (action) => String(action || '')
   .replace('.', ' · ')
   .replace(/_/g, ' ')
   .replace(/^./, (c) => c.toUpperCase());
-
-const timeAgo = (value) => {
-  const then = new Date(value ?? NaN).getTime();
-  if (Number.isNaN(then)) return '';
-  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (seconds < 60) return 'just now';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
-  const days = Math.round(hours / 24);
-  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
-};
 
 /**
  * The banner for the newest critical entry.

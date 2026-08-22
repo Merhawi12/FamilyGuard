@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { admin as adminApi, errorMessage, EmptyState, Icon } from '@parentix/shared';
+import { admin as adminApi, errorMessage, timeAgo, EmptyState, Icon } from '@parentix/shared';
 import DataTable from '../components/DataTable';
 import StatTile from '../components/StatTile';
 
@@ -49,16 +49,8 @@ const REPORTING = [
   { key: 'pending', label: 'Never connected', bar: 'bg-gray-300', dot: 'bg-gray-300' },
 ];
 
-const timeAgo = (value) => {
-  if (!value) return 'never';
-  const minutes = Math.round((Date.now() - new Date(value)) / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} hr${hours === 1 ? '' : 's'} ago`;
-  const days = Math.round(hours / 24);
-  return `${days} day${days === 1 ? '' : 's'} ago`;
-};
+/** A device that has never checked in says so, rather than showing nothing. */
+const lastSeen = (value) => timeAgo(value, { absent: 'never' });
 
 /**
  * Date and time to the minute.
@@ -290,7 +282,7 @@ function TopologyCard({ devices, summary, selectedId, onSelect }) {
                       pointer target, so the hit area is its own circle. */}
                   <circle cx={x} cy={y} r={Math.max(r + 6, 11)} fill="transparent" />
                   <circle cx={x} cy={y} r={r} className={node.fill} />
-                  <title>{`${device.name} — ${status.label}, last sync ${timeAgo(device.lastSeen)}`}</title>
+                  <title>{`${device.name} — ${status.label}, last sync ${lastSeen(device.lastSeen)}`}</title>
                 </g>
               );
             })}
@@ -400,7 +392,7 @@ function DetailPanel({ device, panelRef }) {
           {device.owner && !device.owner.isActive && <span className="badge-red ml-1">blocked</span>}
         </Field>
         <Field label="Last sync">
-          <span className="block">{timeAgo(device.lastSeen)}</span>
+          <span className="block">{lastSeen(device.lastSeen)}</span>
           <span className="block text-xs text-gray-400">{compactDate(device.lastSeen)}</span>
         </Field>
         <Field label="Enrolled">
@@ -609,7 +601,7 @@ export default function AdminDevices() {
               <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
               {status.label}
             </span>
-            <span className="block text-xs text-gray-400 mt-1">{timeAgo(d.lastSeen)}</span>
+            <span className="block text-xs text-gray-400 mt-1">{lastSeen(d.lastSeen)}</span>
           </span>
         );
       },

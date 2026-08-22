@@ -3,6 +3,7 @@ const { GoogleAuth } = require('google-auth-library');
 const { Op } = require('sequelize');
 const { PushToken, Device } = require('../models');
 const { blindIndex } = require('../utils/crypto');
+const { assertPublicHttpsUrl, publicHttpsProblem, guardedAgent } = require('./outboundGuard');
 const { env } = require('../config/env');
 const logger = require('./logger');
 
@@ -105,8 +106,25 @@ const sendWeb = async (row, payload) => {
     return { ok: false, error: 'invalid subscription' };
   }
 
+  /**
+   * Re-checked here, not only at registration.
+   *
+   * `registerToken` refuses a non-public endpoint, but rows predating that check
+   * are already in the table, and a restored dump brings its own. This is the
+   * check that governs whether a request actually leaves, so it is the one that
+   * has to be unconditional. Permanent, because an endpoint does not become
+   * public on a retry — the row retires rather than being attempted hourly.
+   */
+  const problem = publicHttpsProblem(subscription.endpoint);
+  if (problem) {
+    await recordFailure(row, `refused to send: ${problem}`, true);
+    return { ok: false, error: 'endpoint not allowed' };
+  }
+
   try {
-    await webpush.sendNotification(subscription, JSON.stringify(payload));
+    // `guardedAgent` re-checks the address DNS actually returns, which is the
+    // only place a public name pointing at a private address can be caught.
+    await webpush.sendNotification(subscription, JSON.stringify(payload), { agent: guardedAgent });
     await recordSuccess(row);
     return { ok: true };
   } catch (err) {
@@ -357,6 +375,12 @@ const registerToken = async ({ token, platform, userId = null, deviceId = null, 
     if (!parsed?.endpoint || !parsed?.keys?.p256dh || !parsed?.keys?.auth) {
       throw Object.assign(new Error('Not a valid Web Push subscription'), { status: 400 });
     }
+    /**
+     * The endpoint is a URL this server will POST to, repeatedly, on the
+     * caller's schedule — so it is refused here rather than stored and
+     * discovered later. See utils/outboundGuard.js for what this stops.
+     */
+    assertPublicHttpsUrl(parsed.endpoint, 'Push endpoint');
   }
 
   const existing = await PushToken.findOne({ where: { tokenHash: blindIndex(value) } });

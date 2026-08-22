@@ -54,6 +54,18 @@ export const NAV_SECTIONS = [
 export const NAV_ITEMS = NAV_SECTIONS.flatMap((section) => section.items);
 
 /**
+ * Screens that live inside the dashboard but are not destinations in the nav.
+ *
+ * Support is reached from Settings, not from the sidebar — a parent looks for it
+ * when something is wrong, not while browsing. It still needs a title, because
+ * `titleForPath` falls back to "Parentix" and a page headed with the product
+ * name tells the reader nothing about where they are.
+ */
+export const EXTRA_TITLES = [
+  { to: '/dashboard/support', label: 'Contact support' },
+];
+
+/**
  * The phone tab bar. Four destinations plus the drawer.
  *
  * Everything else is one tap further in, under "More" — a tab bar that tries to
@@ -75,7 +87,7 @@ export const TAB_ITEMS = [
  */
 export const titleForPath = (pathname) => {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
-  const match = NAV_ITEMS
+  const match = [...NAV_ITEMS, ...EXTRA_TITLES]
     .filter((item) => (item.end ? path === item.to : path.startsWith(item.to)))
     // The longest matching prefix is the most specific route.
     .sort((a, b) => b.to.length - a.to.length)[0];

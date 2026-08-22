@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   useAuth, payments, auth as authApi, errorMessage, Icon, PAID_PLAN_KEYS, GoogleSignInButton,
 } from '@parentix/shared';
@@ -792,7 +792,7 @@ export default function Login() {
                     setError('');
                     setNotice('');
                   }}
-                  className="inline-flex items-center min-h-[36px] px-1 text-sm font-medium text-primary-600 hover:underline"
+                  className="link-action"
                 >
                   Forgot Password?
                 </button>
@@ -808,11 +808,15 @@ export default function Login() {
                   className="mt-0.5 w-5 h-5 shrink-0 rounded border-gray-300 text-primary-600
                              focus:ring-2 focus:ring-primary-500 focus:ring-offset-0 cursor-pointer"
                 />
+                {/* Links, not anchors. An anchor here is a full page load, so a
+                    parent part-way through signing up who wanted to read what
+                    they were agreeing to came back to an empty form — including
+                    the box they had just ticked. */}
                 <span>
                   I agree to the{' '}
-                  <a href="/terms" className="text-primary-600 font-medium hover:underline">Terms &amp; Conditions</a>
+                  <Link to="/terms" className="text-primary-600 font-medium hover:underline">Terms &amp; Conditions</Link>
                   {' '}and{' '}
-                  <a href="/privacy-policy" className="text-primary-600 font-medium hover:underline">Privacy Policy</a>.
+                  <Link to="/privacy-policy" className="text-primary-600 font-medium hover:underline">Privacy Policy</Link>.
                 </span>
               </label>
             )}
@@ -854,7 +858,7 @@ export default function Login() {
                 setError('');
                 setNotice('');
               }}
-              className="text-primary-600 font-semibold hover:underline"
+              className="inline-flex items-center min-h-[44px] px-1 text-primary-600 font-semibold hover:underline"
             >
               {isRegister ? 'Log In' : 'Sign Up'}
             </button>

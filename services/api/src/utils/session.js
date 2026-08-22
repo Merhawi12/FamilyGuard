@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { Op } = require('sequelize');
-const { Session, Child } = require('../models');
+const { Session, Child, PushToken } = require('../models');
 const { env } = require('../config/env');
 const { DEVICE_UNLINKED } = require('./deviceAccess');
 
@@ -53,6 +53,35 @@ const disconnectDeviceSockets = (io, deviceId) => {
   if (!io) return;
   io.to(`device:${deviceId}`).emit('device:unlinked', { deviceId, code: DEVICE_UNLINKED });
   io.in(`device:${deviceId}`).disconnectSockets(true);
+};
+
+/**
+ * Everything that has to happen when a device stops belonging to a family.
+ *
+ * Revoking a device was three steps in three places, and only one place did all
+ * three. Removing a device and removing a child both cut the socket and left the
+ * push token registered — a bearer credential for a handset the family had just
+ * asked to be rid of, kept indefinitely, while `accountErasure.js` two files away
+ * destroyed exactly the same rows. Nothing failed: `sendToChild` joins through
+ * `Device.isActive`, so no notification was ever delivered to a removed device.
+ * That single filter, in one function, a long way from either removal, was the
+ * whole of what stood between a retired credential and a live one.
+ *
+ * So the steps live together. A caller that revokes a device by hand is a caller
+ * that will one day be a step short.
+ *
+ * `accountErasure.js` deliberately does not use this: it destroys the Device row
+ * itself, in a transaction, alongside every other trace of the account, and its
+ * bulk `PushToken.destroy` has to be inside that transaction rather than beside
+ * it. It calls `disconnectDeviceSockets` directly, once the transaction has
+ * committed.
+ */
+const revokeDeviceAccess = async (io, deviceId) => {
+  disconnectDeviceSockets(io, deviceId);
+  // Destroyed rather than deactivated, which is how the two paths that already
+  // got this right treat it: the row is a credential, not a record worth
+  // keeping, and a device that comes back re-registers on its first run.
+  return PushToken.destroy({ where: { deviceId } });
 };
 
 /**
@@ -121,4 +150,5 @@ const revokeAllSessions = async (userId, io) => {
 module.exports = {
   createSession, revokeSession, revokeAllSessions, revokeOtherSessions,
   disconnectUserSockets, disconnectDeviceSockets, disconnectFamilySockets,
+  revokeDeviceAccess,
 };

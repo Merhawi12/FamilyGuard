@@ -48,7 +48,7 @@
     "google-auth-library": "^9.15.1",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
-    "nodemailer": "^8.0.10",
+    "nodemailer": "^9.0.5",
     "otplib": "^13.4.1",
     "pg": "^8.11.3",
     "pg-hstore": "^2.3.4",

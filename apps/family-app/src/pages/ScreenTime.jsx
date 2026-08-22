@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   children as childrenApi, screenTime as screenTimeApi,
-  errorMessage, EmptyState, Toggle,
+  errorMessage, EmptyState, Icon, Toggle,
 } from '@parentix/shared';
 import ChildTabs from '../components/ChildTabs';
+import DeviceScopeTabs from '../components/DeviceScopeTabs';
 import PageIntro from '../components/PageIntro';
 
 const DAYS = [
@@ -25,7 +26,17 @@ const formatLimit = (minutes) => {
 export default function ScreenTime() {
   const [childList, setChildList] = useState([]);
   const [selected, setSelected] = useState(null);
+  /**
+   * Which devices the rule on screen applies to: `null` for all of this child's,
+   * or one device id.
+   *
+   * `null` is the default and stays the default. A parent who never touches the
+   * device tabs writes exactly the rule this page has always written.
+   */
+  const [scope, setScope] = useState(null);
   const [rule, setRule] = useState(null);
+  // Device ids that already have their own rule, so the tabs can mark them.
+  const [overridden, setOverridden] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
@@ -38,23 +49,73 @@ export default function ScreenTime() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Changing child resets the scope: a device id from one child means nothing
+  // under another, and the API would refuse it.
+  useEffect(() => { setScope(null); }, [selected?.id]);
+
   useEffect(() => {
     if (!selected) return;
     setRule(null);
-    screenTimeApi.get(selected.id)
+    screenTimeApi.get(selected.id, scope)
       .then((r) => setRule(r.data))
       .catch(() => setError('Could not load the screen time rules for this child.'));
-  }, [selected]);
+  }, [selected, scope]);
+
+  /**
+   * Which of this child's devices already have an exception.
+   *
+   * Read by asking for each device's rule and seeing whether the answer carries
+   * its device id — `GET` creates the row on first look, so this cannot be a
+   * survey of what exists without also creating it. Instead it reads the rules
+   * the *devices* would get, which is the honest question anyway, and only for
+   * devices the parent can see.
+   */
+  useEffect(() => {
+    const devices = (selected?.devices || []).filter((d) => d.isLinked);
+    if (!selected || devices.length < 2) { setOverridden([]); return; }
+    let cancelled = false;
+    Promise.all(devices.map((d) => screenTimeApi.get(selected.id, d.id)
+      .then((r) => (r.data?.deviceId === d.id ? d.id : null))
+      .catch(() => null)))
+      .then((ids) => { if (!cancelled) setOverridden(ids.filter(Boolean)); });
+    return () => { cancelled = true; };
+  }, [selected, saved]);
+
+  const scopeDevice = (selected?.devices || []).find((d) => d.id === scope) || null;
 
   const save = async () => {
     setSaving(true);
     setError(''); setSaved('');
     try {
-      await screenTimeApi.update(selected.id, rule);
-      setSaved('Screen time rules saved.');
+      await screenTimeApi.update(selected.id, rule, scope);
+      setSaved(scope ? 'Rules saved for this device.' : 'Screen time rules saved.');
       setTimeout(() => setSaved(''), 3000);
     } catch (err) {
       setError(errorMessage(err, 'Could not save the screen time rules.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /**
+   * Drop this device's exception so it follows the child's rule again.
+   *
+   * Not the same as typing the child's numbers back in by hand, which leaves an
+   * exception that merely agrees today and stops tracking the child rule the
+   * moment the parent edits it — the difference nobody would notice until a
+   * limit change failed to reach one device.
+   */
+  const useChildRule = async () => {
+    if (!scope) return;
+    setSaving(true);
+    setError(''); setSaved('');
+    try {
+      await screenTimeApi.clearDeviceRule(selected.id, scope);
+      setScope(null);
+      setSaved('That device follows the shared rules again.');
+      setTimeout(() => setSaved(''), 3000);
+    } catch (err) {
+      setError(errorMessage(err, 'Could not remove that device rule.'));
     } finally {
       setSaving(false);
     }
@@ -87,10 +148,43 @@ export default function ScreenTime() {
 
       <ChildTabs items={childList} selectedId={selected?.id} onSelect={setSelected} />
 
+      <DeviceScopeTabs
+        devices={selected?.devices || []}
+        selectedId={scope}
+        onSelect={setScope}
+        overriddenIds={overridden}
+      />
+
       {!rule ? (
         <p className="text-sm text-gray-400 py-8">Loading rules…</p>
       ) : (
         <div className="space-y-4 max-w-2xl">
+          {/* Which rule is being edited, said in words rather than left to the
+              selected tab. A parent who set a limit on the wrong device would
+              otherwise only find out from the child. */}
+          {scope && (
+            <div className="card bg-amber-50 border-amber-200 flex items-start gap-3">
+              <span className="text-warning mt-0.5 shrink-0"><Icon name="lock" size={17} /></span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-900">
+                  Just for {scopeDevice?.name || 'this device'}
+                </p>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  {selected?.name}
+                  ’s other devices keep the shared rules.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={useChildRule}
+                disabled={saving}
+                className="btn-secondary btn-sm shrink-0 disabled:opacity-50"
+              >
+                Use shared rules
+              </button>
+            </div>
+          )}
+
           <div className="card">
             <div className="flex items-baseline justify-between gap-3 mb-4">
               <h2 className="section-title">Daily limit</h2>
@@ -105,7 +199,11 @@ export default function ScreenTime() {
               step={15}
               value={rule.dailyLimitMinutes}
               onChange={(e) => setRule({ ...rule, dailyLimitMinutes: parseInt(e.target.value, 10) })}
-              className="w-full h-6 cursor-pointer"
+              /* h-11 rather than h-6: the track is drawn the same, but the
+                 element itself is a 44px grab area. At 24px this was the
+                 hardest control in the app to catch with a thumb, and it is the
+                 one a parent adjusts most. */
+              className="w-full h-11 cursor-pointer"
               aria-label={`Daily limit for ${selected?.name}`}
             />
             <div className="flex justify-between text-xs text-gray-400 mt-1">

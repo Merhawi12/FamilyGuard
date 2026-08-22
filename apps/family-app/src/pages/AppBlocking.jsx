@@ -4,6 +4,7 @@ import {
   errorMessage, EmptyState, Icon, CONTENT_CATEGORIES, categoryLabel,
 } from '@parentix/shared';
 import ChildTabs from '../components/ChildTabs';
+import DeviceScopeTabs from '../components/DeviceScopeTabs';
 import PageIntro from '../components/PageIntro';
 
 const POPULAR_APPS = [
@@ -49,6 +50,17 @@ const EMPTY_APP_FORM = {
 export default function AppBlocking() {
   const [childList, setChildList] = useState([]);
   const [selected, setSelected] = useState(null);
+  /**
+   * Which devices a *new* rule applies to: `null` for all of this child's, or
+   * one device id.
+   *
+   * Only new rules. The lists below deliberately keep showing every rule
+   * whatever the scope — filtering them to the selected device would hide the
+   * child-wide rules that device is also obeying, and "why is Roblox still
+   * blocked on the laptop" is precisely the question this screen has to answer.
+   * Each row says which scope it belongs to instead.
+   */
+  const [scope, setScope] = useState(null);
   const [view, setView] = useState('apps'); // phone only; both columns show from lg
   const [appRules, setAppRules] = useState([]);
   const [webRules, setWebRules] = useState([]);
@@ -92,6 +104,10 @@ export default function AppBlocking() {
       });
   }, [selected]);
 
+  // A device id from one child means nothing under another, and the API refuses
+  // it — reset rather than send a request that cannot succeed.
+  useEffect(() => { setScope(null); }, [selected?.id]);
+
   // Every mutation went out unguarded; a rejected request became an unhandled
   // promise rejection and the parent saw nothing at all happen.
   const run = async (fn, fallback) => {
@@ -114,7 +130,7 @@ export default function AppBlocking() {
           ? { dailyLimitMinutes: parseInt(appForm.dailyLimitMinutes, 10) }
           : {}),
       };
-    const r = await blockingApi.addApp(selected.id, data);
+    const r = await blockingApi.addApp(selected.id, { ...data, deviceId: scope || undefined });
     setAppRules((prev) => [...prev, r.data]);
     if (!app) setAppForm(EMPTY_APP_FORM);
   }, 'Could not add that app rule.');
@@ -137,14 +153,16 @@ export default function AppBlocking() {
   const addWebsite = (e) => {
     e?.preventDefault();
     return run(async () => {
-      const r = await blockingApi.addWebsite(selected.id, { ...webForm, url: webForm.url.trim() });
+      const r = await blockingApi.addWebsite(selected.id, {
+        ...webForm, url: webForm.url.trim(), deviceId: scope || undefined,
+      });
       setWebRules((prev) => [...prev, r.data]);
       setWebForm({ url: '', category: 'custom', action: 'block' });
     }, 'Could not add that website rule.');
   };
 
   const addCategory = (category) => run(async () => {
-    const r = await blockingApi.addWebsite(selected.id, { category, action: 'block' });
+    const r = await blockingApi.addWebsite(selected.id, { category, action: 'block', deviceId: scope || undefined });
     setWebRules((prev) => [...prev, r.data]);
   }, 'Could not block that category.');
 
@@ -168,11 +186,31 @@ export default function AppBlocking() {
     );
   }
 
-  const ruleRow = (key, title, subtitle, action, onRemove) => (
+  const deviceName = (id) => (selected?.devices || []).find((d) => d.id === id)?.name;
+
+  /**
+   * `deviceId` is shown on the row rather than by filtering the list.
+   *
+   * The list has to keep showing everything: a rule narrowed to the laptop and a
+   * child-wide rule both reach the laptop, and a parent looking at "what applies
+   * here" needs to see both. Naming the device on the row that has one — and
+   * saying nothing on the rows that do not, since child-wide is the norm — keeps
+   * the exception visible without making the common case noisy.
+   */
+  const ruleRow = (key, title, subtitle, action, onRemove, deviceId) => (
     <div key={key} className="list-row bg-gray-50">
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-gray-900 truncate">{title}</p>
-        <p className="text-xs text-gray-500 truncate">{subtitle}</p>
+        <p className="text-xs text-gray-500 truncate">
+          {subtitle}
+          {deviceId && (
+            <span className="text-warning font-medium">
+              {' · '}
+              {deviceName(deviceId) || 'One device'}
+              {' only'}
+            </span>
+          )}
+        </p>
       </div>
       {/* Three outcomes, not two: blocked, explicitly allowed, and capped. A
           time cap reading as green ("allow") said the opposite of what it does. */}
@@ -181,7 +219,7 @@ export default function AppBlocking() {
       </span>
       <button
         onClick={onRemove}
-        className="icon-btn w-9 h-9 text-gray-400 hover:text-danger"
+        className="icon-btn text-gray-400 hover:text-danger"
         aria-label={`Remove rule for ${title}`}
       >
         <Icon name="trash" size={16} />
@@ -194,6 +232,13 @@ export default function AppBlocking() {
       <PageIntro description="Control which apps and sites each child can reach." />
 
       <ChildTabs items={childList} selectedId={selected?.id} onSelect={setSelected} />
+
+      <DeviceScopeTabs
+        devices={selected?.devices || []}
+        selectedId={scope}
+        onSelect={setScope}
+        overriddenIds={[...appRules, ...webRules].map((r) => r.deviceId).filter(Boolean)}
+      />
 
       {error && <p className="notice-error">{error}</p>}
 
@@ -335,7 +380,8 @@ export default function AppBlocking() {
                       r.action === 'limit' && r.dailyLimitMinutes
                         ? `${r.dailyLimitMinutes}m/day`
                         : r.action,
-                      () => removeApp(r.id)
+                      () => removeApp(r.id),
+                      r.deviceId
                     )
                   )}
                 </div>
@@ -407,7 +453,8 @@ export default function AppBlocking() {
                       r.url || categoryLabel(r.category),
                       r.url ? 'Specific site' : 'Category',
                       r.action,
-                      () => removeWebsite(r.id)
+                      () => removeWebsite(r.id),
+                      r.deviceId
                     )
                   )}
                 </div>

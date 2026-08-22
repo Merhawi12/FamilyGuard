@@ -365,3 +365,47 @@ describe('A device is only as authorised as the family above it', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('Only the signing algorithm this service uses is accepted', () => {
+  /**
+   * `jwt.verify` was called without `algorithms`, so the set it would accept was
+   * whatever the installed `jsonwebtoken` happened to allow.
+   *
+   * On 9.0.3 that is already safe — `alg: none` and an `RS256` header against a
+   * string secret are both refused — so this was never a live hole. It is pinned
+   * because the guarantee lived in a dependency's internals rather than in this
+   * codebase, and two ordinary changes take it away: an older `jsonwebtoken` (v8
+   * accepted `alg: none`), or moving `JWT_SECRET` to a key object for rotation.
+   * Either would restore algorithm confusion with nothing failing to show it.
+   *
+   * HS512 is the probe because it is the case a version pin cannot save you
+   * from: same secret, same family, a different algorithm — accepted by an
+   * unpinned `verify` on every version of the library, and refused by this one.
+   */
+  it('refuses a token signed with a different HMAC algorithm', async () => {
+    const user = await createUser();
+    const session = await Session.create({ userId: user.id });
+
+    const hs512 = jwt.sign(
+      { id: user.id, sid: session.id },
+      env.auth.jwtSecret,
+      { algorithm: 'HS512', expiresIn: '1h' }
+    );
+
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${hs512}`);
+    expect(res.status).toBe(401);
+  });
+
+  it('still accepts the HS256 tokens the service issues', async () => {
+    const user = await createUser();
+    const login = await request(app)
+      .post('/api/auth/login')
+      .send({ email: user.email, password: DEFAULT_PASSWORD })
+      .expect(200);
+
+    await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${login.body.token}`)
+      .expect(200);
+  });
+});

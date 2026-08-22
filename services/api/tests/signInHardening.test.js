@@ -10,6 +10,7 @@ const request = require('supertest');
 const { app } = require('../src/app');
 const { Session } = require('../src/models');
 const { createUser, uniqueEmail, DEFAULT_PASSWORD } = require('./helpers');
+const { hashTicket } = require('../src/utils/otp');
 
 jest.mock('../src/services/sms', () => ({
   sendVerificationSms: jest.fn().mockResolvedValue(true),
@@ -320,8 +321,10 @@ describe('a password that changes is confirmed to its owner', () => {
   it('emails the holder when it is reset through the link', async () => {
     const email = uniqueEmail('pw-reset');
     const user = await createUser({ email });
+    // The column holds a keyed digest, never the ticket — so a fixture that
+    // plants one has to plant it in the stored form. See `otp.hashTicket`.
     await user.update({
-      passwordResetToken: 'reset-token-abc',
+      passwordResetToken: hashTicket('reset-token-abc'),
       passwordResetExpires: new Date(Date.now() + 60_000),
     });
     mailer.send.mockClear();
@@ -361,12 +364,79 @@ describe('the mailer does not report success for mail it never sent', () => {
   });
 });
 
+/**
+ * Sign-in answers "no such address" and "wrong password" with the same 401, and
+ * the clock used to give the difference away anyway.
+ *
+ * `!user || !(await user.comparePassword(...))` short-circuits, so an unknown
+ * address never reached bcrypt: it answered in about a millisecond while a real
+ * account spent the ~200ms of a cost-12 comparison. That is measurable across
+ * the internet, and it enumerates the customer base as reliably as a "no such
+ * user" message would — the very disclosure `forgot-password` two screens away
+ * goes to some length to avoid.
+ *
+ * Asserted as a floor rather than as a ratio. A ratio is a flaky test on shared
+ * CI; "the unknown-address path did real work" is the property, and a refactor
+ * that drops the comparison fails this immediately because it returns in single
+ * -digit milliseconds.
+ */
+describe('an unknown address costs what a wrong password costs', () => {
+  const timeLogin = async (email, password) => {
+    const started = process.hrtime.bigint();
+    await request(app).post('/api/auth/login').send({ email, password }).expect(401);
+    return Number(process.hrtime.bigint() - started) / 1e6;
+  };
+
+  it('runs a password comparison even when there is no account', async () => {
+    const known = uniqueEmail('timing');
+    await createUser({ email: known });
+
+    const wrongPassword = await timeLogin(known, 'definitely-not-it-9');
+    const noSuchAccount = await timeLogin(uniqueEmail('timing-absent'), 'definitely-not-it-9');
+
+    // bcrypt at cost 12 is ~100–300ms on any machine this runs on; the
+    // short-circuited path was ~1ms. 40ms separates the two with room to spare.
+    expect(wrongPassword).toBeGreaterThan(40);
+    expect(noSuchAccount).toBeGreaterThan(40);
+  });
+
+  it('does the same for an account that has no password at all', async () => {
+    // Google and phone signups store no hash, so `comparePassword` returned
+    // false without hashing — the same tell, for the accounts least likely to
+    // be signing in with a password.
+    const email = uniqueEmail('timing-google');
+    await createUser({ email, passwordHash: null, googleId: `g-${email}` });
+
+    expect(await timeLogin(email, 'definitely-not-it-9')).toBeGreaterThan(40);
+  });
+
+  it('reports the same refusal either way', async () => {
+    const known = uniqueEmail('timing-body');
+    await createUser({ email: known });
+
+    const a = await request(app).post('/api/auth/login')
+      .send({ email: known, password: 'definitely-not-it-9' }).expect(401);
+    const b = await request(app).post('/api/auth/login')
+      .send({ email: uniqueEmail('timing-body-absent'), password: 'definitely-not-it-9' }).expect(401);
+
+    expect(a.body).toEqual(b.body);
+  });
+});
+
 describe('production refuses to boot without a way to send mail', () => {
   /*
    * Signup does not complete without email: the account cannot log in until the
    * emailed code is entered, and the code exists only in that email. A
    * production boot with no relay therefore accepted registrations all day and
    * stranded every one of them while /api/health reported a healthy service.
+   */
+  /**
+   * Note the NODE_ENV it sets. `config/env.js` skips dotenv under `test` and
+   * this block deliberately reloads it as `production`, so the developer's
+   * `services/api/.env` *is* read here — which means every variable
+   * `assertProductionConfig` looks at has to be stated, or the assertion below
+   * is really about whoever's laptop is running it. Both SMTP credentials are
+   * named for exactly that reason.
    */
   const loadEnv = (overrides) => {
     jest.resetModules();
@@ -377,7 +447,10 @@ describe('production refuses to boot without a way to send mail', () => {
       FIELD_ENCRYPTION_KEY: 'a'.repeat(64),
       DATABASE_URL: 'postgres://user:pw@host:5432/db',
       CLIENT_URL: 'https://parentix.ca',
+      EMAIL_PROVIDER: 'smtp',
       SMTP_HOST: 'smtp.example.com',
+      SMTP_USER: 'apikey',
+      SMTP_PASS: 'relay-password',
       ...overrides,
     });
     try {

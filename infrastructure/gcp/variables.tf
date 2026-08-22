@@ -311,7 +311,7 @@ variable "redis_memory_size_gb" {
 variable "email_from" {
   description = "From address on outbound mail."
   type        = string
-  default     = "Parentix <no-reply@parentix.ca>"
+  default     = "Parentix <support@parentix.ca>"
 }
 
 variable "admin_email" {
@@ -325,7 +325,7 @@ variable "admin_email" {
     no way to hand over.
   EOT
   type        = string
-  default     = "merhawigu@gmail.com"
+  default     = "support@parentix.ca"
 }
 
 # ── Monitoring ───────────────────────────────────────────────────────────────

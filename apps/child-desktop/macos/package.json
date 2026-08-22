@@ -1,0 +1,79 @@
+{
+  "name": "@parentix/child-desktop-macos",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Parentix Child Desktop for macOS — the monitored laptop agent (Electron + launchd DNS helper).",
+  "main": "main.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder --mac --publish never",
+    "pack": "electron-builder --mac --dir",
+    "test:e2e": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON ../shared/scripts/e2e.mjs"
+  },
+  "dependencies": {
+    "@parentix/child-desktop-shared": "file:../shared",
+    "axios": "^1.6.2",
+    "socket.io-client": "^4.6.2"
+  },
+  "devDependencies": {
+    "electron": "^38.8.6",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "ca.parentix.child-desktop",
+    "productName": "Parentix",
+    "copyright": "Parentix",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "src/**/*",
+      "build/tray.png",
+      "!dist",
+      "!**/*.map"
+    ],
+    "mac": {
+      "target": [
+        { "target": "pkg", "arch": ["x64", "arm64"] },
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.utilities",
+      "artifactName": "Parentix-${version}-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "LSUIElement": false,
+        "NSHumanReadableCopyright": "Parentix"
+      }
+    },
+    "pkg": {
+      "installLocation": "/Applications",
+      "scripts": "build/pkg-scripts",
+      "allowAnywhere": false,
+      "allowCurrentUserHome": false
+    },
+    "dmg": {
+      "contents": [
+        { "x": 140, "y": 200 },
+        { "x": 400, "y": 200, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "extraResources": [
+      {
+        "from": "build/launchd",
+        "to": "launchd",
+        "filter": ["**/*"]
+      }
+    ]
+  }
+}

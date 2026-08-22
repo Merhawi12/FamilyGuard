@@ -40,10 +40,10 @@ esac
 API_URL="$(tf_output api_url)"
 ADMIN_URL="$(tf_output admin_url)"
 
-# The Google Maps browser key is baked into the bundle at build time, so it has
-# to be present here or the Location page ships with its map permanently
-# disabled — a silent downgrade, since the page still renders and only shows a
-# "Map unavailable" placeholder.
+# The Google Maps browser key is baked into the bundle at build time. It is
+# optional: without one the Location page draws its map from OpenStreetMap tiles
+# and geocodes against Nominatim, so a release with no key ships a working map
+# rather than the "Map unavailable" placeholder it used to.
 #
 # It is read from Secret Manager when it exists there, so a release does not
 # depend on whoever runs it having the right variable exported. This is a
@@ -59,9 +59,10 @@ VITE_GOOGLE_MAPS_KEY="$(printf '%s' "${VITE_GOOGLE_MAPS_KEY:-}" | tr -d '[:space
 
 # A placeholder is not a key, and it is worse than no key at all: the page sees a
 # truthy value, loads Google's script, and Google refuses it during
-# authentication — a failure that only `gm_authFailure` reports and that costs a
-# doomed round trip on every visit to Location. An absent key is caught before
-# any of that and states the case plainly.
+# authentication — a failure that only `gm_authFailure` reports, that costs a
+# doomed round trip on every visit to Location, and that puts a "Google rejected
+# the map key" banner above the map for every parent. An absent key loads nothing
+# from Google and goes straight to the OpenStreetMap renderer.
 #
 # This is not hypothetical. The warning below says `printf 'AIza…'`, and the prod
 # secret held exactly that — the instruction pasted literally, ellipsis and all.
@@ -70,15 +71,26 @@ VITE_GOOGLE_MAPS_KEY="$(printf '%s' "${VITE_GOOGLE_MAPS_KEY:-}" | tr -d '[:space
 if [ -n "$VITE_GOOGLE_MAPS_KEY" ] \
   && ! printf '%s' "$VITE_GOOGLE_MAPS_KEY" | grep -Eq '^AIza[0-9A-Za-z_-]{35}$'; then
   warn "Ignoring VITE_GOOGLE_MAPS_KEY — '${VITE_GOOGLE_MAPS_KEY}' is not a Maps browser key (expected AIza + 35 chars)."
-  warn "Fix the value in ${MAPS_SECRET}; the build continues with the map disabled."
+  warn "Fix the value in ${MAPS_SECRET}; the build continues on OpenStreetMap tiles."
   VITE_GOOGLE_MAPS_KEY=""
 fi
 
 export VITE_GOOGLE_MAPS_KEY
 
 if [ -z "$VITE_GOOGLE_MAPS_KEY" ]; then
-  warn "No Google Maps key — the Location page will show 'Map unavailable'."
-  warn "Set one with: printf 'AIzaSyEXAMPLE…' | gcloud secrets versions add ${MAPS_SECRET} --data-file=-"
+  log "No Google Maps key — the Location page will use OpenStreetMap tiles and geocoding."
+  log "To use Google's instead: printf 'AIzaSyEXAMPLE…' | gcloud secrets versions add ${MAPS_SECRET} --data-file=-"
+fi
+
+# Where the keyless map fetches its tiles. Empty means OpenStreetMap's public
+# servers, whose usage policy covers a service of this size but not a large one —
+# and explicitly not tiles served into a distributed mobile app. Point this at a
+# provider of your own before either becomes true; any {z}/{x}/{y} raster source
+# works, and the attribution shown on the map comes from the value beside it.
+export VITE_MAP_TILE_URL="${VITE_MAP_TILE_URL:-}"
+export VITE_MAP_TILE_ATTRIBUTION="${VITE_MAP_TILE_ATTRIBUTION:-}"
+if [ -z "$VITE_GOOGLE_MAPS_KEY" ] && [ -n "$VITE_MAP_TILE_URL" ]; then
+  log "Map tiles from ${VITE_MAP_TILE_URL}"
 fi
 
 # The Google OAuth Web client ID, read from the same Terraform run that told the
@@ -100,6 +112,8 @@ build() {
   VITE_ADMIN_URL="${ADMIN_URL}" \
   VITE_GOOGLE_MAPS_KEY="${VITE_GOOGLE_MAPS_KEY}" \
   VITE_GOOGLE_CLIENT_ID="${VITE_GOOGLE_CLIENT_ID}" \
+  VITE_MAP_TILE_URL="${VITE_MAP_TILE_URL}" \
+  VITE_MAP_TILE_ATTRIBUTION="${VITE_MAP_TILE_ATTRIBUTION}" \
     npm --prefix "${REPO_ROOT}" run "build:${build_script}"
 
   DIST="${REPO_ROOT}/apps/${app_dir}/dist"

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { auth as authApi, errorMessage, EmptyState, Icon } from '@parentix/shared';
+import { auth as authApi, errorMessage, timeAgo, EmptyState, Icon } from '@parentix/shared';
 
 /**
  * Where this account is signed in, and how to end any of it.
@@ -43,15 +43,11 @@ const describeAgent = (ua) => {
   return ua.length > 40 ? `${ua.slice(0, 40)}…` : ua;
 };
 
-const when = (value) => {
-  if (!value) return 'Unknown';
-  const then = new Date(value);
-  const minutes = Math.round((Date.now() - then) / 60000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  if (minutes < 60 * 24) return `${Math.round(minutes / 60)}h ago`;
-  return then.toLocaleDateString();
-};
+/**
+ * Reads inside "Active …", so it stays lowercase and short — the line it sits on
+ * already carries an IP address and has to survive a phone-width column.
+ */
+const when = (value) => timeAgo(value, { absent: 'Unknown', compact: true });
 
 export default function ActiveSessions() {
   const [sessions, setSessions] = useState(null);

@@ -18,10 +18,16 @@
     "build:family": "npm run build --workspace apps/family-app",
     "dev:admin": "npm run dev --workspace apps/admin-dashboard",
     "dev:api": "npm --prefix services/api run dev",
-    "dev:child": "npm --prefix apps/child-app run start",
+    "dev:child": "npm --prefix apps/child-app/android run start",
+    "dev:child:ios": "npm --prefix apps/child-app/ios run start",
+    "dev:desktop": "npm --prefix apps/child-desktop/windows run dev",
+    "dev:desktop:mac": "npm --prefix apps/child-desktop/macos run dev",
     "dev:family": "npm run dev --workspace apps/family-app",
+    "desktop:win": "npm --prefix apps/child-desktop/windows run build",
+    "desktop:mac": "npm --prefix apps/child-desktop/macos run build",
     "apk:child": "bash scripts/build-apk.sh child",
     "check:dns": "node scripts/check-dns.mjs",
+    "mail:setup": "bash scripts/setup-google-mail.sh",
     "apk:family": "bash scripts/build-apk.sh family",
     "ios:child": "bash scripts/build-ios.sh child",
     "ios:family": "bash scripts/build-ios.sh family",
@@ -30,8 +36,8 @@
     "infra:deploy": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} apply",
     "infra:output": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} output",
     "infra:plan": "infrastructure/gcp/deploy.sh ${ENV_NAME:-dev} plan",
-    "install:all": "npm install && npm --prefix services/api ci && npm --prefix apps/child-app ci",
-    "lint": "eslint apps/admin-dashboard/src apps/family-app/src apps/child-app/src apps/child-app/App.js packages/shared/src services/api/src",
+    "install:all": "npm install && npm --prefix services/api ci && npm --prefix apps/child-app/android ci && npm --prefix apps/child-app/ios ci && npm --prefix apps/child-desktop/windows ci",
+    "lint": "eslint apps/admin-dashboard/src apps/family-app/src apps/child-app/shared/src apps/child-app/shared/App.js apps/child-desktop/shared/src apps/child-desktop/shared/preload.cjs apps/child-desktop/windows/main.js apps/child-desktop/windows/src apps/child-desktop/macos/main.js apps/child-desktop/macos/src packages/shared/src services/api/src",
     "test": "npm --prefix services/api test",
     "test:all": "npm run lint && npm run build && npm test && npm run test:e2e && npm run test:browser",
     "test:api": "npm --prefix services/api test",
@@ -42,14 +48,18 @@
     "pg:install": "node scripts/local-postgres.mjs install",
     "test:pg": "node scripts/local-postgres.mjs test:api",
     "test:browser:pg": "node scripts/local-postgres.mjs test:browser",
-    "test:e2e": "npm --prefix services/api run test:e2e && npm --prefix apps/child-app run test:e2e",
+    "test:e2e": "npm --prefix services/api run test:e2e && npm --prefix apps/child-app/android run test:e2e && npm --prefix apps/child-desktop/windows run test:e2e",
     "test:e2e:api": "npm --prefix services/api run test:e2e",
-    "test:e2e:child": "npm --prefix apps/child-app run test:e2e"
+    "test:e2e:child": "npm --prefix apps/child-app/android run test:e2e",
+    "test:e2e:desktop": "npm --prefix apps/child-desktop/windows run test:e2e"
   },
   "devDependencies": {
     "eslint": "^8.57.1",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^4.6.2",
     "playwright": "^1.62.1"
+  },
+  "dependencies": {
+    "@getbrevo/brevo": "^6.0.3"
   }
 }

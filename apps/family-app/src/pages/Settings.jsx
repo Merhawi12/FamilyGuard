@@ -215,23 +215,30 @@ export default function Settings() {
         aria-label="Settings sections"
         className="lg:w-56 lg:shrink-0 lg:sticky lg:top-24 mb-5 lg:mb-0"
       >
-        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar lg:overflow-visible">
-          <div className="flex lg:flex-col gap-2 w-max lg:w-full">
-            {SECTIONS.map(({ key, label, icon }) => {
-              const active = activeSection === key;
-              return (
-                <button
-                  key={key}
-                  onClick={() => selectSection(key)}
-                  aria-current={active ? 'page' : undefined}
-                  className={`chip lg:w-full lg:justify-start ${active ? 'chip-active' : ''}`}
-                >
-                  <Icon name={icon} size={18} />
-                  {label}
-                </button>
-              );
-            })}
-          </div>
+        {/*
+          * Wraps below `lg`, where it is a row; a column from `lg` up.
+          *
+          * Four fixed sections, and side by side they are wider than a phone —
+          * "Plan & billing" sat off the right edge at 320px *and* 375px, behind
+          * a scrollbar `no-scrollbar` hides. A settings section a parent cannot
+          * see is a settings section they do not have, and unlike a child list
+          * this one has a known, small, permanent size, so it can wrap.
+          */}
+        <div className="flex flex-wrap lg:flex-col gap-2 lg:w-full">
+          {SECTIONS.map(({ key, label, icon }) => {
+            const active = activeSection === key;
+            return (
+              <button
+                key={key}
+                onClick={() => selectSection(key)}
+                aria-current={active ? 'page' : undefined}
+                className={`chip lg:w-full lg:justify-start ${active ? 'chip-active' : ''}`}
+              >
+                <Icon name={icon} size={18} />
+                {label}
+              </button>
+            );
+          })}
         </div>
       </nav>
 
@@ -544,13 +551,18 @@ export default function Settings() {
                   <Icon name="chevronRight" size={16} className="text-gray-300" />
                 </Link>
               ))}
-              <a href="/contact" className="list-row rounded-none px-4 hover:bg-gray-50">
+              {/* A Link, not an anchor to /contact. That was a full page
+                  navigation onto the static marketing page: the session
+                  survived, but the parent landed on "Sign in / Get Started
+                  Free" with no route back into the app, which is what being
+                  logged out looks like from the outside. */}
+              <Link to="/dashboard/support" className="list-row rounded-none px-4 hover:bg-gray-50">
                 <span className="w-9 h-9 rounded-xl bg-gray-50 text-gray-500 flex items-center justify-center shrink-0">
                   <Icon name="mail" size={18} />
                 </span>
                 <span className="flex-1 text-sm font-medium text-gray-900">Contact support</span>
-                <Icon name="external" size={16} className="text-gray-300" />
-              </a>
+                <Icon name="chevronRight" size={16} className="text-gray-300" />
+              </Link>
             </div>
 
             <div className="card">

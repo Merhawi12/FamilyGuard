@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { vendorChunks } from '@parentix/shared/vendor-chunks';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,10 +29,9 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          charts: ['recharts'],
-        },
+        // No `maps` group — the console has no map screen. See
+        // packages/shared/vendor-chunks.mjs for why this is a function.
+        manualChunks: vendorChunks(['react', 'charts']),
       },
     },
   },

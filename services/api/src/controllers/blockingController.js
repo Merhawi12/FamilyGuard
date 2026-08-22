@@ -1,5 +1,5 @@
 const { fn, col } = require('sequelize');
-const { AppRule, WebsiteRule, Child, ActivityLog } = require('../models');
+const { AppRule, WebsiteRule, Child, Device, ActivityLog } = require('../models');
 const { normalizeDomain } = require('../utils/domain');
 const { isUuid } = require('../utils/ids');
 
@@ -11,6 +11,41 @@ const verifyChild = async (parentId, childId) =>
 /** The same guard for a rule id, which is a UUID on both rule tables. */
 const findRule = (Model, ruleId, childId) =>
   (isUuid(ruleId) ? Model.findOne({ where: { id: ruleId, childId } }) : null);
+
+/**
+ * Resolve the optional `deviceId` a rule may be narrowed to.
+ *
+ * Returns `{ deviceId }` on success — `null` for a child-wide rule, which is
+ * both the default and what every rule was before per-device control — or
+ * `{ error }` when the id is not a live device of *this* child.
+ *
+ * That ownership check is the whole reason this is a function. `deviceId`
+ * arrives in the request body, and a rule written against another family's
+ * device id would be a parent silently writing policy onto a stranger's phone.
+ * The child is already proved to belong to the caller by the time this runs, so
+ * matching the device to the child is enough to close it.
+ */
+const resolveDeviceScope = async (childId, raw) => {
+  if (raw === undefined || raw === null || raw === '') return { deviceId: null };
+  if (!isUuid(raw)) return { error: 'Unknown device' };
+  const device = await Device.findOne({ where: { id: raw, childId, isActive: true } });
+  if (!device) return { error: 'Unknown device' };
+  return { deviceId: device.id };
+};
+
+/**
+ * Tell the devices a rule change actually reaches.
+ *
+ * A child-wide rule goes to the child's room, as it always has. A rule narrowed
+ * to one device goes only to that device — waking its siblings to re-sync rules
+ * that did not move is wasted radio on a phone, and the resulting `rules_updated`
+ * would be indistinguishable to them from a real change.
+ */
+const announceRuleChange = (req, childId, deviceId, type) => {
+  const io = req.app.get('io');
+  if (!io) return;
+  io.to(deviceId ? `device:${deviceId}` : `child:${childId}`).emit('rules_updated', { type });
+};
 
 const getAppRules = async (req, res) => {
   if (!(await verifyChild(req.user.id, req.params.childId))) return res.status(404).json({ error: 'Child not found' });
@@ -108,10 +143,14 @@ const addAppRule = async (req, res) => {
     }
   }
 
+  const scope = await resolveDeviceScope(req.params.childId, req.body.deviceId);
+  if (scope.error) return res.status(400).json({ error: scope.error });
+
   // Field by field rather than a spread of the body: `childId` is the caller's
   // to supply and `id` is not, and neither belongs to whatever JSON arrives.
   const rule = await AppRule.create({
     childId: req.params.childId,
+    deviceId: scope.deviceId,
     appName,
     appPackage,
     action,
@@ -119,17 +158,18 @@ const addAppRule = async (req, res) => {
     category: req.body.category ? String(req.body.category) : null,
   });
 
-  req.app.get('io').to(`child:${req.params.childId}`).emit('rules_updated', { type: 'app' });
-  res.status(201).json(rule);
+  announceRuleChange(req, req.params.childId, scope.deviceId, 'app');
+  return res.status(201).json(rule);
 };
 
 const removeAppRule = async (req, res) => {
   if (!(await verifyChild(req.user.id, req.params.childId))) return res.status(404).json({ error: 'Child not found' });
   const rule = await findRule(AppRule, req.params.ruleId, req.params.childId);
   if (!rule) return res.status(404).json({ error: 'Rule not found' });
+  const { deviceId } = rule;
   await rule.destroy();
-  req.app.get('io').to(`child:${req.params.childId}`).emit('rules_updated', { type: 'app' });
-  res.json({ message: 'Rule removed' });
+  announceRuleChange(req, req.params.childId, deviceId, 'app');
+  return res.json({ message: 'Rule removed' });
 };
 
 const WEBSITE_ACTIONS = new Set(['block', 'allow']);
@@ -171,24 +211,29 @@ const addWebsiteRule = async (req, res) => {
     return res.status(400).json({ error: 'A website rule can either block the site or allow it.' });
   }
 
+  const scope = await resolveDeviceScope(req.params.childId, req.body.deviceId);
+  if (scope.error) return res.status(400).json({ error: scope.error });
+
   // Field by field, for the same reason as the app rule above.
   const rule = await WebsiteRule.create({
     childId: req.params.childId,
+    deviceId: scope.deviceId,
     url,
     category,
     action,
   });
-  req.app.get('io').to(`child:${req.params.childId}`).emit('rules_updated', { type: 'website' });
-  res.status(201).json(rule);
+  announceRuleChange(req, req.params.childId, scope.deviceId, 'website');
+  return res.status(201).json(rule);
 };
 
 const removeWebsiteRule = async (req, res) => {
   if (!(await verifyChild(req.user.id, req.params.childId))) return res.status(404).json({ error: 'Child not found' });
   const rule = await findRule(WebsiteRule, req.params.ruleId, req.params.childId);
   if (!rule) return res.status(404).json({ error: 'Rule not found' });
+  const { deviceId } = rule;
   await rule.destroy();
-  req.app.get('io').to(`child:${req.params.childId}`).emit('rules_updated', { type: 'website' });
-  res.json({ message: 'Rule removed' });
+  announceRuleChange(req, req.params.childId, deviceId, 'website');
+  return res.json({ message: 'Rule removed' });
 };
 
 module.exports = {

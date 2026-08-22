@@ -7,8 +7,12 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./tailwind-preset": "./tailwind-preset.cjs"
+    "./tailwind-preset": "./tailwind-preset.cjs",
+    "./vendor-chunks": "./vendor-chunks.mjs"
   },
+  "sideEffects": [
+    "**/*.css"
+  ],
   "peerDependencies": {
     "axios": "^1.6.2",
     "react": "^18.2.0",

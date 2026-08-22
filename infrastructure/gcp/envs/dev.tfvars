@@ -31,7 +31,7 @@ db_deletion_protection   = false
 # One API instance at a time, so Socket.IO needs no cross-instance fan-out.
 redis_enabled = false
 
-email_from = "Parentix Dev <no-reply@parentix.ca>"
+email_from = "Parentix Dev <support@parentix.ca>"
 
 labels = {
   cost-center = "engineering"

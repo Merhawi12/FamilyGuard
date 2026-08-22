@@ -9,7 +9,8 @@
 const request = require('supertest');
 const { io: ioClient } = require('socket.io-client');
 const { app, httpServer, io } = require('../src/app');
-const { createUser } = require('./helpers');
+const jwt = require('jsonwebtoken');
+const { createUser, createChild, createDevice, deviceToken } = require('./helpers');
 const { createSession, revokeAllSessions } = require('../src/utils/session');
 
 let port;
@@ -78,6 +79,45 @@ describe('socket handshake honours session revocation', () => {
 
     const result = await connect(token);
     expect(result.ok).toBe(false);
+  });
+});
+
+/**
+ * The handshake has to bind a device token to its own device row, exactly as the
+ * REST middleware does.
+ *
+ * Both claims are signed and so always agree today, but `socket.data.childId`
+ * is what decides which `child:<id>` room the socket joins — and that room
+ * carries the family's chat and every rule push. Taking it from the token while
+ * authorising against the device is the same mismatch `middleware/auth.js` had.
+ */
+describe('socket handshake binds a device token to its device row', () => {
+  it('refuses a device token naming another family’s child', async () => {
+    const victimParent = await createUser();
+    const victimChild = await createChild(victimParent.id);
+
+    const attackerParent = await createUser();
+    const attackerChild = await createChild(attackerParent.id);
+    const attackerDevice = await createDevice(attackerChild.id);
+
+    const forged = jwt.sign(
+      { deviceId: attackerDevice.id, childId: victimChild.id },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' },
+    );
+
+    const result = await connect(forged);
+    expect(result.ok).toBe(false);
+  });
+
+  it('accepts a device token that agrees with its row', async () => {
+    const parent = await createUser();
+    const child = await createChild(parent.id);
+    const device = await createDevice(child.id);
+
+    const result = await connect(deviceToken(device));
+    expect(result.ok).toBe(true);
+    result.socket.disconnect();
   });
 });
 

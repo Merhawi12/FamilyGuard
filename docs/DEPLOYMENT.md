@@ -214,21 +214,32 @@ wait; the certificate retries on its own.
 ### 1.6 Mail authentication records
 
 Also at GoDaddy, and easy to forget until password-reset emails start landing in
-spam. Sending as `no-reply@parentix.ca` through a third-party relay means the
+spam. Sending as `support@parentix.ca` through a third-party relay means the
 domain has to authorise that relay:
+
+`parentix.ca` runs on Google Workspace, so all four records are Google's:
 
 | Type | Name | Value |
 | --- | --- | --- |
-| TXT | `@` | `v=spf1 include:<relay's SPF host> ~all` |
-| CNAME | *(relay-specific)* | provided by the relay when you verify the domain |
-| TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:you@parentix.ca` |
+| MX | `@` | `aspmx.l.google.com` (1), `alt1`/`alt2` (5), `alt3`/`alt4` (10) |
+| TXT | `@` | `v=spf1 include:_spf.google.com ~all` |
+| TXT | `google._domainkey` | the 2048-bit key from the Admin console |
+| TXT | `_dmarc` | `v=DMARC1; p=quarantine; …` |
 
-The exact SPF include and DKIM CNAMEs come from whichever relay you pick —
-SendGrid, Mailgun and Postmark all walk you through "domain authentication" and
-print the records to add.
+Publishing the DKIM record is only half of turning DKIM on — **Admin console →
+Apps → Google Workspace → Gmail → Authenticate email → Start authentication**
+is the switch, and until it is thrown Google publishes a key it does not sign
+with.
 
-Start DMARC at `p=none` so you get reports without silently dropping your own
-mail, then tighten to `p=quarantine` once the reports look clean.
+That matters more here than it usually would, because DMARC is already at
+`p=quarantine` rather than `p=none`. Enforcing before both mechanisms pass means
+delivery rests on SPF alignment alone, and SPF breaks on any forwarding hop — a
+parent whose work address forwards home, a school alias. The message is then
+quarantined rather than bounced, so nobody is told, and the symptom is a reset
+code that "never arrived" for one parent and works for everyone else.
+
+`npm run check:dns` asserts all four, and fails specifically on the enforcing-
+without-DKIM combination.
 
 > If GoDaddy also hosts mailboxes on `parentix.ca` (Microsoft 365 is the usual
 > bundle), do **not** replace the existing SPF record — a domain may have only
@@ -330,6 +341,76 @@ Terraform — you never need to see them.
 > logs an error on every production start without a relay. The admin console's
 > Overview reports the same thing under Delivery channels.
 
+#### Google (Gmail or Workspace) as the relay
+
+One command does the whole of it — test the credential, write the local `.env`,
+store the three secrets, roll the revision that picks them up, then verify what
+was stored rather than what was typed:
+
+```bash
+npm run mail:setup -- support@parentix.ca --to you@example.com --deploy
+```
+
+It reads the app password from stdin, never from `argv`, and refuses to store
+anything Gmail has not already accepted. Before running it, in the Google
+account that will send:
+
+1. **Turn on 2-Step Verification.** App passwords do not exist without it — the
+   `myaccount.google.com/apppasswords` page simply does not resolve, which reads
+   as "Google removed the feature" rather than "you have not enabled the thing it
+   depends on".
+2. **Create the app password** and paste it with the spaces removed. Google
+   displays 16 characters as four groups of four; Gmail's SMTP AUTH rejects the
+   spaced form with the same `535` it gives a revoked password. The script strips
+   them, and refuses anything that is not 16 characters once stripped.
+3. Nothing else. IMAP and POP are receiving settings and irrelevant here, and
+   "less secure app access" was removed in 2022 — app passwords replaced it.
+
+#### The mailboxes the product promises
+
+Three addresses on `parentix.ca` are printed in front of users, and each has to
+exist before the page that names it is true. `support@` is a Workspace **user**
+— you sign in as it to generate the app password, which an alias cannot do. The
+other two are aliases on that same mailbox and cost nothing:
+
+| Address | Promised by | Kind |
+| --- | --- | --- |
+| `support@parentix.ca` | `EMAIL_FROM`, and the contact-form `Reply-To` | user |
+| `legal@parentix.ca` | [Terms.jsx](../apps/family-app/src/pages/Terms.jsx) | alias |
+| `privacy@parentix.ca` | [PrivacyPolicy.jsx](../apps/family-app/src/pages/PrivacyPolicy.jsx) | alias |
+
+The last two are commitments in published legal text, which is the reason to
+create them in the same sitting rather than when someone first writes in: a
+privacy request that bounces is a compliance problem, not a support backlog.
+
+> **`EMAIL_FROM` must be the authenticating account.** Gmail rewrites the `From`
+> header to the account that signed in unless the address is a verified alias,
+> so authenticate as `support@parentix.ca` itself rather than sending as it from
+> somewhere else. A free `@gmail.com` account with the address pasted into
+> `EMAIL_FROM` does not work: the header is rewritten, the parent sees the gmail
+> address, and the message carries an `X-Google-Original-From` header
+> advertising the mismatch.
+>
+> With DMARC at `p=quarantine` that shortcut is worse than cosmetic. Mail sent
+> from a `gmail.com` account is signed `d=gmail.com` and envelope-sent from
+> `gmail.com`, so neither DKIM nor SPF *aligns* with a `parentix.ca` header
+> From — DMARC fails, and the policy says quarantine. Reset codes go to spam for
+> the recipients strict enough to honour it, and nothing on this side logs a
+> problem.
+
+> **Do not use `smtp-relay.gmail.com` with IP allowlisting.** It fails the way
+> Brevo did: there is no Cloud NAT in this project and Cloud Run egress is
+> `PRIVATE_RANGES_ONLY`, so SMTP leaves over Google's shared dynamic pool and
+> there is no stable address to allowlist. If you use the relay, configure it
+> for *Require SMTP Authentication* only. `smtp.gmail.com` with an app password
+> has no such requirement, which is why it is what the script configures.
+
+Google caps a free account at **500 recipients a day** and Workspace at
+**2,000**. Past the cap every send fails for 24 hours — which here means
+password reset and signup verification stop, silently, from the outside. That
+ceiling is the reason to treat Gmail as the way to get delivery working today
+rather than the permanent answer for a consumer product.
+
 ### 1.8 Create the first staff account
 
 The Admin Dashboard has no sign-up. Run the bootstrap script through the Cloud
@@ -391,7 +472,7 @@ feature rather than accepting any audience.
 > appear in the app, and email-and-password sign-in works there as normal.
 >
 > ```bash
-> keytool -list -v -keystore apps/child-app/android/app/debug.keystore >   -alias androiddebugkey -storepass android | grep SHA1
+> keytool -list -v -keystore apps/child-app/android/android/app/debug.keystore >   -alias androiddebugkey -storepass android | grep SHA1
 > ```
 
 ### 1.10 Point Stripe at the webhook
@@ -487,7 +568,7 @@ and a new Play release**. Installed copies never pick it up.
 
 > **They are signed with the DEBUG key until a keystore exists.** That APK
 > installs fine for testing and Google Play rejects it outright. Generate a real
-> one once, with `apps/child-app/android/generate-release-keystore.sh`, and back
+> one once, with `apps/child-app/android/android/generate-release-keystore.sh`, and back
 > it up somewhere you will still have in three years: losing it means the listing
 > can never be updated again.
 
@@ -513,31 +594,33 @@ API already accepts, so the app needs no CORS entry of its own and its
 
 
 ```bash
-cd apps/child-app
+cd apps/child-app/android
 EXPO_PUBLIC_API_URL=https://api.parentix.ca/api npx expo run:android --variant release
 ```
 
 Values are inlined at build time, so a new API hostname means a new build and a
 new Play release.
 
-> **Never run `expo prebuild` on this project.** `apps/child-app/android/` is
-> committed source, not generated output: it holds the accessibility service,
-> the VPN service, the usage-stats and app-blocker modules, the DNS web-history
-> reporter, and manifest entries that no config plugin produces. `prebuild`
-> deletes the directory and regenerates it from `app.json`, which silently drops
-> every one of those — the app still compiles, and then blocks nothing, monitors
-> nothing and reports nothing.
+> **Never run `expo prebuild` in `apps/child-app/android`.** Its `android/`
+> subdirectory is committed source, not generated output: it holds the
+> accessibility service, the VPN service, the usage-stats and app-blocker
+> modules, the DNS web-history reporter, and manifest entries that no config
+> plugin produces. `prebuild` deletes the directory and regenerates it from the
+> Expo config, which silently drops every one of those — the app still compiles,
+> and then blocks nothing, monitors nothing and reports nothing. That project
+> deliberately ships no `prebuild` script; the iOS one does, where there is
+> nothing to lose.
 >
 > Native dependencies are picked up by `useExpoModules()` autolinking in
 > `android/settings.gradle`, so adding an Expo package needs no regeneration.
 > Anything a config plugin would have written — a permission, a service, a
 > meta-data entry — is applied to `android/app/src/main/AndroidManifest.xml` by
-> hand. `app.json`'s `plugins` and `android.permissions` are documentation here;
-> the manifest is what ships.
+> hand. `app.config.js`'s `plugins` and `android.permissions` are documentation
+> here; the manifest is what ships.
 >
 > Push to the child device also needs FCM: register `com.parentix.child` in the
 > Firebase project, download `google-services.json` into
-> `apps/child-app/android/app/`, and upload the FCM credential to the Expo
+> `apps/child-app/android/android/app/`, and upload the FCM credential to the Expo
 > project (`eas credentials`). Expo's relay hands off to FCM for Android
 > delivery, so both halves are required.
 >

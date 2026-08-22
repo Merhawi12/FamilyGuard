@@ -20,6 +20,12 @@
 #           App Store from this repo's usual development machine and the family
 #           app does not.
 #
+#           It builds from `apps/child-app/ios`, which is a whole Expo project —
+#           not the native Xcode directory the name suggests. The child app is
+#           split into a project per platform; see apps/child-app/README.md.
+#           EAS uploads from the git root, so the `file:`-linked shared package
+#           one directory over is included in the build context.
+#
 # The Android equivalents live in build-apk.sh and are unaffected.
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -61,7 +67,11 @@ if [ "$TARGET" = "child" ]; then
   warn "signed build. EAS_PROFILE=simulator produces an unsigned .app instead,"
   warn "which needs no Apple account and runs only in the iOS Simulator."
 
-  ( cd "${REPO_ROOT}/apps/child-app" && npx eas-cli build --platform ios --profile "$PROFILE" )
+  # Run from the iOS project, which owns the iOS half of the config and its own
+  # eas.json. `--platform ios` is still passed explicitly: the profile names in
+  # that file are not reserved, and being wrong here would mean an EAS build of
+  # the wrong platform rather than an error.
+  ( cd "${REPO_ROOT}/apps/child-app/ios" && npx eas-cli build --platform ios --profile "$PROFILE" )
   exit 0
 fi
 
@@ -83,6 +93,8 @@ VITE_API_URL="${API_URL}" \
 VITE_ADMIN_URL="${VITE_ADMIN_URL:-}" \
 VITE_GOOGLE_MAPS_KEY="${VITE_GOOGLE_MAPS_KEY:-}" \
 VITE_GOOGLE_CLIENT_ID="${VITE_GOOGLE_CLIENT_ID:-}" \
+VITE_MAP_TILE_URL="${VITE_MAP_TILE_URL:-}" \
+VITE_MAP_TILE_ATTRIBUTION="${VITE_MAP_TILE_ATTRIBUTION:-}" \
   npm --prefix "${REPO_ROOT}" run build:family
 
 [ -f "${REPO_ROOT}/apps/family-app/dist/index.html" ] \

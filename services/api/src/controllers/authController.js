@@ -10,7 +10,7 @@ const { notifyNewSignIn } = require('../utils/signInNotice');
 const { track } = require('../utils/background');
 const { serializeUser } = require('../utils/serializers');
 // Registration, reset, change and staff account creation all run the same check.
-const { passwordProblem } = require('../utils/password');
+const { passwordProblem, burnPasswordComparison } = require('../utils/password');
 const { OAuth2Client } = require('google-auth-library');
 const { normalizeEmail } = require('../utils/normalizeEmail');
 const { isUuid } = require('../utils/ids');
@@ -275,7 +275,26 @@ const login = async (req, res, next) => {
       return res.status(423).json({ error: 'Account temporarily locked due to repeated failed logins. Try again later.' });
     }
 
-    if (!user || !(await user.comparePassword(password))) {
+    /**
+     * A wrong password and an address with no account have to cost the same.
+     *
+     * `!user || !(await user.comparePassword(...))` short-circuits, so an
+     * unknown address skipped bcrypt entirely and came back in about a
+     * millisecond while a real one spent the ~200ms of a cost-12 hash. That gap
+     * is measurable over the network and does not care about the identical 401
+     * this endpoint is careful to return: it enumerates the customer base as
+     * reliably as a "no such user" message would, and it is the same account
+     * list `forgot-password` refuses to disclose two screens away.
+     *
+     * The same is true of an account with no password at all — a Google or
+     * phone-only signup, where `comparePassword` returns false without hashing.
+     * Both cases burn one comparison against a fixed hash instead.
+     */
+    const correct = user?.passwordHash
+      ? await user.comparePassword(password)
+      : await burnPasswordComparison(password);
+
+    if (!correct) {
       if (user) {
         const attempts = user.failedLoginAttempts + 1;
         const updates = { failedLoginAttempts: attempts };
@@ -878,7 +897,10 @@ const verifyResetCode = async (req, res, next) => {
     const token = crypto.randomBytes(32).toString('hex');
     await user.update({
       ...checked.fields,
-      passwordResetToken: token,
+      // Hashed on the way in — the column holds a keyed digest, never the ticket.
+      // See `otp.hashTicket` for why this is the one secret that authorises a
+      // password change on its own, and why it cannot go through `hashCode`.
+      passwordResetToken: otp.hashTicket(token),
       passwordResetExpires: new Date(Date.now() + RESET_TOKEN_EXPIRES_MS),
     });
 
@@ -901,7 +923,13 @@ const resetPassword = async (req, res, next) => {
     const weak = passwordProblem(newPassword);
     if (weak) return res.status(400).json({ error: weak });
 
-    const user = await User.findOne({ where: { passwordResetToken: token } });
+    // Looked up by digest, because that is what is stored. A ticket that is not
+    // a string cannot be one this service issued, and `hashTicket` would happily
+    // digest `[object Object]` into a value that matches nothing — refused here
+    // so the intent is stated rather than relied on.
+    const user = typeof token === 'string' && token
+      ? await User.findOne({ where: { passwordResetToken: otp.hashTicket(token) } })
+      : null;
     if (!user || !user.passwordResetExpires || new Date() > new Date(user.passwordResetExpires)) {
       return res.status(400).json({ error: 'Invalid or expired reset request' });
     }
@@ -945,42 +973,84 @@ const resetPassword = async (req, res, next) => {
   }
 };
 
+/**
+ * The notification switches, and their out-of-the-box positions.
+ *
+ * Lifted out of the getter so the writer can use the same object as its
+ * allow-list — the set of settings a parent may change has to be the set the
+ * product shows them, and two copies of that would drift.
+ *
+ * `blocked_app_attempt` is off by default because a determined child trips it
+ * repeatedly, and an inbox full of it is how parents learn to ignore the others.
+ */
+const NOTIFICATION_PREF_DEFAULTS = Object.freeze({
+  emailAlerts: true,
+  emailHighOnly: true,
+  // Push is on by default but only reaches a browser the parent has explicitly
+  // subscribed, so this cannot notify anyone who has not opted in.
+  pushAlerts: true,
+  alertTypes: Object.freeze({
+    emergency_button: true,
+    cyberbullying: true,
+    left_safe_zone: true,
+    entered_safe_zone: false,
+    safety_pattern: true,
+    screen_time_exceeded: true,
+    blocked_app_attempt: false,
+    // Raised once the device holds an approved-contact list and someone not
+    // on it tries to reach the child.
+    unknown_contact: true,
+  }),
+});
+
+const PREF_FLAGS = Object.keys(NOTIFICATION_PREF_DEFAULTS).filter((key) => key !== 'alertTypes');
+const PREF_ALERT_TYPES = Object.keys(NOTIFICATION_PREF_DEFAULTS.alertTypes);
+
 const getNotificationPrefs = async (req, res, next) => {
   try {
     const prefs = req.user.notificationPrefs ? JSON.parse(req.user.notificationPrefs) : {};
-    // One entry per alert type the platform can actually raise. `blocked_app_attempt`
-    // is off by default because a determined child trips it repeatedly, and an
-    // inbox full of it is how parents learn to ignore the others.
-    const defaults = {
-      emailAlerts: true,
-      emailHighOnly: true,
-      // Push is on by default but only reaches a browser the parent has
-      // explicitly subscribed, so this cannot notify anyone who has not opted in.
-      pushAlerts: true,
-      alertTypes: {
-        emergency_button: true,
-        cyberbullying: true,
-        left_safe_zone: true,
-        entered_safe_zone: false,
-        safety_pattern: true,
-        screen_time_exceeded: true,
-        blocked_app_attempt: false,
-        // Raised once the device holds an approved-contact list and someone not
-        // on it tries to reach the child.
-        unknown_contact: true,
-      },
-    };
+    const defaults = NOTIFICATION_PREF_DEFAULTS;
     res.json({ ...defaults, ...prefs, alertTypes: { ...defaults.alertTypes, ...(prefs.alertTypes || {}) } });
   } catch (err) {
     next(err);
   }
 };
 
+/**
+ * The switches this endpoint is allowed to move, and the alert types they may
+ * name.
+ *
+ * `{ ...current, ...req.body }` wrote whatever it was handed. Nothing read the
+ * extra keys, so this was not a privilege bug — but it made a request body an
+ * arbitrary write into a column on the user row, which is a storage primitive
+ * nobody asked for: keys of any name, values of any shape, nested to any depth,
+ * up to the 1 MB body limit, per account, persisted and echoed back on every
+ * read. The next reader of this blob is what turns that into something worse,
+ * and there is no reason to leave it open: the screen has three toggles and a
+ * list of alert types, and every one of them is a boolean.
+ *
+ * An unrecognised key is dropped rather than refused. The apps ship on their own
+ * schedule, and a build that still knows about a setting this API has since
+ * retired must not fail to save the rest of the parent's choices.
+ */
 const updateNotificationPrefs = async (req, res, next) => {
   try {
     const current = req.user.notificationPrefs ? JSON.parse(req.user.notificationPrefs) : {};
-    const updated = { ...current, ...req.body };
-    if (req.body.alertTypes) updated.alertTypes = { ...(current.alertTypes || {}), ...req.body.alertTypes };
+    const body = req.body || {};
+
+    const updated = { ...current };
+    for (const flag of PREF_FLAGS) {
+      if (body[flag] !== undefined) updated[flag] = !!body[flag];
+    }
+
+    if (body.alertTypes && typeof body.alertTypes === 'object' && !Array.isArray(body.alertTypes)) {
+      const types = { ...(current.alertTypes || {}) };
+      for (const [type, on] of Object.entries(body.alertTypes)) {
+        if (PREF_ALERT_TYPES.includes(type)) types[type] = !!on;
+      }
+      updated.alertTypes = types;
+    }
+
     await req.user.update({ notificationPrefs: JSON.stringify(updated) });
     res.json(updated);
   } catch (err) {

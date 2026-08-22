@@ -2,6 +2,7 @@ const { Op } = require('sequelize');
 const { Transaction, User } = require('../models');
 const { parsePagination } = require('../utils/pagination');
 const { likeOperator } = require('../utils/queryOperators');
+const { countGrouped } = require('../utils/aggregate');
 const { isUuid } = require('../utils/ids');
 const { STAFF_ROLES } = require('../config/roles');
 const { PLANS, PLAN_KEYS, PAID_PLAN_KEYS, SUSPENDED_PLAN, planLabel } = require('../config/plans');
@@ -89,8 +90,13 @@ const billingSummary = async () => {
   const monthAgo = new Date(now - 30 * DAY_MS);
   const twoMonthsAgo = new Date(now - 60 * DAY_MS);
 
-  const [planRows, billedRows, changeRows] = await Promise.all([
-    User.findAll({ where: CUSTOMERS, attributes: ['plan'] }),
+  const [counted, billedRows, changeRows] = await Promise.all([
+    // The plan mix, grouped in the database. This used to select every customer
+    // row with its `plan` projected and tally them in JS — a full scan of the
+    // users table on each load of this screen, for a handful of integers.
+    // Unlike the revenue buckets below, a `GROUP BY` on a plain string column
+    // reads identically on SQLite and Postgres.
+    countGrouped(User, 'plan', CUSTOMERS),
     // A year of payments, two columns wide. Bucketed in JS rather than with
     // three GROUP BY queries: date truncation is spelled differently on SQLite
     // and Postgres, and the console must not report a different revenue trend
@@ -110,13 +116,15 @@ const billingSummary = async () => {
   ]);
 
   // ── The plan mix ───────────────────────────────────────────────────────────
-  const counted = new Map(planRows.map((u) => [u.plan, 0]));
-  planRows.forEach((u) => { counted.set(u.plan, counted.get(u.plan) + 1); });
-
   // Every sellable plan appears whether or not anyone is on it — a tier with no
   // subscribers is a fact, and a legend that drops it reads as a broken chart.
   // Suspended accounts only appear once there are some.
-  const customers = planRows.length;
+  //
+  // The customer total is the sum of the groups rather than a separate COUNT, so
+  // it cannot disagree with the shares computed from them — including for a row
+  // whose `plan` is NULL, which forms its own group and belongs in the
+  // denominator even though it matches no tier.
+  const customers = [...counted.values()].reduce((sum, n) => sum + n, 0);
   const shownPlans = [...PLAN_KEYS, ...(counted.get(SUSPENDED_PLAN) ? [SUSPENDED_PLAN] : [])];
   const plans = shownPlans.map((key) => {
     const subscribers = counted.get(key) || 0;

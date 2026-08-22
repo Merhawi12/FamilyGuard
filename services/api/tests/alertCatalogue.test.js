@@ -29,7 +29,7 @@ const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
 
 /** Every `emitEvent('alert:x')` the child app really performs. */
 const childEmitted = () => {
-  const dir = path.join(REPO, 'apps/child-app/src');
+  const dir = path.join(REPO, 'apps/child-app/shared/src');
   const files = [];
   const walk = (d) => {
     for (const entry of fs.readdirSync(d, { withFileTypes: true })) {

@@ -47,6 +47,9 @@ const check = (name, ok, detail = '') => {
 };
 const step = (t) => console.log(`\n${t}`);
 
+/** Multi-line page text flattened onto one line, so a failure detail stays readable. */
+const oneLine = (text) => String(text || '').split('\n').map((s) => s.trim()).filter(Boolean).join(' | ');
+
 // ── API ──────────────────────────────────────────────────────────────────────
 const dataDir = mkdtempSync(path.join(tmpdir(), 'parentix-browser-'));
 let serverOutput = '';
@@ -71,6 +74,29 @@ const server = spawn(process.execPath, ['src/server.js'], {
     STORAGE_PROVIDER: 'none',
     STRIPE_SECRET_KEY: '',
     REDIS_URL: '',
+
+    /**
+     * No SMS provider, stated rather than assumed.
+     *
+     * This block neutralises every external service by name, and the SMS ones
+     * were simply not there to name when it was written. Once Twilio went live,
+     * `services/api/.env` carried real credentials — and this harness spawns the
+     * API as `development`, where dotenv reads that file — so the phone-signup
+     * walk started sending a genuine, billed message to the fictional number the
+     * harness types, and then hung waiting for a dev code the API no longer
+     * returns because the SMS had "gone out".
+     *
+     * Both halves of that are worth stopping. A test suite must not spend money
+     * or put a stranger's number into a carrier's queue, and a harness whose
+     * behaviour depends on what is in an untracked file on one machine is not
+     * testing the product — it is testing the laptop. The same reasoning is why
+     * `config/env.js` refuses to read `.env` at all under NODE_ENV=test.
+     */
+    SMS_PROVIDER: 'none',
+    TWILIO_ACCOUNT_SID: '',
+    TWILIO_AUTH_TOKEN: '',
+    TWILIO_FROM_NUMBER: '',
+    TWILIO_MESSAGING_SERVICE_SID: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -325,6 +351,26 @@ const ENVIRONMENTAL_CONSOLE_NOISE = [
  */
 const CRASHED = 'An unexpected error occurred';
 
+/**
+ * Third-party map services, whose reachability is not this product.
+ *
+ * The Location page draws OpenStreetMap tiles whenever Google's map is not
+ * usable, and looks addresses up against Nominatim on the same terms. Both are
+ * free public services on the open internet: a run behind a proxy, on a laptop
+ * with no connection, or during one of OSM's rate-limited minutes would fail
+ * every check on a page whose own behaviour was correct. The page reports a tile
+ * server it cannot reach on its own — that message is asserted below — so
+ * nothing here goes unnoticed by being forgiven.
+ */
+const EXTERNAL_MAP_HOSTS = [
+  'tile.openstreetmap.org',
+  'nominatim.openstreetmap.org',
+  'maps.googleapis.com',
+  'maps.gstatic.com',
+];
+
+const isExternalMap = (url) => EXTERNAL_MAP_HOSTS.some((host) => url.includes(host));
+
 /** Everything a page did wrong, collected so a silent failure cannot pass. */
 const watch = (page, label) => {
   const problems = [];
@@ -337,9 +383,11 @@ const watch = (page, label) => {
   page.on('pageerror', (e) => problems.push(`exception: ${e.message}`));
   page.on('requestfailed', (r) => {
     const why = r.failure()?.errorText || '';
+    if (isExternalMap(r.url())) return;
     if (!why.includes('ERR_ABORTED')) problems.push(`request failed: ${r.url()} (${why})`);
   });
   page.on('response', (r) => {
+    if (isExternalMap(r.url())) return;
     if (r.status() >= 400 && !r.url().includes('favicon')) problems.push(`HTTP ${r.status()} ${r.url()}`);
   });
   return { label, problems };
@@ -706,6 +754,74 @@ try {
     check('marking read is persisted across a reload', !/unread/.test(after || ''), after || '(none)');
   }
 
+  /*
+   * Reading the privacy policy must not cost a parent their session.
+   *
+   * These are public routes on purpose — the sign-in screen and the marketing
+   * site link to them — but they are also linked from Settings, and the shell
+   * used to greet a signed-in parent with "Sign in / Get started" and no
+   * dashboard chrome. The token was never touched; it simply looked exactly
+   * like being logged out, and the only way back was a logo pointing at the
+   * marketing site.
+   */
+  step('Family app — legal pages and support keep the session and the way back');
+  {
+    const page = await browser.newPage();
+    await page.goto(`${FAMILY}/login`);
+    await page.evaluate((t) => localStorage.setItem('fg_token', t), parentToken);
+    const w = watch(page, 'legal-and-support');
+
+    for (const [route, label] of [['privacy-policy', 'Privacy Policy'], ['terms', 'Terms']]) {
+      await page.goto(`${FAMILY}/${route}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(500);
+
+      const header = await page.locator('header').innerText();
+      check(`${label} does not ask a signed-in parent to sign in`,
+        !/Sign in|Get started/i.test(header), oneLine(header));
+      check(`${label} offers the way back to the dashboard`,
+        /Back to dashboard/i.test(header), oneLine(header));
+
+      // The logo is what people actually click to leave a page like this.
+      await page.locator('header a').first().click();
+      await page.waitForTimeout(1200);
+      check(`${label} returns to the dashboard, not the marketing site`,
+        page.url().endsWith('/dashboard'), page.url());
+      check(`${label} leaves the session intact`,
+        Boolean(await page.evaluate(() => localStorage.getItem('fg_token'))));
+    }
+
+    // Support is a route inside the dashboard, not a trip to the static site.
+    await page.goto(`${FAMILY}/dashboard/settings?section=about`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+    await page.locator('a[href="/dashboard/support"]').first().click();
+    await page.waitForTimeout(1000);
+    check('Contact support stays in the app', page.url().endsWith('/dashboard/support'), page.url());
+    check('and keeps the dashboard nav on screen',
+      await page.locator('nav[aria-label="Primary"]').count() > 0);
+    check('and is titled, not left as "Parentix"',
+      (await page.locator('header h1').innerText()).trim() === 'Contact support');
+
+    check('the legal and support flow is clean', w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
+    await page.close();
+  }
+
+  /*
+   * The other half: a visitor with no session must still be offered a way in.
+   * Making the shell session-aware could easily have shown "Back to dashboard"
+   * to someone with no dashboard to go back to.
+   */
+  step('Family app — legal pages still serve signed-out visitors');
+  {
+    const page = await browser.newPage();
+    await page.goto(`${FAMILY}/privacy-policy`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(500);
+    const header = await page.locator('header').innerText();
+    check('a signed-out visitor is offered sign-in', /Sign in|Get started/i.test(header),
+      oneLine(header));
+    check('and not a dashboard they cannot reach', !/Back to dashboard/i.test(header));
+    await page.close();
+  }
+
   step('Family app — every dashboard route renders');
   {
     const routes = [
@@ -796,24 +912,26 @@ try {
   }
 
   /*
-   * The third way the map can fail, which the page used to have no state for.
+   * The map without Google, which is how most deployments run.
    *
-   * A missing key is caught before loading, and a script that never arrives
-   * shows up as `loadError`. But a key that is present, well-formed and live and
-   * is then refused during authentication — the ordinary result of a browser key
-   * whose referrer allowlist names the production hostnames, exactly as it
-   * should — leaves `loadError` null and `isLoaded` true. The page believed the
-   * map was fine while Google painted "Oops! Something went wrong." inside it,
-   * and went on offering "Safe zone", which drops the parent into a mode whose
-   * only instruction is to tap a map that is not there.
+   * There are three ways Google's map does not appear: no key configured (the
+   * default, since a Maps key is a billing-backed secret someone has to create),
+   * a script that never arrives, and — the one nothing in the loader reports — a
+   * key that is present, well-formed and live and is then refused during
+   * authentication, the ordinary result of a browser key whose referrer
+   * allowlist names the production hostnames, exactly as it should. All three
+   * used to end with a "Map unavailable" panel where the most important element
+   * of the screen goes; all three now fall back to keyless OpenStreetMap tiles.
    *
    * Driven through `gm_authFailure` because that is exactly how Google reports
-   * it, so no key is needed to exercise the behaviour and the check runs the
-   * same whether or not this machine has one.
+   * the refusal, so no key is needed to exercise the behaviour and the check
+   * runs the same whether or not this machine has one.
    */
-  step('Family app — the Location page owns the failure when Google refuses the key');
+  step('Family app — the Location page draws a map without Google');
   {
     const page = await browser.newPage();
+    const said = [];
+    page.on('console', (m) => { if (m.type() === 'warning') said.push(m.text()); });
     await page.goto(`${FAMILY}/login`);
     await page.evaluate((t) => localStorage.setItem('fg_token', t), parentToken);
     await page.goto(`${FAMILY}/dashboard/location`, { waitUntil: 'networkidle' });
@@ -823,18 +941,66 @@ try {
     check('the page registers Google’s auth-failure hook', hookInstalled);
 
     await page.evaluate(() => window.gm_authFailure());
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(1500); // the fallback map is a lazily loaded chunk
 
+    /*
+     * A browser key is public, so an allowlist of the hostnames that may use it
+     * is the only thing protecting it — which means a correctly restricted key
+     * *must* refuse this run at 127.0.0.1. Putting "Google rejected the map key,
+     * check billing and referrers" on the screen for that is the page grading
+     * the safer configuration as broken, in front of a parent who came here to
+     * find their child and now has a working map anyway. So: nothing on screen
+     * at a development origin, and the reason in the console instead.
+     */
     const body = await page.locator('body').innerText();
     check(
-      'it names the refusal itself rather than leaving Google’s overlay to explain it',
-      /Google rejected the map key/i.test(body),
-      body.slice(0, 120).replace(/\s+/g, ' '),
+      'it does not call a development origin’s expected refusal a fault',
+      !/Google rejected the map key/i.test(body),
+      body.slice(0, 160).replace(/\s+/g, ' '),
+    );
+    check(
+      'it says why the map is not Google’s where a developer will see it',
+      said.some((line) => /OpenStreetMap/i.test(line) && /refused/i.test(line)),
+      said.slice(0, 2).join(' | ') || '(nothing logged)',
     );
 
+    // The point of the fallback: a real, pannable map, not a panel apologising
+    // for the absence of one.
+    const drawn = await page.evaluate(() => {
+      const container = document.querySelector('.leaflet-container');
+      return {
+        present: !!container,
+        height: container ? Math.round(container.getBoundingClientRect().height) : 0,
+        attributed: /OpenStreetMap/i.test(document.querySelector('.leaflet-control-attribution')?.textContent || ''),
+      };
+    });
+    check('a keyless OpenStreetMap map is drawn in its place', drawn.present && drawn.height > 200, JSON.stringify(drawn));
+    // Required by the tile usage policy the deployment relies on.
+    check('the tile source is credited', drawn.attributed);
+
     const zoneButton = page.locator('button:has-text("Safe zone")');
-    const closedOff = (await zoneButton.count()) === 0 || await zoneButton.first().isDisabled();
-    check('it stops offering to place a zone on a map that is not there', closedOff);
+    check('placing a zone on the map is still offered', await zoneButton.first().isEnabled());
+
+    // Tapping the map is the whole point of that mode, and it is the one part
+    // the fallback had to reimplement rather than inherit.
+    await zoneButton.first().click();
+    await page.locator('.leaflet-container').click({ position: { x: 240, y: 160 } });
+    await page.waitForTimeout(400);
+    const placed = await page.evaluate(() => {
+      const latitude = document.querySelector('input[type="number"][step="any"]');
+      return latitude ? latitude.value : '';
+    });
+    check('a tap on it fills in the new zone’s position', /^-?\d+\.\d+$/.test(placed), placed || '(empty)');
+
+    // And the zone that comes out of it is drawn on that map. A circle is the
+    // one thing the fallback renders that has no equivalent in a screenshot of
+    // an empty map: it is SVG, drawn by us, from data the API returned.
+    await page.fill('input[placeholder="e.g. Home, School"]', 'Browser Zone');
+    await page.click('button:has-text("Save safe zone")');
+    await page.waitForTimeout(900);
+    check('the zone is saved and listed', await page.locator('text=Browser Zone').count() > 0);
+    check('and drawn on the map as a circle',
+      await page.locator('.leaflet-container path.leaflet-interactive').count() > 0);
 
     await page.close();
   }
@@ -897,6 +1063,89 @@ try {
 
     check('the Web History page is clean', w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
     await page.close();
+
+    // ── Deleting history, and the dialog in front of it ─────────────────────
+    /*
+     * The confirmation is the feature here as much as the delete is. A parent
+     * mis-tapping a bin icon on a dense list of near-identical domains is the
+     * failure this guards, so "Cancel leaves the row alone" is the check that
+     * matters most — a dialog nobody tested is a dialog that might be accepting
+     * by default.
+     */
+    step('Family app — history rows can be deleted, and cancelling really cancels');
+    const delPage = await browser.newPage();
+    await delPage.goto(`${FAMILY}/login`);
+    await delPage.evaluate((t) => localStorage.setItem('fg_token', t), parentToken);
+    const dw = watch(delPage, 'web-history-delete');
+    await delPage.goto(`${FAMILY}/dashboard/web-history`, { waitUntil: 'networkidle' });
+    await delPage.waitForTimeout(900);
+    await delPage.locator('button:has-text("Browser Kid")').first().click().catch(() => {});
+    await delPage.waitForTimeout(900);
+
+    const rowDelete = delPage.locator('button[aria-label^="Delete history entry"]');
+    check('every history row offers a delete', await rowDelete.count() > 0,
+      String(await rowDelete.count()));
+
+    // Cancel: the dialog appears, is dismissed, and nothing is destroyed.
+    let dialogText = '';
+    delPage.once('dialog', async (d) => { dialogText = d.message(); await d.dismiss(); });
+    await rowDelete.first().click();
+    await delPage.waitForTimeout(700);
+    check('deleting one entry asks first', dialogText.includes('Delete this entry'), dialogText);
+    check('the prompt names the row rather than asking in the abstract',
+      dialogText.includes('khanacademy.org') || dialogText.includes('wikipedia.org'), dialogText);
+    check('the prompt says it cannot be undone', dialogText.includes('cannot be undone'), dialogText);
+
+    let bodyText = await delPage.locator('body').innerText();
+    check('cancelling deletes nothing', bodyText.includes('khanacademy.org'),
+      bodyText.slice(0, 140).replace(/\n/g, ' '));
+
+    // Accept: the row goes.
+    delPage.once('dialog', (d) => d.accept());
+    await delPage.locator('button[aria-label*="khanacademy.org"]').first().click();
+    await delPage.waitForTimeout(1200);
+    bodyText = await delPage.locator('body').innerText();
+    check('confirming removes that one row', !bodyText.includes('khanacademy.org'),
+      bodyText.slice(0, 140).replace(/\n/g, ' '));
+    check('and leaves the others alone', bodyText.includes('wikipedia.org'),
+      bodyText.slice(0, 140).replace(/\n/g, ' '));
+
+    /*
+     * A search-scoped clear could only ever be partial — the search decrypts
+     * over a capped scan — so the button is withheld rather than offering a
+     * delete that quietly misses rows.
+     */
+    await delPage.fill('input[type="search"]', 'wikipedia');
+    await delPage.waitForTimeout(1200);
+    check('the clear button is withheld while a search is active',
+      await delPage.locator('button:has-text("Clear all")').count() === 0);
+    await delPage.fill('input[type="search"]', '');
+    await delPage.waitForTimeout(1200);
+    check('and comes back when the search is cleared',
+      await delPage.locator('button:has-text("Clear all")').count() === 1);
+
+    let clearPrompt = '';
+    delPage.once('dialog', async (d) => { clearPrompt = d.message(); await d.accept(); });
+    await delPage.locator('button:has-text("Clear all")').first().click();
+    await delPage.waitForTimeout(1500);
+    check('clearing the history warns that the Activity Log loses the same rows',
+      clearPrompt.includes('Activity Log'), clearPrompt);
+
+    bodyText = await delPage.locator('body').innerText();
+    check('the history is empty afterwards', bodyText.includes('No web history yet'),
+      bodyText.slice(0, 160).replace(/\n/g, ' '));
+
+    // The rows really are gone from the other screen, not merely hidden on this one.
+    await delPage.goto(`${FAMILY}/dashboard/activity`, { waitUntil: 'networkidle' });
+    await delPage.waitForTimeout(900);
+    await delPage.locator('button:has-text("Browser Kid")').first().click().catch(() => {});
+    await delPage.waitForTimeout(900);
+    bodyText = await delPage.locator('body').innerText();
+    check('and gone from the Activity Log too, which reads the same table',
+      !bodyText.includes('wikipedia.org'), bodyText.slice(0, 160).replace(/\n/g, ' '));
+
+    check('the delete flow is clean', dw.problems.length === 0, dw.problems.slice(0, 2).join(' | '));
+    await delPage.close();
 
     // ── Contacts: the UI-vs-backend reality check ──────────────────────────
     step('Family app — an approval in the UI is real on the device');
@@ -1118,15 +1367,31 @@ try {
     const stillLinked = await api('GET', '/devices/me/rules', { token: controlDeviceToken });
     check('the linked device is untouched by the rename', stillLinked.status === 200);
 
-    // Only the platform that has a client can be linked — and because that is
-    // exactly one, the sheet states it rather than offering a dropdown whose
-    // only option is the one already selected.
+    /*
+     * Only a platform that has an installable client may be offered, or the
+     * parent generates a code nothing can consume and gets a device row that
+     * stays "never connected" for ever with nothing to explain why.
+     *
+     * That used to be Android alone, and the sheet stated it rather than
+     * offering a dropdown whose only option was the one already selected — with
+     * the count condition left in place so the control would come back on its
+     * own the day a second client shipped. It has: `apps/child-desktop` is an
+     * agent for Windows and macOS, and it redeems a code through the same
+     * endpoint the phones use. iPhone is still absent, and for the original
+     * reason — the iOS child app builds, but it is not in the App Store, so
+     * there is nothing for a family to install.
+     */
     await page.click('button:has-text("Link device")');
     await page.waitForTimeout(400);
-    const typeSelects = await page.locator('label:has-text("Device type") select').count();
-    const linkForm = (await page.locator('form:has(button:has-text("Generate code"))').innerText()).replace(/\s+/g, ' ');
-    check('the one supported platform is stated, not offered as a single-option dropdown',
-      typeSelects === 0 && /android phone or tablet/i.test(linkForm), `selects=${typeSelects} · ${linkForm.slice(0, 90)}`);
+    const typeSelect = page.locator('label:has-text("Device type") select');
+    const offered = (await typeSelect.locator('option').allInnerTexts()).map((t) => t.trim());
+    check('every platform with a client is offered, and only those',
+      offered.length === 3
+      && offered.some((o) => /android/i.test(o))
+      && offered.some((o) => /windows/i.test(o))
+      && offered.some((o) => /mac/i.test(o))
+      && !offered.some((o) => /iphone|ipad/i.test(o)),
+      JSON.stringify(offered));
 
     /*
      * Typed rather than filled, which is the entire point of these four lines.
@@ -1510,6 +1775,88 @@ try {
 
     check(`${label} is clean on a phone`, w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
     await page.close();
+  }
+
+  /*
+   * The narrowest phone still in use, which is where a layout gives way first.
+   *
+   * The sweep above runs at 390×844. Nothing was breaking there, and things were
+   * breaking anyway: the Alerts severity filters measured 475px side by side, so
+   * on a 320–375px screen "Medium" and "Low" sat off the right edge behind a
+   * scrollbar `no-scrollbar` hides — present in the DOM, invisible to the
+   * parent, and passing every check because the page itself did not scroll.
+   *
+   * So this asserts two different things: that no screen scrolls sideways, and
+   * that no *control* is parked outside the viewport. The second is the one that
+   * catches a hidden filter.
+   */
+  step('Family app at 320px — the narrowest phone still in use');
+  {
+    const narrow = await browser.newContext({
+      viewport: { width: 320, height: 640 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
+    });
+    for (const [route, label] of PHONE_ROUTES) {
+      const page = await narrow.newPage();
+      await page.goto(`${FAMILY}/login`);
+      await page.evaluate((t) => localStorage.setItem('fg_token', t), parentToken);
+      await page.goto(`${FAMILY}/dashboard/${route}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(600);
+
+      const m = await page.evaluate(() => {
+        const de = document.documentElement;
+        // A control inside the closed off-canvas drawer is meant to be off
+        // screen; only its own container's position says whether it counts.
+        const offCanvas = (el) => {
+          let n = el;
+          while (n && n !== document.body) {
+            const r = n.getBoundingClientRect();
+            if (r.right <= 0 || r.left >= window.innerWidth) return true;
+            n = n.parentElement;
+          }
+          return false;
+        };
+        const stranded = [];
+        for (const el of document.querySelectorAll('a,button,[role="button"]')) {
+          const s = getComputedStyle(el);
+          if (s.display === 'none' || s.visibility === 'hidden') continue;
+          const r = el.getBoundingClientRect();
+          if (!r.width || !r.height || offCanvas(el)) continue;
+          // Inside a scroller the user can reach it; outside one it is lost.
+          let p = el.parentElement, scrollable = false;
+          while (p && p !== document.body) {
+            const ps = getComputedStyle(p);
+            if ((ps.overflowX === 'auto' || ps.overflowX === 'scroll') && p.scrollWidth > p.clientWidth) { scrollable = true; break; }
+            p = p.parentElement;
+          }
+          if (!scrollable && (r.right > window.innerWidth + 1 || r.left < -1)) {
+            stranded.push(`${(el.innerText || el.getAttribute('aria-label') || '?').trim().slice(0, 18)} @${Math.round(r.left)}..${Math.round(r.right)}`);
+          }
+        }
+        return { overflow: de.scrollWidth - de.clientWidth, stranded: [...new Set(stranded)] };
+      });
+
+      check(`${label} does not scroll sideways at 320px`, m.overflow <= 1, `${m.overflow}px`);
+      check(`${label} strands no control off-screen at 320px`, m.stranded.length === 0,
+        m.stranded.slice(0, 3).join(', '));
+      await page.close();
+    }
+
+    // The specific regression: every severity filter reachable without scrolling.
+    const page = await narrow.newPage();
+    await page.goto(`${FAMILY}/login`);
+    await page.evaluate((t) => localStorage.setItem('fg_token', t), parentToken);
+    await page.goto(`${FAMILY}/dashboard/alerts`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+    const chips = await page.evaluate(() => [...document.querySelectorAll('[aria-pressed]')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return { t: el.innerText.trim().split('\n')[0], visible: r.right <= window.innerWidth + 1 && r.left >= -1, h: Math.round(r.height) };
+    }));
+    check('all five alert filters are visible at 320px', chips.length === 5 && chips.every((c) => c.visible),
+      chips.filter((c) => !c.visible).map((c) => c.t).join(', ') || `${chips.length} chips`);
+    check('and each is a 44px target', chips.every((c) => c.h >= 44),
+      chips.map((c) => `${c.t}:${c.h}`).join(' '));
+    await page.close();
+    await narrow.close();
   }
 
   step('Family app on a phone — navigation');

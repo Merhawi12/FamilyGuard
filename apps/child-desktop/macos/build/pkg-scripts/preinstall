@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# Parentix — .pkg preinstall.
+#
+# One job, and it is the one that matters on an upgrade: put the machine's DNS
+# servers back before the app is replaced underneath a running agent.
+#
+# Without this, upgrading over a running install leaves the resolver pointed at
+# 127.0.0.1 with the proxy killed mid-install — a Mac with no working DNS, at
+# the exact moment the family is least likely to suspect the thing they were
+# just installing. The new agent repairs it at next start, but "next start" is
+# after somebody has already tried to load a page and failed.
+
+set -e
+
+HELPER="/Library/Application Support/Parentix/dns-helper.sh"
+SHARED="/Users/Shared/Parentix"
+
+if [ -x "$HELPER" ] && [ -s "$SHARED/dns-snapshot.tsv" ]; then
+  mkdir -p "$SHARED"
+  printf '{"id":"preinstall","action":"restore"}\n' > "$SHARED/dns-request.json"
+  # Run it directly rather than waiting for launchd to notice the file: the
+  # install is about to proceed either way, and a watch that fires after the app
+  # bundle has been replaced is too late to be the thing we relied on.
+  "$HELPER" || true
+fi
+
+# The agent is about to be replaced on disk; let it exit rather than run against
+# a bundle that no longer matches it.
+pkill -x Parentix 2>/dev/null || true
+
+exit 0

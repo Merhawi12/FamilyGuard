@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Parentix — hardened runtime entitlements.
+
+  Short, and short on purpose. The agent asks macOS for nothing beyond what an
+  ordinary application gets:
+
+  - It is **not sandboxed**. `com.apple.security.app-sandbox` is absent, which is
+    what lets the agent spawn `lsappinfo`, `ioreg` and `networksetup` and send a
+    signal to another process. A sandboxed build could do none of those, and
+    there is no entitlement that would give them back — the sandbox is the wrong
+    container for a device agent, which is why this ships outside the Mac App
+    Store.
+  - There is **no `com.apple.developer.networking.networkextension`**, and that
+    is a decision rather than an omission. A content-filter or DNS-proxy Network
+    Extension is Apple's blessed way to do website filtering, and it is gated
+    behind an entitlement granted by application, on a review cycle, with the
+    extension itself needing user approval in System Settings. The launchd helper
+    reaches the same place with `networksetup` and no Apple negotiation. If the
+    entitlement is ever granted, `NEDNSProxyProvider` is the better home for
+    `src/dns/proxy.js` and the rest of the agent would not change.
+
+  `allow-jit` and `allow-unsigned-executable-memory` are Electron's, not ours:
+  V8 needs both under the hardened runtime, and notarisation fails without them.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <key>com.apple.security.network.server</key>
+  <true/>
+</dict>
+</plist>

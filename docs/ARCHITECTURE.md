@@ -17,10 +17,10 @@
                      │   parentix-admin.web.app      │  │
                      └───────────────────────────────┘  │
                                                         ▼
-   Child device ──────────────────────────▶ ┌──────────────────────────┐
-   (Android, direct)                        │ Global external HTTPS LB │
-                                            │   api.parentix.ca        │
-                                            └────────────┬─────────────┘
+   Child phone   ────────────────────────▶ ┌──────────────────────────┐
+   (Android / iOS, direct)                  │ Global external HTTPS LB │
+   Child laptop  ────────────────────────▶  │   api.parentix.ca        │
+   (Windows / macOS, direct)                └────────────┬─────────────┘
                                                          ▼
                                             ┌──────────────────────────┐
                                             │ Cloud Run: Parentix API  │

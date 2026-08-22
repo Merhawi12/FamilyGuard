@@ -13,6 +13,9 @@ const Child = sequelize.define('Child', {
   pin: { type: DataTypes.STRING },
   dailyLimitMinutes: { type: DataTypes.INTEGER, defaultValue: 120 },
   isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
-}, { underscored: true });
+}, {
+  underscored: true,
+  indexes: [{ fields: ['parent_id', 'is_active'] }],
+});
 
 module.exports = Child;

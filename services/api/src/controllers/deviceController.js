@@ -8,7 +8,11 @@ const { deviceAllowance } = require('../middleware/featureGate');
 const { blindIndex } = require('../utils/crypto');
 const { getContentPolicy } = require('../utils/contentSettings');
 const { deviceWebsiteRules } = require('../utils/contentPolicy');
-const { disconnectDeviceSockets } = require('../utils/session');
+const { revokeDeviceAccess } = require('../utils/session');
+const { BLOCKED_BY_PARENT } = require('../utils/deviceAccess');
+const {
+  rulesVisibleTo, resolveAppRules, resolveWebsiteRules, resolveScreenTimeRule,
+} = require('../utils/deviceScope');
 const { reportRiskyBrowsing } = require('../utils/riskyBrowsing');
 const { track } = require('../utils/background');
 const { isUuid } = require('../utils/ids');
@@ -223,7 +227,7 @@ const updateDevice = async (req, res, next) => {
  */
 const confirmLink = async (req, res, next) => {
   try {
-    const { code, deviceId, osVersion, pushToken } = req.body;
+    const { code, deviceId, osVersion, pushToken, type } = req.body;
     if (!code) return res.status(400).json({ error: 'code is required' });
 
     // Codes are generated as uppercase hex. The child app upper-cases what was
@@ -278,11 +282,28 @@ const confirmLink = async (req, res, next) => {
      * The condition is repeated inside the UPDATE so the database decides, and
      * the loser gets exactly what a second attempt should get.
      */
+    /**
+     * The device correcting its own type.
+     *
+     * The parent picks a type when they generate a code, from a dashboard that
+     * is by definition not the computer being set up — so a household with a
+     * Windows laptop and a MacBook can hand the Mac's code to the PC without
+     * anything looking wrong. The row then carries the wrong icon and the wrong
+     * label in the device list for ever, because nothing else ever revisits it.
+     *
+     * The device knows what it is. It may only say so as it links, it is
+     * validated against the same list the parent chose from, and an unrecognised
+     * value is ignored rather than refused: a client sending something new must
+     * not be unable to link because of a field that only decides an icon.
+     */
+    const declaredType = DEVICE_TYPES.includes(type) ? { type } : {};
+
     const [claimed] = await Device.update(
       {
         isLinked: true,
         osVersion,
         pushToken,
+        ...declaredType,
         lastSeen: new Date(),
         // Single-use, and gone from the database the moment it is spent. Leaving
         // it behind kept a live-looking credential on every linked row for the
@@ -345,10 +366,37 @@ const removeDevice = async (req, res, next) => {
     const device = await findOwnedDevice(req, res);
     if (!device) return undefined;
 
-    await device.update({ isActive: false });
+    await device.update({
+      isActive: false,
+      // The column `confirmLink` will accept from a client. Nothing the two
+      // shipping agents send populates it, but it can hold a push token, and a
+      // removal that leaves any credential behind is not a removal.
+      pushToken: null,
+      // A removed device is not a paused one. Left set, the row would come back
+      // from the dashboard's own filters describing itself as blocked, and a
+      // replacement device linked under the same name would look paused.
+      blockedAt: null,
+    });
+
+    /**
+     * The rules that named only this device go with it.
+     *
+     * These are exceptions to the child's general rules and have no meaning once
+     * the device is gone. Left behind they are invisible — no screen lists a
+     * rule for a device that no longer exists — and they would silently attach
+     * themselves to nothing until the ids were reused. The child-wide rows
+     * (`deviceId: null`) are untouched: they belong to the child, not to any
+     * device, and the siblings still obey them.
+     */
+    await Promise.all([
+      AppRule.destroy({ where: { deviceId: device.id } }),
+      WebsiteRule.destroy({ where: { deviceId: device.id } }),
+      ScreenTimeRule.destroy({ where: { deviceId: device.id } }),
+    ]);
     // Deactivating the row is only half of it — an already-open socket survives
-    // the handshake check that would now refuse it.
-    disconnectDeviceSockets(req.app.get('io'), device.id);
+    // the handshake check that would now refuse it, and the push token outlives
+    // both. See utils/session.js for why all three moved into one call.
+    await revokeDeviceAccess(req.app.get('io'), device.id);
     auditLog(req, { userId: req.user.id, action: 'device.removed', entity: 'Device', entityId: device.id });
     return res.json({ message: 'Device removed' });
   } catch (err) {
@@ -356,18 +404,32 @@ const removeDevice = async (req, res, next) => {
   }
 };
 
-// GET /api/devices/me/rules — device-authenticated, returns all active rules for this device's child
+/**
+ * GET /api/devices/me/rules — device-authenticated.
+ *
+ * Returns the rules *this* device must obey: the child's general rules, with any
+ * rule the parent narrowed to this device replacing its child-wide counterpart.
+ * Both the query and the collapse live in utils/deviceScope.js so the sync and
+ * the parent's own listing cannot disagree about precedence.
+ *
+ * A sibling's rules are filtered out in SQL, not after the fact — a device is
+ * never sent a rule that does not apply to it, so nothing on the phone has to be
+ * trusted to ignore one.
+ */
 const getDeviceRules = async (req, res, next) => {
   try {
-    const { childId } = req;
-    const [appRules, childRules, screenTimeRule, child, policy] = await Promise.all([
-      AppRule.findAll({ where: { childId } }),
-      WebsiteRule.findAll({ where: { childId } }),
-      ScreenTimeRule.findOne({ where: { childId } }),
+    const { childId, deviceId } = req;
+    const scope = rulesVisibleTo(childId, deviceId);
+
+    const [appRows, websiteRows, screenTimeRows, child, device, policy] = await Promise.all([
+      AppRule.findAll({ where: scope }),
+      WebsiteRule.findAll({ where: scope }),
+      ScreenTimeRule.findAll({ where: scope }),
       // The child app greets whoever is holding the phone. Their own name is
       // the one thing it needs that no rule carries, and this is the call it
       // already makes every five minutes.
       Child.findByPk(childId, { attributes: ['name'] }),
+      Device.findByPk(deviceId, { attributes: ['blockedAt'] }),
       getContentPolicy(),
     ]);
 
@@ -376,15 +438,84 @@ const getDeviceRules = async (req, res, next) => {
     // arrive as a row with no url, which the device could do nothing with: a
     // parent switched on "adult" and the phone blocked nothing.
     res.json({
-      appRules,
-      websiteRules: deviceWebsiteRules({ policy, childRules }),
-      screenTimeRule: screenTimeRule || null,
+      appRules: resolveAppRules(appRows),
+      websiteRules: deviceWebsiteRules({ policy, childRules: resolveWebsiteRules(websiteRows) }),
+      screenTimeRule: resolveScreenTimeRule(screenTimeRows),
       childName: child?.name || null,
+      /**
+       * The parent's pause, carried on the sync the device already makes.
+       *
+       * Sent on every sync rather than only on the socket event that applies it,
+       * because the socket is the fast path and not the reliable one: a phone
+       * that was switched off while it was blocked, or that missed the event on
+       * a flaky connection, has to come back locked. The five-minute poll is
+       * what makes that true, and it is the same reason the rules themselves are
+       * re-sent every time instead of being diffed.
+       */
+      blocked: device?.blockedAt
+        ? { since: device.blockedAt.toISOString(), reason: BLOCKED_BY_PARENT }
+        : null,
     });
   } catch (err) {
     next(err);
   }
 };
+
+/**
+ * POST /api/devices/:id/block and /unblock — pause one device, leaving its
+ * siblings alone.
+ *
+ * The device keeps its token and its socket: see utils/deviceAccess.js for why
+ * a block deliberately is not a revocation. All this changes is a timestamp and
+ * a push down the device's own room, which is what turns the lock screen on
+ * within a second instead of at the next five-minute poll.
+ *
+ * Idempotent, because the button that calls it is on a list that may be a few
+ * seconds stale and a parent who taps Block twice means it once.
+ */
+const setDeviceBlocked = (blocked) => async (req, res, next) => {
+  try {
+    const device = await findOwnedDevice(req, res);
+    if (!device) return undefined;
+
+    // No `isActive` check: `findOwnedDevice` only ever returns a live device, so
+    // a removed one is already a 404 here. That is the right answer — as far as
+    // the account is concerned the device is gone — and it is also why pausing
+    // and removing cannot be confused: there is nothing left to pause.
+
+    if (Boolean(device.blockedAt) !== blocked) {
+      await device.update({ blockedAt: blocked ? new Date() : null });
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`device:${device.id}`).emit(blocked ? 'device_blocked' : 'device_unblocked', {
+          deviceId: device.id,
+          since: device.blockedAt ? device.blockedAt.toISOString() : null,
+          reason: blocked ? BLOCKED_BY_PARENT : null,
+        });
+        // The parent's other open tabs, so a block applied on a phone shows on
+        // the laptop without a reload.
+        io.to(`parent:${req.user.id}`).emit('device_updated', {
+          deviceId: device.id, blockedAt: device.blockedAt,
+        });
+      }
+
+      auditLog(req, {
+        userId: req.user.id,
+        action: blocked ? 'device.blocked' : 'device.unblocked',
+        entity: 'Device',
+        entityId: device.id,
+      });
+    }
+
+    return res.json(device);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+const blockDevice = setDeviceBlocked(true);
+const unblockDevice = setDeviceBlocked(false);
 
 // GET /api/devices/me/contacts — device-authenticated, the approved contact list
 // for this device's child. `childId` comes from the device token, never the
@@ -610,5 +741,6 @@ const deviceLogWebHistory = async (req, res, next) => {
 
 module.exports = {
   getDevices, generateLink, regenerateLink, confirmLink, updateDevice, removeDevice,
+  blockDevice, unblockDevice,
   getDeviceRules, getDeviceContacts, deviceHeartbeat, deviceLogActivity, deviceLogWebHistory,
 };

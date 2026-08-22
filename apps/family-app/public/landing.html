@@ -156,7 +156,7 @@ em{font-style:italic;color:var(--current);}
 .btn-on-dark:hover{border-color:rgba(255,255,255,.6);}
 .btn-light{background:#fff;color:var(--abyss);box-shadow:0 10px 28px -10px rgba(0,0,0,.35);--ripple-color:rgba(12,100,120,.2);}
 .btn-light:hover{transform:translateY(-2px);}
-.btn-sm{padding:.6rem 1.25rem;font-size:.86rem;}
+.btn-sm{padding:.6rem 1.25rem;font-size:.86rem;min-height:2.75rem;}
 .btn-ripple{position:absolute;border-radius:50%;background:var(--ripple-color,rgba(255,255,255,.5));transform:scale(0);animation:rippleAnim .65s ease-out forwards;pointer-events:none;}
 @keyframes rippleAnim{to{transform:scale(1);opacity:0;}}
 
@@ -186,7 +186,7 @@ em{font-style:italic;color:var(--current);}
 .nav-links a:hover::after{width:100%;}
 .nav-right{display:flex;align-items:center;gap:1.2rem;}
 .nav-signin{font-size:.92rem;font-weight:600;color:var(--ink);}
-.nav-toggle{display:none;width:2.2rem;height:2.2rem;align-items:center;justify-content:center;}
+.nav-toggle{display:none;width:2.75rem;height:2.75rem;align-items:center;justify-content:center;margin-right:-.35rem;}
 .nav-toggle .use-icon{width:1.5rem;height:1.5rem;}
 .nav-toggle .ic-close{display:none;}
 body.nav-open .nav-toggle .ic-menu{display:none;}
@@ -559,7 +559,7 @@ body.nav-open .nav-toggle .ic-close{display:block;}
 .contact-status.error{color:var(--coral-deep);}
 .cf-ref{display:block;margin-top:.35rem;font-size:.78rem;color:#7C9AA3;letter-spacing:.04em;}
 .contact-more{text-align:center;margin-top:1.6rem;font-size:.9rem;color:var(--slate);}
-.contact-more a{color:var(--current);font-weight:600;}
+.contact-more a{color:var(--current);font-weight:600;display:inline-flex;align-items:center;min-height:2.75rem;padding:0 .25rem;}
 
 /* ============ FINAL CTA ============ */
 .cta{background:var(--abyss);color:#fff;text-align:center;overflow:hidden;position:relative;}
@@ -576,7 +576,8 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
 .footer-row{display:flex;flex-direction:column;align-items:center;gap:1.1rem;text-align:center;}
 .footer-logo{display:flex;align-items:center;gap:.5rem;color:#fff;font-family:'Fraunces',serif;font-weight:600;font-size:1.05rem;}
 .footer-logo .use-icon{width:1.5rem;height:1.5rem;color:var(--tide-light);}
-.footer-links{display:flex;gap:1.6rem;font-size:.88rem;}
+.footer-links{display:flex;gap:1.1rem;font-size:.88rem;}
+.footer-links a{display:inline-flex;align-items:center;min-height:2.75rem;padding:0 .25rem;}
 .footer-links a:hover{color:#fff;}
 .footer-copy{font-size:.8rem;color:rgba(255,255,255,.35);margin-top:.4rem;}
 </style>
@@ -586,7 +587,7 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
 <!-- ============ NAV ============ -->
 <header class="nav" id="siteNav">
   <div class="wrap nav-row">
-    <a href="#top" class="logo"><img src="/logo.png" alt="Parentix" class="logo-img"></a>
+    <a href="#top" class="logo"><picture style="display:contents"><source srcset="/logo.webp" type="image/webp"><img src="/logo.png" alt="Parentix" class="logo-img" width="500" height="500"></picture></a>
     <nav class="nav-links">
       <a href="#features">Features</a>
       <a href="#ai-features">AI Coach</a>
@@ -1007,7 +1008,7 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
 <!-- ============ FOOTER ============ -->
 <footer>
   <div class="wrap footer-row">
-    <div class="footer-logo"><img src="/logo.png" alt="Parentix" class="logo-img logo-img--footer"></div>
+    <div class="footer-logo"><picture style="display:contents"><source srcset="/logo.webp" type="image/webp"><img src="/logo.png" alt="Parentix" class="logo-img logo-img--footer" width="500" height="500"></picture></div>
     <div class="footer-links">
       <a href="/privacy-policy">Privacy Policy</a>
       <a href="/terms">Terms of Service</a>

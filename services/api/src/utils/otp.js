@@ -151,6 +151,28 @@ const codeMatches = (stored, submitted) => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
+/**
+ * The password-reset *ticket*, hashed for storage.
+ *
+ * `verify-reset-code` mints 32 random bytes and `reset-password` takes them
+ * back; between those two requests the value sat in `users.password_reset_token`
+ * as plain text. That is the one secret on this service that authorises a
+ * password change outright — no code, no session, no second step — so a database
+ * dump, a stray backup or a read-only SQL injection anywhere in the estate was a
+ * ready-made takeover of every account with a reset in flight, for the fifteen
+ * minutes each one lasts. The six digits that *buy* the ticket have been hashed
+ * since the OTP work above; the ticket itself was the half that was missed.
+ *
+ * Deliberately **not** `hashCode`. That function passes an already-hashed value
+ * through untouched so that applying it twice cannot break a live code, and it
+ * recognises "already hashed" as 64 hex characters — which is exactly the shape
+ * of the ticket (`randomBytes(32).toString('hex')`). Routed through it, every
+ * ticket would be stored verbatim and the hashing would silently do nothing.
+ * This one always hashes, and the label keeps it out of the same space as the
+ * codes so neither can ever be replayed as the other.
+ */
+const hashTicket = (token) => (token ? digest(`reset-ticket:${token}`) : null);
+
 /* ── The bookkeeping column ───────────────────────────────────────────────────
  *
  * `users.otp_state` is JSON in a TEXT column, holding one entry per purpose:
@@ -312,6 +334,7 @@ module.exports = {
   MAX_SENDS_PER_WINDOW,
   generateCode,
   hashCode,
+  hashTicket,
   codeMatches,
   prepareCode,
   checkCode,

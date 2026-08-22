@@ -9,6 +9,9 @@ const Session = sequelize.define('Session', {
   lastActiveAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   revoked: { type: DataTypes.BOOLEAN, defaultValue: false },
   revokedAt: { type: DataTypes.DATE },
-}, { underscored: true });
+}, {
+  underscored: true,
+  indexes: [{ fields: ['user_id'] }],
+});
 
 module.exports = Session;

@@ -40,7 +40,7 @@
       "env": { "node": true, "jest": true }
     },
     {
-      "files": ["apps/child-app/**/*.{js,jsx}"],
+      "files": ["apps/child-app/shared/**/*.{js,jsx}"],
       "extends": ["eslint:recommended", "plugin:react/recommended", "plugin:react-hooks/recommended"],
       "env": { "browser": false, "node": false, "es2022": true },
       "globals": {
@@ -59,6 +59,29 @@
       }
     },
     {
+      "files": [
+        "apps/child-desktop/shared/src/**/*.js",
+        "apps/child-desktop/shared/scripts/**/*.mjs",
+        "apps/child-desktop/*/main.js",
+        "apps/child-desktop/*/src/**/*.js"
+      ],
+      "extends": ["eslint:recommended"],
+      "env": { "node": true, "browser": false, "es2022": true }
+    },
+    {
+      // The child-facing windows: plain modules in a renderer, with no Node.
+      "files": ["apps/child-desktop/shared/src/ui/**/*.js"],
+      "extends": ["eslint:recommended"],
+      "env": { "node": false, "browser": true, "es2022": true }
+    },
+    {
+      // Electron loads preload scripts in a context with no ESM loader.
+      "files": ["apps/child-desktop/shared/preload.cjs"],
+      "extends": ["eslint:recommended"],
+      "env": { "node": true, "browser": true, "es2022": true },
+      "parserOptions": { "sourceType": "script" }
+    },
+    {
       "files": ["*.config.js", "apps/*/vite.config.js", "apps/*/tailwind.config.js", "apps/*/postcss.config.js"],
       "env": { "node": true }
     }
@@ -68,7 +91,8 @@
     "dist/",
     "build/",
     ".terraform/",
-    "apps/child-app/android/",
-    "apps/child-app/.expo/"
+    "apps/child-app/android/android/",
+    "apps/child-app/*/.expo/",
+    "apps/child-desktop/*/dist/"
   ]
 }

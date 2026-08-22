@@ -23,6 +23,7 @@ const Contacts = lazy(() => import('./pages/Contacts'));
 const Profile = lazy(() => import('./pages/Profile'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const Terms = lazy(() => import('./pages/Terms'));
+const Support = lazy(() => import('./pages/Support'));
 
 /**
  * The marketing site is the static `public/landing.html`, not a React route.
@@ -113,6 +114,10 @@ export default function App() {
                 <Route path="contacts" element={<Contacts />} />
                 <Route path="profile" element={<Profile />} />
                 <Route path="settings" element={<Settings />} />
+                {/* Support lives inside the dashboard, not out on the marketing
+                    site. Reaching it must never cost a parent their session or
+                    the way back — see pages/Support.jsx. */}
+                <Route path="support" element={<Support />} />
               </Route>
 
               <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';" />
+    <title>Parentix</title>
+    <link rel="stylesheet" href="./lock.css" />
+  </head>
+  <body>
+    <!--
+      The lock screen: one of these covers every display while a screen-time rule
+      is in force.
+
+      It closes nothing. Bedtime arriving mid-essay must not be the thing that
+      loses the essay, so the desktop underneath is untouched and everything the
+      child had open is still there in the morning. What it does is take the
+      screen and refuse to give it back, which is the desktop equivalent of what
+      the phone does by drawing over the app in front.
+
+      It is honest about being a deterrent rather than a cage. A child who knows
+      how can still reach a terminal on either platform; the point is that they
+      cannot do it *by accident* and cannot do it without knowing they did.
+    -->
+    <main class="lock">
+      <p class="eyebrow">Parentix</p>
+      <h1 id="title">This computer is paused</h1>
+      <p class="lead" id="detail"></p>
+
+      <div class="actions">
+        <button class="btn-primary" type="button" id="ask">Ask for more time</button>
+        <button class="btn-danger" type="button" id="sos">I need help now</button>
+      </div>
+
+      <p class="sent" id="sent" hidden>Sent to your parent.</p>
+      <p class="clock" id="clock"></p>
+    </main>
+    <script type="module" src="./lock.js"></script>
+  </body>
+</html>

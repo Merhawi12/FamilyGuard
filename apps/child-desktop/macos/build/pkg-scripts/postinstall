@@ -1,0 +1,58 @@
+#!/bin/sh
+#
+# Parentix — .pkg postinstall.
+#
+# Runs as root, once, at the end of the install. Three jobs:
+#
+#   1. put the DNS helper somewhere only root can write
+#   2. tell launchd about it
+#   3. create the shared directory the agent posts its requests into
+#
+# It does **not** start the agent or create a login item. That is the app's own
+# job — `bootstrap()` writes the login item through Electron the first time it
+# runs, under whichever account is signed in, which is the account that should
+# have it. An installer that guessed would guess wrong on any Mac with more than
+# one child on it.
+#
+# Every step is best-effort in the sense that a failure here leaves a working
+# agent: without the helper, website blocking and web history simply do not
+# start, and the permissions window says why. What must not happen is a helper
+# that exists but is writable by a non-root user, so those two `chown`/`chmod`
+# lines are the ones to preserve if this file is ever edited.
+
+set -e
+
+APP_SUPPORT="/Library/Application Support/Parentix"
+SHARED="/Users/Shared/Parentix"
+PLIST="/Library/LaunchDaemons/ca.parentix.child-desktop.helper.plist"
+RESOURCES="/Applications/Parentix.app/Contents/Resources/launchd"
+
+# ── 1. The helper ────────────────────────────────────────────────────────────
+mkdir -p "$APP_SUPPORT"
+cp "$RESOURCES/dns-helper.sh" "$APP_SUPPORT/dns-helper.sh"
+chown root:wheel "$APP_SUPPORT/dns-helper.sh"
+chmod 755 "$APP_SUPPORT/dns-helper.sh"
+
+# ── 2. launchd ───────────────────────────────────────────────────────────────
+# A daemon plist that any non-root account can write is one launchd refuses to
+# load, and it refuses silently — so these permissions are load-bearing rather
+# than tidy.
+cp "$RESOURCES/ca.parentix.child-desktop.helper.plist" "$PLIST"
+chown root:wheel "$PLIST"
+chmod 644 "$PLIST"
+
+# `bootout` first so a reinstall replaces the running definition rather than
+# adding a second one. It fails when nothing is loaded, which is the ordinary
+# first-install case, hence the `|| true`.
+launchctl bootout system "$PLIST" 2>/dev/null || true
+launchctl bootstrap system "$PLIST"
+
+# ── 3. The request directory ─────────────────────────────────────────────────
+# Writable by every local account on purpose: the child's unprivileged agent
+# posts requests here. The helper accepts no addresses, only `redirect` and
+# `restore`, precisely because this directory is not a trust boundary — see the
+# comment at the top of dns-helper.sh.
+mkdir -p "$SHARED"
+chmod 1777 "$SHARED"
+
+exit 0

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Avatar, Icon, useAuth, useBodyScrollLock, isStaff } from '@parentix/shared';
+import { Avatar, BrandLogo, Icon, useAuth, useBodyScrollLock, isStaff } from '@parentix/shared';
 import { NAV_SECTIONS } from '../navigation';
 
 // The staff console is a separate application; link out to it rather than
@@ -192,7 +192,7 @@ export default function Sidebar({ open, onClose, badges = {} }) {
               buy the whole lockup, not just the mark, which is why this is a
               large jump rather than a nudge.
             */}
-            <img src="/logo.png" alt="Parentix" className="h-12 lg:h-16 w-auto shrink-0" />
+            <BrandLogo className="h-12 lg:h-16 w-auto shrink-0" />
           </NavLink>
           <button onClick={onClose} className="icon-btn lg:hidden -mr-2" aria-label="Close menu">
             <Icon name="close" />

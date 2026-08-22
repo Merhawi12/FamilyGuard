@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Icon } from '@parentix/shared';
+import { BrandLogo, Icon } from '@parentix/shared';
 import { markWelcomeSeen } from '../services/welcome';
 
 /**
@@ -191,7 +191,7 @@ export default function Welcome() {
             className="splash-pop -mt-14 flex h-28 w-28 shrink-0 items-center justify-center rounded-[1.75rem] bg-white shadow-pop ring-1 ring-gray-100 wide:mt-0 wide:h-24 wide:w-24 short:h-16 short:w-16 short:rounded-2xl"
           >
             {slide.logo
-              ? <img src="/logo.png" alt="Parentix" className="h-auto w-20 wide:w-16 short:w-11" />
+              ? <BrandLogo className="h-auto w-20 wide:w-16 short:w-11" />
               : (
                 <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary-50 text-primary-600 wide:h-14 wide:w-14 short:h-10 short:w-10 short:rounded-xl">
                   <Icon name={slide.icon} size={32} />

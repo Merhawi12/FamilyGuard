@@ -1,8 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+      Backup is off, and both switches are set because they cover different
+      Android versions: `allowBackup` governs cloud backup everywhere, and
+      `dataExtractionRules` governs it *and* device-to-device transfer from
+      Android 12 on. See res/xml/data_extraction_rules.xml for why it matters
+      here specifically — this app is a WebView, and the parent's session token
+      lives in its localStorage inside the backed-up data directory.
+    -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

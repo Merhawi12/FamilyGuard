@@ -1,6 +1,7 @@
 const {
   Session, Child, Device, ActivityLog, Location, AppRule, WebsiteRule, ScreenTimeRule,
   Message, Contact, Alert, SafeZone, Notification, PushToken, Transaction,
+  AuditLog, ContactMessage,
 } = require('../models');
 const { sequelize } = require('../config/db');
 const { disconnectUserSockets, disconnectDeviceSockets } = require('./session');
@@ -64,6 +65,44 @@ const eraseAccount = async (user, { io } = {}) => {
     await SafeZone.destroy({ where: { parentId: user.id }, transaction });
     // Contacts added before any child existed carry a parentId and no childId.
     await Contact.destroy({ where: { parentId: user.id }, transaction });
+
+    /**
+     * Messages this person sent through the public contact form.
+     *
+     * Matched on the address rather than on a user id, because the form does not
+     * require an account — someone writes in, and only later signs up with the
+     * same address. Those submissions carry their name, their message and a hash
+     * of their IP, and nothing else in this function would ever reach them.
+     */
+    await ContactMessage.destroy({ where: { email: user.email }, transaction });
+
+    /**
+     * The audit trail is anonymised, not deleted — the one place this function
+     * keeps a row on purpose.
+     *
+     * Destroying it would be the wrong trade in both directions. It would erase
+     * the record that the deletion itself happened, and it would let anyone
+     * remove the history of their own actions by closing their account, which is
+     * exactly the sequence an audit log exists to survive. Staff actions taken
+     * *against* this account live here too, and they belong to the operator.
+     *
+     * So what goes is the identifying content, and what stays is the shape:
+     * `action`, `entity` and `createdAt` still describe what happened and when.
+     * `metadata` is the field that actually matters here — nineteen call sites
+     * write an `email` into it, and others a `name` or a `phone` — and it is
+     * dropped wholesale rather than filtered, because a deny-list over
+     * free-form JSON written by twenty controllers is a guarantee nobody can
+     * keep. `ipAddress` and `userAgent` go with it.
+     *
+     * `userId` is nulled last, which is what makes the remaining row unlinkable:
+     * the account it pointed at is destroyed on the next line, so the id would
+     * dangle in any case.
+     */
+    await AuditLog.update(
+      { metadata: null, ipAddress: null, userAgent: null, userId: null },
+      { where: { userId: user.id }, transaction }
+    );
+
     if (childIds.length) await Child.destroy({ where: { id: childIds }, transaction });
     await user.destroy({ transaction });
   });

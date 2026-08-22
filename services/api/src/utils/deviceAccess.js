@@ -27,4 +27,25 @@
 const DEVICE_UNLINKED = 'device_unlinked';
 const ACCOUNT_SUSPENDED = 'account_suspended';
 
-module.exports = { DEVICE_UNLINKED, ACCOUNT_SUSPENDED };
+/**
+ * Why the lock screen is up when a parent paused this one device.
+ *
+ * Not a member of the pair above, and the difference is the point: those two are
+ * reasons a *token was refused*, and a device holding either one can do nothing
+ * further. A blocked device authenticates perfectly well. It keeps syncing,
+ * keeps reporting its battery and location, and keeps its socket open — which is
+ * what makes the block reversible in one tap and what keeps a paused phone
+ * visible on the parent's map. Only the screen is locked.
+ *
+ * Blocking by revoking the token was the obvious alternative and is a trap: the
+ * phone would go dark while carrying on enforcing its last-known rules, so the
+ * parent would see "blocked" on a device they had actually just lost sight of.
+ *
+ * This joins `daily_limit`, `bedtime` and `outside_schedule` as a lock reason in
+ * the child app and the desktop agent. Both already treat an unrecognised
+ * reason as "locked, no specific explanation", so an older build that has never
+ * heard of this string still locks — it just words it generically.
+ */
+const BLOCKED_BY_PARENT = 'blocked_by_parent';
+
+module.exports = { DEVICE_UNLINKED, ACCOUNT_SUSPENDED, BLOCKED_BY_PARENT };

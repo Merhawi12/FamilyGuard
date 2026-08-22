@@ -1,6 +1,6 @@
 const { Child, Device, ScreenTimeRule } = require('../models');
 const storage = require('../services/storage');
-const { disconnectDeviceSockets } = require('../utils/session');
+const { revokeDeviceAccess } = require('../utils/session');
 const { isUuid } = require('../utils/ids');
 
 // A malformed id is "not found", not a database error — see utils/ids.js for why
@@ -103,9 +103,14 @@ const deleteChild = async (req, res, next) => {
 
     await child.update({ isActive: false });
     if (devices.length) {
-      await Device.update({ isActive: false }, { where: { id: devices.map((d) => d.id) } });
+      await Device.update(
+        { isActive: false, pushToken: null },
+        { where: { id: devices.map((d) => d.id) } },
+      );
       const io = req.app.get('io');
-      for (const device of devices) disconnectDeviceSockets(io, device.id);
+      // The same revocation `DELETE /devices/:id` performs, per device: the
+      // socket and the push token, not just the socket.
+      for (const device of devices) await revokeDeviceAccess(io, device.id);
     }
 
     res.json({ message: 'Child removed' });

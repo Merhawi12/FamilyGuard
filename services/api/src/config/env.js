@@ -1,6 +1,24 @@
-require('dotenv').config();
-
 const NODE_ENV = process.env.NODE_ENV || 'development';
+
+/**
+ * A test run must not inherit the developer's `.env`.
+ *
+ * `tests/env.setup.js` pins the values the suite cares about *by setting them*,
+ * because dotenv only fills keys that are missing — but that only covers the
+ * keys somebody thought to list. Everything else leaked straight through, and
+ * once real credentials landed in this file (Twilio going live is what did it)
+ * three security tests started asserting against them: `config.test.js` checks
+ * that a blank Twilio SID reads as "no provider" and got `twilio`, because the
+ * developer's `SMS_PROVIDER` was sitting underneath it.
+ *
+ * That is worse than three red tests. A suite whose configuration comes partly
+ * from an untracked file passes or fails differently on every machine, and the
+ * checks most likely to be affected are exactly these — the ones that assert a
+ * credential is *absent*. So the file is not read at all under NODE_ENV=test,
+ * and the environment a test sees is the one `env.setup.js` states.
+ */
+if (NODE_ENV !== 'test') require('dotenv').config();
+
 const isProduction = NODE_ENV === 'production';
 const isTest = NODE_ENV === 'test';
 
@@ -161,7 +179,28 @@ const env = Object.freeze({
     // Over private IP, Cloud SQL presents a Google-issued certificate whose CA
     // is not in the image, so strict verification stays opt-in.
     ssl: bool(process.env.DB_SSL, usePostgres && isProduction && !dbSocketPath),
-    sslRejectUnauthorized: bool(process.env.DB_SSL_REJECT_UNAUTHORIZED, false),
+    /**
+     * The server certificate to trust, PEM, supplied inline.
+     *
+     * Without one there is nothing to verify against — Cloud SQL presents a
+     * per-instance certificate signed by a CA that is not in any base image — so
+     * `rejectUnauthorized` had to default to false, which is TLS that encrypts
+     * and authenticates nothing: anything that can answer on that address gets
+     * the database password and every query. Over private IP that is a small
+     * exposure, and it is not nothing.
+     *
+     * Supplying the CA is what makes verification possible, so verification
+     * *defaults on whenever it is supplied* and the operator does not have to
+     * remember a second switch. Download it with
+     * `gcloud sql instances describe <instance> --format='value(serverCaCert.cert)'`
+     * and put it in Secret Manager as DB_SSL_CA.
+     *
+     * The old default is unchanged when no CA is configured, because flipping it
+     * would take every existing deployment offline at boot rather than warning
+     * them — `server.js` logs the weakened state instead, so it is visible.
+     */
+    sslCa: (process.env.DB_SSL_CA || '').trim(),
+    sslRejectUnauthorized: bool(process.env.DB_SSL_REJECT_UNAUTHORIZED, !!(process.env.DB_SSL_CA || '').trim()),
     sqlitePath: process.env.DB_PATH || './parentix.sqlite',
     poolMax: int(process.env.DB_POOL_MAX, 10),
     logging: bool(process.env.DB_LOGGING, false),
@@ -220,7 +259,7 @@ const env = Object.freeze({
     // 'smtp' for any relay (SendGrid, Mailgun, Postmark, Workspace), 'none'
     // logs instead of sending. Google Cloud has no first-party email service.
     provider: (process.env.EMAIL_PROVIDER || (process.env.SMTP_HOST ? 'smtp' : 'none')).toLowerCase(),
-    from: process.env.EMAIL_FROM || process.env.SMTP_FROM || 'Parentix <no-reply@parentix.ca>',
+    from: process.env.EMAIL_FROM || process.env.SMTP_FROM || 'Parentix <support@parentix.ca>',
     adminAddress: process.env.ADMIN_EMAIL || '',
     smtp: {
       // Trimmed, not just defaulted: an unsupplied Secret Manager version is a

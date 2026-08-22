@@ -9,7 +9,8 @@
 #
 # Both are signed with the release keystore when one is present and with the
 # DEBUG key when it is not — installable either way, publishable only in the
-# first case. `apps/child-app/android/generate-release-keystore.sh` makes one.
+# first case. `apps/child-app/android/android/generate-release-keystore.sh`
+# makes one.
 #
 # Neither app is built by `npm run build`, which only produces the two web
 # bundles. An Android release is deliberately a separate, explicit step: it
@@ -45,6 +46,25 @@ case "$TARGET" in
   *) die "Usage: $(basename "$0") <child|family> [--debug] [--bundle]" ;;
 esac
 
+# The Gradle project, which is not in the same place for the two apps.
+#
+# The child app was split into a project per platform, so `apps/child-app/android`
+# is an Expo *project root* — package.json, app.config.js, eas.json — and the
+# Gradle project it owns is the `android/` inside it, the ordinary React Native
+# arrangement one level down. The family app is Capacitor and unsplit, so its
+# Gradle project sits directly under the app.
+#
+# Everything below reads this rather than assembling the path inline: the
+# keystore check at the end used to do that, and got it wrong in a way that
+# reported one app's signing state while building the other.
+if [ "$TARGET" = "child" ]; then
+  ANDROID_ROOT="${REPO_ROOT}/apps/child-app/android/android"
+  EXPO_ROOT="${REPO_ROOT}/apps/child-app/android"
+else
+  ANDROID_ROOT="${REPO_ROOT}/apps/family-app/android"
+  EXPO_ROOT="${REPO_ROOT}/apps/family-app"
+fi
+
 # The JDK Android Studio installs alongside the SDK. Gradle 8 needs 17; the JDK
 # that happens to be first on PATH is frequently 8 or 11, and the failure that
 # produces ("Unsupported class file major version") does not mention Java.
@@ -68,8 +88,10 @@ fi
 API_URL_EXPLICIT="${API_URL:-}"
 API_URL="${API_URL:-$(terraform -chdir="$TF_DIR" output -raw api_url 2>/dev/null || echo 'https://api.parentix.ca')}"
 
-# `apps/child-app/.env` is where a developer points the app at their own machine,
-# and it is the file the app's own comments tell you to edit and rebuild after.
+# `apps/child-app/android/.env` is where a developer points the app at their own
+# machine, and it is the file the app's own comments tell you to edit and rebuild
+# after. Per-platform since the split: an Android build reads the Android
+# project's, and an iOS build cannot read one at all (see build-ios.sh).
 #
 # It has no effect here, and that silence cost an afternoon. Expo's env loader
 # does not overwrite variables that are already set, and the export below sets
@@ -82,13 +104,13 @@ API_URL="${API_URL:-$(terraform -chdir="$TF_DIR" output -raw api_url 2>/dev/null
 # Read here so the file wins for a local build, since that is the only reason to
 # have written it. An explicit `API_URL=... npm run apk:child` still overrides it,
 # and CI sets neither, so a release build is unaffected.
-CHILD_ENV="${REPO_ROOT}/apps/child-app/.env"
+CHILD_ENV="${EXPO_ROOT}/.env"
 if [ "$TARGET" = "child" ] && [ -z "${API_URL_EXPLICIT:-}" ] && [ -f "$CHILD_ENV" ]; then
   ENV_API_URL="$(sed -n 's/^[[:space:]]*EXPO_PUBLIC_API_URL[[:space:]]*=[[:space:]]*//p' "$CHILD_ENV" | tail -1 | tr -d '"'"'"'\r')"
   # The variable carries the `/api` suffix; API_URL everywhere else is the origin.
   ENV_ORIGIN="${ENV_API_URL%/api}"
   if [ -n "$ENV_ORIGIN" ] && [ "$ENV_ORIGIN" != "$API_URL" ]; then
-    warn "apps/child-app/.env points at ${ENV_ORIGIN}, not ${API_URL} — building against the .env."
+    warn "${CHILD_ENV} points at ${ENV_ORIGIN}, not ${API_URL} — building against the .env."
     warn "Run 'API_URL=${API_URL} npm run apk:child' to override it, or comment the line out."
     API_URL="$ENV_ORIGIN"
   fi
@@ -111,8 +133,8 @@ if [ "$TARGET" = "child" ]; then
   # then getExpoPushTokenAsync() throws at runtime, which push.js catches and
   # records as a warning nobody reads. Said here because the alternative is
   # finding out from a device that never buzzes.
-  if [ ! -f "${REPO_ROOT}/apps/child-app/android/app/google-services.json" ]; then
-    warn "No google-services.json in apps/child-app/android/app/ — this APK cannot receive push notifications."
+  if [ ! -f "${ANDROID_ROOT}/app/google-services.json" ]; then
+    warn "No google-services.json in apps/child-app/android/android/app/ — this APK cannot receive push notifications."
     warn "See docs/DEPLOYMENT.md §2.3a. Everything else works; only notifications are affected."
   fi
 
@@ -121,10 +143,12 @@ if [ "$TARGET" = "child" ]; then
   export EXPO_PUBLIC_API_URL="${API_URL}/api"
   export EXPO_PUBLIC_SOCKET_URL="${API_URL}"
 
-  # Never `expo prebuild`: apps/child-app/android is committed source holding the
+  # Never `expo prebuild`: this Gradle project is committed source holding the
   # accessibility, VPN, usage-stats and DNS modules, and prebuild would delete it.
-  ( cd "${REPO_ROOT}/apps/child-app/android" && ./gradlew "${GRADLE_VERB}${VARIANT}" --no-daemon )
-  OUT="${REPO_ROOT}/apps/child-app/android/app/build/outputs/${ARTIFACT_DIR}/$(echo "$VARIANT" | tr '[:upper:]' '[:lower:]')"
+  # The Android project's package.json deliberately has no `prebuild` script for
+  # that reason; only the iOS one does, where there is nothing to lose.
+  ( cd "$ANDROID_ROOT" && ./gradlew "${GRADLE_VERB}${VARIANT}" --no-daemon )
+  OUT="${ANDROID_ROOT}/app/build/outputs/${ARTIFACT_DIR}/$(echo "$VARIANT" | tr '[:upper:]' '[:lower:]')"
 else
   log "Building the Family App (${VARIANT}) against ${API_URL}"
   require_web_dependencies
@@ -136,6 +160,8 @@ else
   VITE_ADMIN_URL="${VITE_ADMIN_URL:-}" \
   VITE_GOOGLE_MAPS_KEY="${VITE_GOOGLE_MAPS_KEY:-}" \
   VITE_GOOGLE_CLIENT_ID="${VITE_GOOGLE_CLIENT_ID:-}" \
+  VITE_MAP_TILE_URL="${VITE_MAP_TILE_URL:-}" \
+  VITE_MAP_TILE_ATTRIBUTION="${VITE_MAP_TILE_ATTRIBUTION:-}" \
     npm --prefix "${REPO_ROOT}" run build:family
 
   [ -f "${REPO_ROOT}/apps/family-app/dist/index.html" ] \
@@ -145,14 +171,14 @@ else
   # WebView, WebView has no Push API, so FCM is the only way this app is ever
   # notified. Capacitor's android/app/build.gradle applies the google-services
   # plugin only when the file is there, so its absence is silent by default.
-  if [ ! -f "${REPO_ROOT}/apps/family-app/android/app/google-services.json" ]; then
+  if [ ! -f "${ANDROID_ROOT}/app/google-services.json" ]; then
     warn "No google-services.json in apps/family-app/android/app/ — this APK cannot receive push notifications."
     warn "Register ca.parentix.family in the Firebase console and download it. See docs/DEPLOYMENT.md §2.3b."
   fi
 
-  ( cd "${REPO_ROOT}/apps/family-app" && npx cap sync android )
-  ( cd "${REPO_ROOT}/apps/family-app/android" && ./gradlew "${GRADLE_VERB}${VARIANT}" --no-daemon )
-  OUT="${REPO_ROOT}/apps/family-app/android/app/build/outputs/${ARTIFACT_DIR}/$(echo "$VARIANT" | tr '[:upper:]' '[:lower:]')"
+  ( cd "$EXPO_ROOT" && npx cap sync android )
+  ( cd "$ANDROID_ROOT" && ./gradlew "${GRADLE_VERB}${VARIANT}" --no-daemon )
+  OUT="${ANDROID_ROOT}/app/build/outputs/${ARTIFACT_DIR}/$(echo "$VARIANT" | tr '[:upper:]' '[:lower:]')"
 fi
 
 ARTIFACT="$(ls "$OUT"/*."${ARTIFACT_EXT}" 2>/dev/null | head -1 || true)"
@@ -160,11 +186,12 @@ ARTIFACT="$(ls "$OUT"/*."${ARTIFACT_EXT}" 2>/dev/null | head -1 || true)"
 
 log "Built $(basename "$ARTIFACT") ($(du -h "$ARTIFACT" | cut -f1))"
 log "  ${ARTIFACT}"
-# Each app reads its own git-ignored keystore.properties from its own
-# `android/` root, so the signing question has to be asked about the app that
-# was actually built. This checked the child app's path unconditionally, which
-# meant a family build reported the child app's signing state — silence
-# (implying a release key) whenever the child had one, and a spurious debug
-# warning whenever it did not.
-[ -f "${REPO_ROOT}/apps/${TARGET}-app/android/keystore.properties" ] \
+# Each app reads its own git-ignored keystore.properties from its own Gradle
+# root, so the signing question has to be asked about the app that was actually
+# built. This checked the child app's path unconditionally, which meant a family
+# build reported the child app's signing state — silence (implying a release key)
+# whenever the child had one, and a spurious debug warning whenever it did not.
+# It is $ANDROID_ROOT now rather than an inline path, which is what let the two
+# drift apart in the first place.
+[ -f "${ANDROID_ROOT}/keystore.properties" ] \
   || warn "Signed with the DEBUG key — installable for testing, rejected by Google Play."

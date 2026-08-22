@@ -33,14 +33,22 @@
  *   family app   Capacitor. Both native projects are committed, so every image
  *                is written straight into android/res and ios/Assets.xcassets.
  *
- *   child app    Expo, but *bare*: `android/` is committed source holding the
- *                accessibility, VPN and usage-stats modules, and `expo prebuild`
- *                would delete it — so prebuild is never run for Android and
- *                app.json's icon/splash keys have no effect there. Those files
- *                are written into android/res directly, exactly like the family
- *                app. iOS has no committed project, so EAS *does* prebuild it,
- *                and there app.json is the source of truth — which is why the
- *                same mark is also written to apps/child-app/assets/.
+ *   child app    Expo, and split into a project per platform:
+ *                apps/child-app/{android,ios} are two Expo project roots. The
+ *                Android one is *bare* — its own `android/` is committed source
+ *                holding the accessibility, VPN and usage-stats modules, and
+ *                `expo prebuild` would delete it, so prebuild is never run there
+ *                and its app.config.js icon/splash keys have no effect. Those
+ *                files are written into android/res directly, exactly like the
+ *                family app. iOS has no committed native project, so EAS *does*
+ *                prebuild it, and there app.config.js is the source of truth.
+ *
+ *                Both project roots get an `assets/` copy. Expo resolves
+ *                `icon` and `splash.image` from the project root, so the shared
+ *                app.config.base.js can name `./assets/icon.png` only because
+ *                the file exists under each. Writing both from here is what
+ *                keeps them the same image — they are two files on disk, and
+ *                nothing else would notice if they stopped matching.
  *
  * Get that backwards and the change appears on one platform only.
  */
@@ -52,9 +60,14 @@ import { chromium } from 'playwright';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FAMILY_RES = path.join(REPO, 'apps/family-app/android/app/src/main/res');
 const XCASSETS = path.join(REPO, 'apps/family-app/ios/App/App/Assets.xcassets');
-const CHILD_RES = path.join(REPO, 'apps/child-app/android/app/src/main/res');
-const CHILD_ASSETS = path.join(REPO, 'apps/child-app/assets');
+const CHILD_RES = path.join(REPO, 'apps/child-app/android/android/app/src/main/res');
+const CHILD_ANDROID_ASSETS = path.join(REPO, 'apps/child-app/android/assets');
+const CHILD_IOS_ASSETS = path.join(REPO, 'apps/child-app/ios/assets');
+const DESKTOP_WINDOWS = path.join(REPO, 'apps/child-desktop/windows/build');
+const DESKTOP_MACOS = path.join(REPO, 'apps/child-desktop/macos/build');
 const LOGO = path.join(REPO, 'apps/family-app/public/logo.png');
+const FAMILY_PUBLIC = path.join(REPO, 'apps/family-app/public');
+const ADMIN_PUBLIC = path.join(REPO, 'apps/admin-dashboard/public');
 
 /** `primary-600`, the brand teal. Mirrors res/values/colors.xml and
  *  tailwind.config.js; familyBrandColors.test.js holds those two together. */
@@ -234,6 +247,38 @@ const missingFamilyIos = 'run `npx cap add ios` in apps/family-app first.';
 const missingChild = 'has the child app\'s Android project been re-scaffolded?';
 
 const TARGETS = [
+  /**
+   * ── The web logo, in the format a browser should actually be sent ──────────
+   *
+   * `logo.png` is the source mark for everything in this file, and both web apps
+   * were also serving that exact file to browsers: 82 kB of 500×500 RGBA, drawn
+   * at heights between 36 and 80 px on the sign-in screen, the sidebar, the
+   * legal pages and the marketing site. It is not a badly compressed PNG — a
+   * lossless re-encode comes out a few bytes *larger*, because the mark is
+   * anti-aliased over five thousand distinct colours — so there is nothing to
+   * win by squeezing the PNG. The format is the cost. The same image as WebP is
+   * about 25 kB.
+   *
+   * It is generated here, from `LOGO`, rather than committed as a second
+   * hand-made file, for the reason this whole script exists: two copies of the
+   * mark that nothing keeps in step will drift, and the one that drifts is the
+   * one nobody is looking at.
+   *
+   * The PNG stays exactly where it is and keeps its job. It is the favicon and
+   * the apple-touch-icon — Safari will not take a WebP for either — and it is
+   * the `<img>` fallback inside the `<picture>` elements that reference this
+   * file, so a browser that cannot decode WebP still gets the logo. See
+   * `BrandLogo` in packages/shared.
+   */
+  ...[
+    ['family', FAMILY_PUBLIC],
+    ['admin', ADMIN_PUBLIC],
+  ].map(([app, dir]) => ({
+    label: `${app} public/logo.webp`,
+    file: path.join(dir, 'logo.webp'),
+    w: LOGO_PX, h: LOGO_PX, kind: 'webp',
+  })),
+
   // ── Family app · Android launch screens ────────────────────────────────────
   ...Object.entries(FAMILY_SPLASH_BUCKETS).map(([bucket, [w, h]]) => ({
     label: `family android ${bucket}/splash.png`,
@@ -273,26 +318,43 @@ const TARGETS = [
    *
    * 1024 also replaces a 500×500 source that iOS would have upscaled.
    */
-  {
-    label: 'child expo assets/icon.png',
-    file: path.join(CHILD_ASSETS, 'icon.png'),
-    w: IOS_ICON_PX, h: IOS_ICON_PX, share: ICON_SHARE, kind: 'icon',
-  },
-  {
-    label: 'child expo assets/adaptive-icon.png',
-    file: path.join(CHILD_ASSETS, 'adaptive-icon.png'),
-    w: IOS_ICON_PX, h: IOS_ICON_PX, share: ADAPTIVE_SHARE, kind: 'icon', transparent: true,
-  },
-  {
-    label: 'child expo assets/splash.png',
-    file: path.join(CHILD_ASSETS, 'splash.png'),
-    w: EXPO_SPLASH[0], h: EXPO_SPLASH[1], share: LOGO_SHARE, kind: 'splash',
-  },
-  {
-    label: 'child expo assets/notification-icon.png',
-    file: path.join(CHILD_ASSETS, 'notification-icon.png'),
-    w: 96, h: 96, share: NOTIFY_SHARE, kind: 'icon', transparent: true,
-  },
+  /**
+   * Written once per platform project, because Expo resolves these paths from
+   * the project root and there are two roots now. Same source mark and the same
+   * shares on both — the duplication is on disk, not in this file, which is the
+   * point: a change lands in both or in neither.
+   */
+  ...[
+    ['android', CHILD_ANDROID_ASSETS],
+    ['ios', CHILD_IOS_ASSETS],
+  ].flatMap(([platform, dir]) => [
+    {
+      label: `child ${platform} assets/icon.png`,
+      file: path.join(dir, 'icon.png'),
+      w: IOS_ICON_PX, h: IOS_ICON_PX, share: ICON_SHARE, kind: 'icon',
+    },
+    {
+      label: `child ${platform} assets/splash.png`,
+      file: path.join(dir, 'splash.png'),
+      w: EXPO_SPLASH[0], h: EXPO_SPLASH[1], share: LOGO_SHARE, kind: 'splash',
+    },
+    {
+      label: `child ${platform} assets/notification-icon.png`,
+      file: path.join(dir, 'notification-icon.png'),
+      w: 96, h: 96, share: NOTIFY_SHARE, kind: 'icon', transparent: true,
+    },
+    /**
+     * Android only. An adaptive icon is a foreground layer the launcher
+     * composites over a separate background; iOS has no equivalent, and
+     * ios/app.config.js never names one, so writing it there would leave a file
+     * nothing reads.
+     */
+    ...(platform === 'android' ? [{
+      label: `child ${platform} assets/adaptive-icon.png`,
+      file: path.join(dir, 'adaptive-icon.png'),
+      w: IOS_ICON_PX, h: IOS_ICON_PX, share: ADAPTIVE_SHARE, kind: 'icon', transparent: true,
+    }] : []),
+  ]),
 
   // ── Child app · Android, written directly because prebuild never runs ──────
   ...Object.entries(CHILD_MIPMAP).flatMap(([density, px]) => [
@@ -335,17 +397,92 @@ const TARGETS = [
     w: px, h: px, share: 1, kind: 'splashLogo', transparent: true,
     missing: `drawable-${density} does not exist — ${missingChild}`,
   })),
+
+  // ── Child desktop · Windows and macOS ──────────────────────────────────────
+  /**
+   * Two files per platform project, and one of them is not what it looks like.
+   *
+   * `build/icon.png` is a *source*: electron-builder converts it to `.ico` for
+   * the Windows installer and `.icns` for the Mac bundle at package time, which
+   * is why there is no committed icon in either of those formats. It has to be
+   * at least 512×512 or the conversion is refused, and opaque — the same alpha
+   * rule the App Store icon above is drawn for, arrived at from the other
+   * direction.
+   *
+   * `build/tray.png` is drawn on the brand teal rather than transparent, which
+   * is a deliberate difference from every other icon here. A white silhouette on
+   * nothing is the right answer for Android's status bar, where the system tints
+   * it — and the wrong one for a desktop tray, where the same file has to be
+   * legible against a black Windows taskbar in dark mode and a white one in
+   * light mode without either platform touching it. A small teal tile is visible
+   * on both.
+   */
+  ...[
+    ['windows', DESKTOP_WINDOWS],
+    ['macos', DESKTOP_MACOS],
+  ].flatMap(([platform, dir]) => [
+    {
+      label: `child-desktop ${platform} build/icon.png`,
+      file: path.join(dir, 'icon.png'),
+      w: IOS_ICON_PX, h: IOS_ICON_PX, share: ICON_SHARE, kind: 'icon',
+    },
+    {
+      label: `child-desktop ${platform} build/tray.png`,
+      file: path.join(dir, 'tray.png'),
+      w: 32, h: 32, share: 0.78, kind: 'icon',
+    },
+  ]),
 ];
 
 const check = process.argv.includes('--check');
 const browser = await chromium.launch();
 const stale = [];
 
+/**
+ * The WebP copy of the source mark.
+ *
+ * Not a screenshot: Playwright only writes PNG and JPEG, and a JPEG has no alpha
+ * channel, so the transparent ground the whole brand depends on would come back
+ * as a black square. The canvas encoder is the only route to WebP here, and it
+ * keeps the alpha.
+ *
+ * Quality 0.92 rather than lossless — lossless WebP of this mark is barely
+ * smaller than the PNG, and the artefacts of a lossy encode at this quality are
+ * not visible on a logo displayed at 80 px, which is the largest anything in
+ * either app draws it.
+ */
+const WEBP_QUALITY = 0.92;
+
+const encodeWebp = async (w, h) => {
+  const tab = await browser.newPage();
+  await tab.setContent('<!doctype html><meta charset="utf-8"><body></body>');
+  const base64 = await tab.evaluate(async ({ uri, width, height, quality }) => {
+    const img = new Image();
+    img.src = uri;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, width, height);
+    const url = canvas.toDataURL('image/webp', quality);
+    if (!url.startsWith('data:image/webp')) throw new Error('this Chromium cannot encode WebP');
+    return url.slice(url.indexOf(',') + 1);
+  }, { uri: dataUri, width: w, height: h, quality: WEBP_QUALITY });
+  await tab.close();
+  return Buffer.from(base64, 'base64');
+};
+
 /** Identical geometry is drawn once — the three iOS splash files share a render. */
 const renders = new Map();
 const render = async ({ w, h, share, kind, transparent }) => {
   const key = `${kind}:${w}x${h}@${share}${transparent ? ':a' : ''}`;
   if (!renders.has(key)) {
+    if (kind === 'webp') {
+      renders.set(key, await encodeWebp(w, h));
+      return renders.get(key);
+    }
     const tab = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
     const html = kind === 'splash'
       ? splashPage(w, h, share)
@@ -367,12 +504,13 @@ img{width:${w}px;${WHITE}}</style><img src="${dataUri}" alt="">`
 for (const target of TARGETS) {
   if (!existsSync(path.dirname(target.file))) throw new Error(target.missing || `${target.file} has no directory`);
 
-  const png = await render(target);
+  // PNG for all but the two `kind: 'webp'` targets — see `encodeWebp`.
+  const image = await render(target);
 
   if (check) {
-    if (!existsSync(target.file) || !readFileSync(target.file).equals(png)) stale.push(target.label);
+    if (!existsSync(target.file) || !readFileSync(target.file).equals(image)) stale.push(target.label);
   } else {
-    writeFileSync(target.file, png);
+    writeFileSync(target.file, image);
     console.log(`${target.label}  ${target.w}×${target.h}`);
   }
 }
