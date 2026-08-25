@@ -147,6 +147,11 @@ export async function bootstrap({ createOs, projectRoot }) {
     onStatusText: () => {
       const status = agent.getAgentStatus();
       if (!status.linked) return 'Not linked yet';
+      // A locked machine the child is working on through their allowlist is not
+      // the same state as a locked machine with the screen taken, and a tray that
+      // called both "paused" would be describing a computer that is plainly in
+      // use as though it were asleep.
+      if (status.locked && status.allowlistMode) return 'Out of time — allowed apps only';
       if (status.locked) return 'Paused by a screen-time rule';
       return status.sync?.lastError ? 'Reconnecting…' : 'Linked and monitoring';
     },
@@ -157,7 +162,19 @@ export async function bootstrap({ createOs, projectRoot }) {
     tray?.rebuild();
   });
 
-  watchDisplays(() => agent.getAgentStatus().locked);
+  /**
+   * Rebuild the lock windows when a display is plugged in — but not when the
+   * child is working through their allowlist.
+   *
+   * `locked` alone was the right test until a lock could be dismissed. With
+   * allowlist mode it would resurrect the lock screen the moment a second monitor
+   * was connected, on a machine the child had been given permission to use, with
+   * nothing to explain where it came from.
+   */
+  watchDisplays(() => {
+    const status = agent.getAgentStatus();
+    return status.locked && !status.allowlistMode;
+  });
 
   // ── The bridge ──────────────────────────────────────────────────────────────
   ipcMain.handle('agent:status', () => ok(agent.getAgentStatus()));
@@ -182,6 +199,17 @@ export async function bootstrap({ createOs, projectRoot }) {
   ipcMain.handle('chat:emergency', async () => {
     try { return ok(await chat.sendEmergency()); } catch (error) { return fail(error); }
   });
+
+  /**
+   * The child dismissing a daily-limit lock into their allowlist.
+   *
+   * Handed straight to the agent, which owns the decision: this window is on a
+   * child's own computer and a main-process handler that merely relayed its
+   * request would be the whole policy. `useAllowedApps` refuses anything that is
+   * not a `'limit'` lock with apps behind it, and hides the lock screen itself
+   * when it agrees, so nothing here touches a window.
+   */
+  ipcMain.handle('lock:use-allowed', () => ok(agent.useAllowedApps()));
 
   ipcMain.handle('permissions:list', async () => {
     try { return ok(await platform.permissions.list()); } catch (error) { return fail(error); }

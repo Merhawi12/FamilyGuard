@@ -17,7 +17,8 @@ const Stripe = require('stripe'); // the manual mock in __mocks__/stripe.js
 const { app } = require('../src/app');
 const {
   User, Session, Child, Device, ActivityLog, Location, AppRule, WebsiteRule,
-  ScreenTimeRule, Message, Contact, Alert, SafeZone, Notification, AuditLog, ContactMessage,
+  ScreenTimeRule, ScreenTimeGrant, Message, Contact, Alert, SafeZone, Notification,
+  AuditLog, ContactMessage,
 } = require('../src/models');
 const { createUser, createChild, createDevice, DEFAULT_PASSWORD } = require('./helpers');
 
@@ -355,6 +356,13 @@ describe('an account holder can close their account', () => {
     const device = await createDevice(child.id);
 
     await ScreenTimeRule.create({ childId: child.id });
+    // Both scopes: a grant for the whole child and one narrowed to a device.
+    // The device-scoped row is the one an erasure keyed on `childId` alone could
+    // plausibly miss, so it is worth naming rather than assuming.
+    await ScreenTimeGrant.create({ childId: child.id, minutes: 15, grantedBy: user.id });
+    await ScreenTimeGrant.create({
+      childId: child.id, deviceId: device.id, minutes: 30, grantedBy: user.id,
+    });
     await AppRule.create({ childId: child.id, appName: 'TikTok', appPackage: 'com.tiktok' });
     await WebsiteRule.create({ childId: child.id, url: 'example.com', action: 'block' });
     await ActivityLog.create({
@@ -384,6 +392,10 @@ describe('an account holder can close their account', () => {
     expect(await Child.count({ where: { parentId: user.id } })).toBe(0);
     expect(await Device.count({ where: { childId: child.id } })).toBe(0);
     expect(await ScreenTimeRule.count({ where: { childId: child.id } })).toBe(0);
+    // Covered by the FK cascade as well as by the explicit destroy, and pinned
+    // here because neither is guaranteed: the cascade depends on DDL `sync()`
+    // happened to emit, and the explicit list depends on somebody remembering.
+    expect(await ScreenTimeGrant.count({ where: { childId: child.id } })).toBe(0);
     expect(await AppRule.count({ where: { childId: child.id } })).toBe(0);
     expect(await WebsiteRule.count({ where: { childId: child.id } })).toBe(0);
     expect(await ActivityLog.count({ where: { childId: child.id } })).toBe(0);

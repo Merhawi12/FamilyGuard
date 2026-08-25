@@ -360,6 +360,61 @@ Without it they read and write the child's rule, exactly as before. With it:
 `screen_time_updated` is emitted to `device:<id>` for a device rule and to
 `child:<id>` for a child-wide one.
 
+#### Extra time for today — `/screen-time/:childId/grant`
+
+`GET` lists recent grants, `POST {minutes}` adds one. Both take the same optional
+`?deviceId=`.
+
+A grant is **not** a rule and deliberately does not touch one. Saying yes to "can
+I have more time?" used to mean raising `dailyLimitMinutes` and remembering to
+lower it in the morning, which nobody does — so limits crept upward all term and
+children learned that asking changes the rule permanently. A grant is minutes
+that expire with the day and leave the parent's actual policy alone.
+
+Two things about it are easy to get wrong:
+
+- **Grants add up; they do not override.** A device-specific *rule* replaces the
+  child-wide one, because two rules are two answers to the same question. Two
+  grants are two gifts of minutes, so a parent who adds fifteen to the child and
+  fifteen more to the laptop has given that laptop thirty. See
+  `resolveScreenTimeGrants` in `utils/deviceScope.js`.
+- **No response here ever carries a total for "today".** The API runs on Cloud Run
+  in UTC and the families are in Canada, so a total computed server-side is right
+  for about four hours a day and resets in front of the parent at 20:00 — the same
+  rollover that made every evening's screen time double-count. `GET` answers with
+  rows and `grantedAt` instants; the browser sums the ones inside its own local
+  day, and the device does the same against its own midnight when it spends them.
+
+`POST` emits `screen_time_granted` (`{ minutes, grantedAt }`) to `device:<id>` or
+`child:<id>`, so a locked device lifts in about a second rather than at the end of
+its five-minute poll — the parent tapping it is usually standing next to the child
+who asked. `GET /devices/me/rules` also carries `screenTimeGrants` on every sync,
+which is what covers a device that was switched off when the grant went out.
+
+#### App rules and the tiers a lock has
+
+`POST /blocking/:childId/apps` accepts `action: 'allow'` again. It does **not**
+mean "whitelist this app and block everything else" — that was the old meaning,
+and it was removed because it would have blocked the dialer. It now means *this
+app stays open when the daily limit runs out*, which is the one lock a parent
+routinely wants to be porous.
+
+The server only stores the row. What bounds it lives on the devices, in the copy
+of `schedule.js` both clients share:
+
+| Lock | Tier | Allowlist applies |
+| ---- | ---- | ----------------- |
+| `daily_limit` | `limit` | yes |
+| `bedtime` | `strict` | no |
+| `outside_schedule` | `strict` | no |
+| `blocked_by_parent` | `strict` | no |
+
+Separately, and reachable by no rule at all: the dialer, messaging, contacts, the
+clock and Settings are never blocked on Android. That lives in
+`AppMonitorService.kt` rather than in any rule, so it holds when the app process
+is dead, when the device has been offline for a week, and when a parent has paused
+the device outright.
+
 ### Deleting recorded data
 
 Three screens can now destroy what they show. All of them are audited — a

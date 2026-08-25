@@ -114,6 +114,20 @@ export const screenTime = {
   // Drops a device's exception so it follows the child's rule again.
   clearDeviceRule: (childId, deviceId) =>
     api.delete(`/screen-time/${childId}`, { params: { deviceId } }),
+
+  /**
+   * Extra minutes for today — the answer to "can I have more time?", which both
+   * lock screens have been asking with nothing on this side to reply.
+   *
+   * These do not touch the rule. `grants` answers with the raw rows and their
+   * timestamps rather than a total, because the server cannot say when today
+   * started: it runs in UTC and the families do not. The page sums the ones
+   * inside its own local day — see `todayMinutesFrom` on the Screen Time page.
+   */
+  grants: (childId, deviceId) =>
+    api.get(`/screen-time/${childId}/grant`, { params: deviceId ? { deviceId } : undefined }),
+  grant: (childId, minutes, deviceId) =>
+    api.post(`/screen-time/${childId}/grant`, { minutes }, { params: deviceId ? { deviceId } : undefined }),
 };
 
 export const blocking = {

@@ -13,6 +13,7 @@ const { BLOCKED_BY_PARENT } = require('../utils/deviceAccess');
 const {
   rulesVisibleTo, resolveAppRules, resolveWebsiteRules, resolveScreenTimeRule,
 } = require('../utils/deviceScope');
+const { grantsForDevice } = require('./screenTimeController');
 const { reportRiskyBrowsing } = require('../utils/riskyBrowsing');
 const { track } = require('../utils/background');
 const { isUuid } = require('../utils/ids');
@@ -421,10 +422,14 @@ const getDeviceRules = async (req, res, next) => {
     const { childId, deviceId } = req;
     const scope = rulesVisibleTo(childId, deviceId);
 
-    const [appRows, websiteRows, screenTimeRows, child, device, policy] = await Promise.all([
+    const [appRows, websiteRows, screenTimeRows, grants, child, device, policy] = await Promise.all([
       AppRule.findAll({ where: scope }),
       WebsiteRule.findAll({ where: scope }),
       ScreenTimeRule.findAll({ where: scope }),
+      // Extra minutes a parent granted, with the instant each was given. Not
+      // summed here: which of them still count is a question about the device's
+      // own calendar day, and only the device can answer it.
+      grantsForDevice(childId, deviceId),
       // The child app greets whoever is holding the phone. Their own name is
       // the one thing it needs that no rule carries, and this is the call it
       // already makes every five minutes.
@@ -441,6 +446,17 @@ const getDeviceRules = async (req, res, next) => {
       appRules: resolveAppRules(appRows),
       websiteRules: deviceWebsiteRules({ policy, childRules: resolveWebsiteRules(websiteRows) }),
       screenTimeRule: resolveScreenTimeRule(screenTimeRows),
+      /**
+       * `[{ minutes, grantedAt }]` — extra time for today, on top of whatever
+       * `screenTimeRule.dailyLimitMinutes` says.
+       *
+       * Sent on every sync rather than only on the socket event that grants one,
+       * for the same reason `blocked` is: the socket is the fast path and not the
+       * reliable one. A phone that was switched off when the parent tapped
+       * "+15 minutes" has to come back holding those minutes, and a phone that
+       * has been offline since yesterday has to come back without yesterday's.
+       */
+      screenTimeGrants: grants,
       childName: child?.name || null,
       /**
        * The parent's pause, carried on the sync the device already makes.

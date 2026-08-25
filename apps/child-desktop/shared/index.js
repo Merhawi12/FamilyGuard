@@ -13,6 +13,8 @@ export * as link from './src/services/link.js';
 export * as chat from './src/services/chat.js';
 export * as rules from './src/services/rules.js';
 export { loadChildName } from './src/services/profile.js';
-export { lockState, parseTimeOfDay, withinWindow } from './src/services/schedule.js';
+export {
+  lockState, parseTimeOfDay, withinWindow, bonusMinutesFrom, minutesUntilLimit, tierFor,
+} from './src/services/schedule.js';
 export { API_HOST } from './src/services/api.js';
 export { colors, radius, space } from './src/theme.js';

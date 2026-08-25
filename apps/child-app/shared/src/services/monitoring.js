@@ -7,9 +7,9 @@ import { startContactsSync, stopContactsSync, syncContacts, getContacts } from '
 import {
   startWebHistory, stopWebHistory, uploadWebHistory, collectNow, getWebHistoryStatus,
 } from './webHistory';
-import { registerForPush, getPushStatus } from './push';
+import { registerForPush, getPushStatus, notifyLocally } from './push';
 import { reportNewApps } from './newApps';
-import { lockState } from './schedule';
+import { lockState, bonusMinutesFrom, minutesUntilLimit } from './schedule';
 import { disconnectSocket } from './socket';
 import AppBlocker from '../native/AppBlocker';
 import UsageStats from '../native/UsageStats';
@@ -49,7 +49,7 @@ const _state = {
     webHistory: false,
     pushNotifications: false,
   },
-  rules: { appRules: [], websiteRules: [], screenTimeRule: null },
+  rules: { appRules: [], websiteRules: [], screenTimeRule: null, screenTimeGrants: [] },
   todayMinutes: 0,
   // Minutes used today per package, which is what a per-app `limit` rule is
   // measured against. The whole-device total above cannot answer that question.
@@ -57,6 +57,27 @@ const _state = {
   screenTimeAlertedDate: null, // last date we alerted the parent about the limit
   locked: false,               // drives the wildcard block, and its release
   lockReason: null,            // 'daily_limit' | 'bedtime' | 'outside_schedule'
+  /**
+   * How much of the phone the current lock is entitled to take: `'limit'` lets
+   * the parent's allowlist through, `'strict'` lets nothing through but the
+   * safety exception the accessibility service holds. See schedule.js.
+   */
+  lockTier: null,
+  /** Extra minutes the parent granted for today, already filtered to this day. */
+  bonusMinutes: 0,
+  /** The apps that survive a `daily_limit` lock, as handed to the blocker. */
+  allowedPackages: [],
+  /**
+   * The last "you have N minutes left" that was shown, as `'YYYY-MM-DD:N'`.
+   *
+   * Keyed by day *and* threshold so each warning fires once: the tick runs every
+   * minute, and a child sitting at nine minutes remaining must not be told nine
+   * times. Cleared naturally by the date changing, and re-armed when a grant
+   * pushes the remaining time back above a threshold — which is the case a bare
+   * boolean would get wrong, leaving a child who was granted an hour with no
+   * warning at all before the second lock.
+   */
+  lastLimitWarning: null,
   /**
    * What is blocked at this moment, as handed to the native blocker.
    *
@@ -71,9 +92,10 @@ const _state = {
 
 let _blockSub = null;  // native onAppBlocked subscription
 let _lockTimer = null; // re-evaluates the clock-driven locks
-// The last set handed to the native blocker, so an unchanged set is not pushed
-// (and re-persisted) every minute.
+// The last sets handed to the native blocker, so an unchanged set is not pushed
+// (and re-persisted to SharedPreferences) every minute.
 let _pushedBlocks = null;
+let _pushedAllows = null;
 
 export function getMonitoringStatus() {
   return {
@@ -127,6 +149,42 @@ function blockedPackagesFor(rules, locked, appMinutes = {}) {
   return [...blocked];
 }
 
+/**
+ * The apps that stay open when the daily limit runs out.
+ *
+ * Only for the `'limit'` tier. Bedtime, an out-of-hours schedule and a parent's
+ * own pause hand back an empty list, so the native side has nothing to let
+ * through — the tier decision is made once, in schedule.js, and everything below
+ * simply reads it.
+ *
+ * A `block` rule beats an `allow` rule on the same package, whichever order the
+ * rows arrive in. The two together are a parent who blocked an app and later
+ * added it to the homework list, and the safe reading of that contradiction is
+ * the restrictive one.
+ *
+ * This is not the safety exception. The dialer, messaging, contacts and the clock
+ * are never blocked by anything, with or without a rule, and that lives in
+ * AppMonitorService.kt so it holds when this layer is not running at all.
+ */
+function allowedPackagesFor(rules, tier) {
+  if (tier !== 'limit') return [];
+
+  const blocked = new Set(
+    (rules.appRules || [])
+      .filter((r) => r.action === 'block' && r.appPackage)
+      .map((r) => r.appPackage.toLowerCase()),
+  );
+
+  const allowed = new Set();
+  for (const rule of rules.appRules || []) {
+    if (rule.action !== 'allow' || !rule.appPackage) continue;
+    const pkg = rule.appPackage.toLowerCase();
+    if (blocked.has(pkg)) continue;
+    allowed.add(pkg);
+  }
+  return [...allowed];
+}
+
 /** Blocked domains from the parent's website rules. The column is `url`. */
 function blockedDomainsFor(rules) {
   return rules.websiteRules
@@ -136,8 +194,62 @@ function blockedDomainsFor(rules) {
 }
 
 /**
- * Re-derive what should be blocked from the current rules, usage and clock, and
- * push it to the native blocker when the set has changed.
+ * How many minutes before the daily limit the child is warned.
+ *
+ * **Ascending, and it has to be.** `find` takes the first threshold the remaining
+ * time is at or under, so descending order answers "10" for four minutes left —
+ * a threshold that has already fired, which silently swallows the five-minute
+ * warning entirely. Ascending gives the tightest threshold that still applies.
+ */
+const LIMIT_WARNINGS = [5, 10];
+
+const dayKey = (now) =>
+  `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+/**
+ * Tell the child before the phone stops, not as it stops.
+ *
+ * The Home screen has always said "Nearly out of time" under fifteen minutes, but
+ * only to a child who happens to be looking at it — and a child who is about to
+ * run out of time is, by definition, looking at something else. A lock that lands
+ * with no warning reads as a fault, and the reasonable response to a phone that
+ * has apparently broken is to keep trying it, which is the behaviour the alert
+ * throttles then read as defiance.
+ *
+ * Fires at most once per threshold per day. The key carries the threshold as well
+ * as the date so a grant that puts the child back above ten minutes re-arms the
+ * warning — otherwise the second lock of the evening would arrive silently, which
+ * is the one the child least expects.
+ */
+async function warnBeforeLimit(rule, now) {
+  const remaining = minutesUntilLimit(rule, _state.todayMinutes, _state.bonusMinutes);
+  if (remaining === null) return;
+
+  const threshold = LIMIT_WARNINGS.find((t) => remaining <= t);
+  if (threshold === undefined) return;
+
+  const key = `${dayKey(now)}:${threshold}`;
+  if (_state.lastLimitWarning === key) return;
+  _state.lastLimitWarning = key;
+
+  await notifyLocally({
+    // The real figure, not the threshold that matched it. The threshold decides
+    // *whether* to speak; saying "5 minutes left" to a child who has four is a
+    // small lie that the lock arriving early will make them notice.
+    title: `${remaining} ${remaining === 1 ? 'minute' : 'minutes'} left`,
+    // Said as a choice rather than a countdown: "finish up" is something a child
+    // can act on, and the ask is named because it is the only thing that changes
+    // the outcome.
+    body: threshold <= 5
+      ? 'Your screen time is nearly up. Finish what you are doing, or ask your parent for more.'
+      : 'Nearly out of screen time for today. Ask your parent if you need more.',
+    data: { type: 'screen_time_warning', minutesLeft: remaining },
+  });
+}
+
+/**
+ * Re-derive what should be blocked from the current rules, usage, grants and
+ * clock, and push it to the native blocker when the set has changed.
  *
  * Bedtime and the daily schedule turn on and off with the clock rather than with
  * anything the app does, so this has to run on a timer as well as after a sync
@@ -147,14 +259,43 @@ function blockedDomainsFor(rules) {
  * The comparison is on the resulting package set, not on the lock state. Keying
  * it off the lock was why a per-app daily limit could never have worked: an app
  * crossing its own limit changes what is blocked without changing whether the
- * device is locked, so the new set was computed and then thrown away.
+ * device is locked, so the new set was computed and then thrown away. The
+ * allowlist is compared the same way and for the same reason: a parent adding an
+ * app to it changes nothing about whether the phone is locked.
  */
 function refreshBlocking() {
   const rules = getRules();
-  const { blocked, reason } = lockState(rules.screenTimeRule, _state.todayMinutes, new Date(), rules.blocked);
+  const now = new Date();
+
+  // Recomputed every pass rather than cached, because a grant expires on the
+  // clock: a phone left running past midnight has to stop honouring yesterday's
+  // extra minutes without anything else having happened.
+  _state.bonusMinutes = bonusMinutesFrom(rules.screenTimeGrants, now);
+
+  const { blocked, reason, tier } = lockState(
+    rules.screenTimeRule, _state.todayMinutes, now, rules.blocked, _state.bonusMinutes,
+  );
 
   _state.locked = blocked;
   _state.lockReason = reason;
+  _state.lockTier = tier;
+
+  /**
+   * The allowlist goes down first, and the order is not cosmetic.
+   *
+   * The native side reads the two sets independently, on whichever window change
+   * comes next. If the wildcard landed first, a child whose homework app is on
+   * the allowlist would be bounced out of it during the gap — brief, but it is
+   * the exact moment the lock arrives and the exact app they are entitled to. The
+   * reverse gap is harmless: an allowlist with no wildcard yet blocks nothing.
+   */
+  const allowed = allowedPackagesFor(rules, tier);
+  _state.allowedPackages = allowed;
+  const allowedKey = [...allowed].sort().join(',');
+  if (allowedKey !== _pushedAllows) {
+    _pushedAllows = allowedKey;
+    AppBlocker.setAllowedApps(allowed);
+  }
 
   // '*' is the wildcard the accessibility service reads as "block everything".
   const packages = blockedPackagesFor(rules, blocked, _state.appMinutes);
@@ -163,6 +304,13 @@ function refreshBlocking() {
   if (key !== _pushedBlocks) {
     _pushedBlocks = key;
     AppBlocker.setBlockedApps(packages);
+  }
+
+  // Advisory, and deliberately not awaited: the enforcement above is what this
+  // tick owes the parent, and a notification queue that is slow or refused must
+  // not delay it.
+  if (!blocked) {
+    warnBeforeLimit(rules.screenTimeRule, now).catch(() => {});
   }
 
   return { blocked, packages };
@@ -290,8 +438,7 @@ async function syncUsageStats() {
      * most likely to be looking. The usage window this guards is the device's
      * local day, so the key has to be too.
      */
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const today = dayKey(new Date());
     if (_state.screenTimeAlertedDate !== today) {
       _state.screenTimeAlertedDate = today;
       emitEvent('alert:screen_time_exceeded');
@@ -480,13 +627,20 @@ export function stopMonitoring() {
   _lockTimer = null;
   VpnControl.stopVpn().catch(() => {});
   AppBlocker.setBlockedApps([]);
-  // Cleared alongside it, or the next start would compare against a set the
+  AppBlocker.setAllowedApps([]);
+  // Cleared alongside them, or the next start would compare against sets the
   // native side no longer holds and skip the push that re-applies the rules.
   _pushedBlocks = null;
+  _pushedAllows = null;
   _state.locked = false;
   _state.lockReason = null;
+  _state.lockTier = null;
+  _state.bonusMinutes = 0;
   _state.appMinutes = {};
   _state.blockedPackages = [];
+  _state.allowedPackages = [];
+  // Not the warning key: it is keyed by date, and a child who restarts the app
+  // after being warned at ten minutes has not earned a second warning.
   _state.status = {
     monitoring: false, appBlocking: false, websiteBlocking: false,
     locationTracking: false, contactSync: false, webHistory: false, pushNotifications: false,

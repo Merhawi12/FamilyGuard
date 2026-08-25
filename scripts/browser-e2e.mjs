@@ -1254,6 +1254,35 @@ try {
       onDevice.data.screenTimeRule?.dailyLimitMinutes === 180,
       JSON.stringify(onDevice.data.screenTimeRule));
 
+    /*
+     * Extra time for today — the answer to a question both lock screens have been
+     * asking with nothing on this side to receive it.
+     *
+     * The check that matters is the last one: the grant must reach the device
+     * *without* changing the rule. Raising `dailyLimitMinutes` is what a parent
+     * did before, and it is still 180 afterwards precisely because this is not
+     * that.
+     */
+    await page.click('button:has-text("+15m")');
+    await page.waitForTimeout(1000);
+
+    const afterGrant = await page.locator('body').innerText();
+    check('the grant is confirmed on screen', /added for today/i.test(afterGrant),
+      afterGrant.slice(0, 200).replace(/\n/g, ' '));
+    check('the running total for today is shown', /\+15m/.test(afterGrant),
+      afterGrant.slice(0, 200).replace(/\n/g, ' '));
+
+    const withGrant = await api('GET', '/devices/me/rules', { token: controlDeviceToken });
+    check('the device is given the extra minutes',
+      (withGrant.data.screenTimeGrants || []).some((g) => g.minutes === 15),
+      JSON.stringify(withGrant.data.screenTimeGrants));
+    check('each grant carries the instant it was given, not a total',
+      withGrant.data.screenTimeGrants.every((g) => typeof g.grantedAt === 'string'),
+      JSON.stringify(withGrant.data.screenTimeGrants));
+    check('the daily limit itself is untouched',
+      withGrant.data.screenTimeRule?.dailyLimitMinutes === 180,
+      JSON.stringify(withGrant.data.screenTimeRule));
+
     check('the Screen Time page is clean', w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
     await page.close();
   }
@@ -1314,21 +1343,55 @@ try {
       JSON.stringify(limitRule));
 
     /*
-     * The action that never existed is no longer offered — for apps. Scoped to
-     * the app card on purpose: the Websites column has its own "Rule" select and
-     * "Allow only (whitelist)" is real there, because `utils/contentPolicy`
-     * folds an allow into the domain lists the device is handed. An unscoped
-     * selector matched both and read the working feature as the broken one.
+     * The third app action, which was removed once for meaning nothing and is
+     * back meaning something narrow: "keep open when the daily limit runs out".
+     *
+     * Scoped to the app card on purpose. The Websites column has its own "Rule"
+     * select where "Allow only (whitelist)" is a genuinely different feature, and
+     * an unscoped selector matches both — which is how an earlier version of this
+     * check read the working website feature as the broken app one.
      */
     const appCard = page.locator('.card').filter({ hasText: 'Custom app rule' });
     const actions = await appCard.locator('label:has-text("Rule") select option').allInnerTexts();
-    check('the unimplemented "allow only" action is gone from the app form',
-      actions.length > 0 && !actions.some((a) => /allow/i.test(a)), actions.join(', '));
+    check('the app form offers all three actions', actions.length === 3, actions.join(', '));
+    /*
+     * The wording is load-bearing, not decoration. "Allow only" is a whitelist —
+     * block everything else on the phone, dialer included — and that is emphatically
+     * not what this does. A parent who reads it that way has been told the
+     * opposite of what will happen.
+     */
+    check('the allow action names the lock it survives rather than reading as a whitelist',
+      actions.some((a) => /keep open when time runs out/i.test(a))
+      && !actions.some((a) => /only|whitelist/i.test(a)), actions.join(', '));
+
+    await page.fill('label:has-text("App name") input', 'Kindle');
+    await page.fill('label:has-text("Package name") input', 'com.amazon.kindle');
+    await appCard.locator('label:has-text("Rule") select').selectOption('allow');
+    await page.waitForTimeout(300);
+
+    const scopeNote = await appCard.innerText();
+    check('the parent is told which locks it does not survive',
+      /bedtime/i.test(scopeNote) && /allowed hours/i.test(scopeNote),
+      scopeNote.slice(0, 240).replace(/\n/g, ' '));
+
+    await page.click('button:has-text("Add app rule")');
+    await page.waitForTimeout(900);
+
+    onDevice = await api('GET', '/devices/me/rules', { token: controlDeviceToken });
+    const allowRule = onDevice.data.appRules.find((r) => r.appPackage === 'com.amazon.kindle');
+    check('the device is given the allow rule', allowRule?.action === 'allow',
+      JSON.stringify(onDevice.data.appRules));
+    check('an allow rule carries no daily limit', allowRule?.dailyLimitMinutes === null,
+      JSON.stringify(allowRule));
+
+    body = await page.locator('body').innerText();
+    check('the rule list says what the exception applies to', body.includes('after limit'),
+      body.slice(0, 300).replace(/\n/g, ' '));
 
     const siteCard = page.locator('.card').filter({ hasText: 'Block a specific site' });
     const siteActions = await siteCard.locator('label:has-text("Rule") select option').allInnerTexts();
-    check('website whitelisting, which is implemented, is still offered',
-      siteActions.some((a) => /allow/i.test(a)), siteActions.join(', '));
+    check('website whitelisting, which is a different feature, is still offered',
+      siteActions.some((a) => /allow only/i.test(a)), siteActions.join(', '));
 
     check('the Blocking page is clean', w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
     await page.close();

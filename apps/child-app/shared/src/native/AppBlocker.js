@@ -29,8 +29,10 @@ const noopSub = { remove: () => {} };
 const stub = {
   supported: false,
   setBlockedApps: (_packages) => {},
+  setAllowedApps: (_packages) => {},
   isAccessibilityEnabled: async () => false,
   openSettings: () => {},
+  getAlwaysAllowedApps: async () => [],
   onAppBlocked: (_cb) => noopSub,
 };
 

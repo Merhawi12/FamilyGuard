@@ -1,22 +1,37 @@
 /**
- * When the parent's screen-time rule says this computer should be locked.
+ * When the parent's screen-time rule says this computer should be locked, and how
+ * much of it the lock is entitled to take.
  *
- * Three separate things in `ScreenTimeRule` can each demand a full lock, and the
- * parent sets all of them on the same screen:
+ * Four separate things can each demand a lock, and the parent sets three of them
+ * on the same screen:
  *
  *   - `dailyLimitMinutes` — the total for the day has been used up
  *   - `bedtimeStart`/`bedtimeEnd` — the nightly window, which normally wraps past
  *     midnight
  *   - `schedule[day]` — the hours the device is allowed to be used at all
+ *   - the parent's own pause on this one device, which outranks all three
+ *
+ * **They are not the same lock, and treating them as one was the mistake this
+ * file used to make.** Every reason raised the same full-screen lock, so a child
+ * who spent ninety minutes on YouTube lost the essay editor along with it. A lock
+ * now carries a tier, and the tier is what the enforcement layers read:
+ *
+ *   - `'limit'` — the entertainment budget is spent. The parent's allowlist
+ *     applies: apps they marked `allow` stay open, because homework does not stop
+ *     when YouTube does.
+ *   - `'strict'` — bedtime, out-of-hours, or a deliberate pause. Nothing but the
+ *     safety exception. These exist to stop use rather than to ration it, and an
+ *     allowlist would quietly gut all three.
  *
  * **This is a deliberate copy of the mobile app's `services/schedule.js`, kept
- * character-for-character.** The two clients are separate npm projects with no
- * shared dependency — the phone's package resolves React Native's peer set and
- * this one resolves Node's — so there is no import that would reach across. What
- * there must not be is a second *interpretation* of the same rule: a bedtime
- * that starts at a different minute on a laptop than on a phone is a support
- * call nobody can reproduce. `scripts/e2e.mjs` runs the phone's own wrap-around
- * cases against this copy for exactly that reason.
+ * character-for-character below this comment.** The two clients are separate npm
+ * projects with no shared dependency — the phone's package resolves React
+ * Native's peer set and this one resolves Node's — so there is no import that
+ * would reach across. What there must not be is a second *interpretation* of the
+ * same rule: a bedtime that starts at a different minute on a laptop than on a
+ * phone, or a granted fifteen minutes that expires on one and not the other, is a
+ * support call nobody can reproduce. `scripts/e2e.mjs` runs the phone's own
+ * wrap-around and grant-expiry cases against this copy for exactly that reason.
  */
 
 /** `'HH:MM'` → minutes since midnight, or null when it is not a valid time. */
@@ -49,15 +64,72 @@ export function withinWindow(minute, start, end) {
     : minute >= start || minute < end;
 }
 
+/** Which reasons the parent's allowlist survives. Everything else is strict. */
+const LIMIT_TIER_REASONS = new Set(['daily_limit']);
+
+/** The tier a reason locks at. Exported so nothing has to re-derive it. */
+export const tierFor = (reason) => (LIMIT_TIER_REASONS.has(reason) ? 'limit' : 'strict');
+
+/**
+ * The extra minutes a parent granted that are still worth anything.
+ *
+ * A grant is `{ minutes, grantedAt }` and expires with the day it was given — so
+ * "today" has to be decided here, on the device, against this machine's own
+ * midnight. The server deliberately does not decide it: Cloud Run runs in UTC and
+ * the families are in Canada, so a server-side "today" rolls over at 20:00 local
+ * and would take back minutes a parent granted during the evening they were asked
+ * for. That is the same UTC-rollover bug that made every evening's screen time
+ * double-count, arrived at from the other side.
+ *
+ * A grant stamped in the future is ignored rather than trusted: a machine whose
+ * clock is behind would otherwise carry a grant across days for ever.
+ */
+export function bonusMinutesFrom(grants, now = new Date()) {
+  if (!Array.isArray(grants) || grants.length === 0) return 0;
+
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const from = midnight.getTime();
+  const until = now.getTime();
+
+  let total = 0;
+  for (const grant of grants) {
+    const minutes = Number(grant?.minutes);
+    if (!Number.isFinite(minutes) || minutes <= 0) continue;
+    const at = new Date(grant?.grantedAt ?? NaN).getTime();
+    if (Number.isNaN(at) || at < from || at > until) continue;
+    total += minutes;
+  }
+  return total;
+}
+
+/**
+ * How long until the daily limit is reached, or null when nothing is counting
+ * down — no limit set, the rule switched off, or the limit already spent.
+ *
+ * Split out so the warning that arrives before a lock and the lock itself read
+ * one number. A child being told "ten minutes left" and then locked eight minutes
+ * later is worse than not warning them at all.
+ */
+export function minutesUntilLimit(rule, todayMinutes, bonusMinutes = 0) {
+  if (!rule || rule.isActive === false) return null;
+  const limit = rule.dailyLimitMinutes;
+  if (!limit) return null;
+  const remaining = (limit + (bonusMinutes || 0)) - todayMinutes;
+  return remaining > 0 ? remaining : null;
+}
+
 /**
  * Should everything be blocked right now?
  *
  * @param {object|null} rule       the child's ScreenTimeRule, as the API returns it
  * @param {number} todayMinutes    usage recorded so far today
  * @param {Date} [now]
- * @returns {{ blocked: boolean, reason: 'daily_limit'|'bedtime'|'outside_schedule'|null }}
+ * @param {object|null} [blocked]  the parent's pause on this device: `{ since, reason }`
+ * @param {number} [bonusMinutes]  extra minutes granted for today — see `bonusMinutesFrom`
+ * @returns {{ blocked: boolean, reason: string|null, tier: 'limit'|'strict'|null }}
  */
-export function lockState(rule, todayMinutes, now = new Date(), blocked = null) {
+export function lockState(rule, todayMinutes, now = new Date(), blocked = null, bonusMinutes = 0) {
   /**
    * The parent's own pause, which outranks every scheduled reason.
    *
@@ -70,18 +142,36 @@ export function lockState(rule, todayMinutes, now = new Date(), blocked = null) 
    * `blocked` is whatever the sync put there: `{ since, reason }` or null. It is
    * read for its presence, not its shape, so an older agent talking to a newer
    * server locks correctly even if the payload grows fields it has never seen.
+   *
+   * Always strict, whatever reason it carries. A parent reaching for the pause
+   * button has decided something, and an allowlist they set up months ago for
+   * homework must not decide it differently.
    */
-  if (blocked) return { blocked: true, reason: blocked.reason || 'blocked_by_parent' };
+  if (blocked) {
+    return { blocked: true, reason: blocked.reason || 'blocked_by_parent', tier: 'strict' };
+  }
 
-  if (!rule || rule.isActive === false) return { blocked: false, reason: null };
+  if (!rule || rule.isActive === false) return { blocked: false, reason: null, tier: null };
 
+  /**
+   * Granted minutes raise the bar rather than being spent first.
+   *
+   * The alternative — subtracting them from `todayMinutes` — reads the same until
+   * the day rolls over, and then a grant made at 22:00 goes on paying for the
+   * following morning. Adding to the limit keeps the grant attached to the day it
+   * belongs to, which is the day `bonusMinutesFrom` already decided.
+   */
   const limit = rule.dailyLimitMinutes;
-  if (limit && todayMinutes >= limit) return { blocked: true, reason: 'daily_limit' };
+  if (limit && todayMinutes >= limit + (bonusMinutes || 0)) {
+    return { blocked: true, reason: 'daily_limit', tier: 'limit' };
+  }
 
   if (rule.bedtimeEnabled) {
     const start = parseTimeOfDay(rule.bedtimeStart);
     const end = parseTimeOfDay(rule.bedtimeEnd);
-    if (withinWindow(minutesInto(now), start, end)) return { blocked: true, reason: 'bedtime' };
+    if (withinWindow(minutesInto(now), start, end)) {
+      return { blocked: true, reason: 'bedtime', tier: 'strict' };
+    }
   }
 
   // `schedule` arrives parsed from the API's JSON getter, but a device that has
@@ -98,9 +188,9 @@ export function lockState(rule, todayMinutes, now = new Date(), blocked = null) 
     const start = parseTimeOfDay(today.start);
     const end = parseTimeOfDay(today.end);
     if (start !== null && end !== null && !withinWindow(minutesInto(now), start, end)) {
-      return { blocked: true, reason: 'outside_schedule' };
+      return { blocked: true, reason: 'outside_schedule', tier: 'strict' };
     }
   }
 
-  return { blocked: false, reason: null };
+  return { blocked: false, reason: null, tier: null };
 }

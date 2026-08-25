@@ -1,6 +1,6 @@
 const {
   Session, Child, Device, ActivityLog, Location, AppRule, WebsiteRule, ScreenTimeRule,
-  Message, Contact, Alert, SafeZone, Notification, PushToken, Transaction,
+  ScreenTimeGrant, Message, Contact, Alert, SafeZone, Notification, PushToken, Transaction,
   AuditLog, ContactMessage,
 } = require('../models');
 const { sequelize } = require('../config/db');
@@ -22,10 +22,27 @@ const { disconnectUserSockets, disconnectDeviceSockets } = require('./session');
  * parent and refuses when the parent is gone. What was left was the data, not a
  * live feed.)
  *
- * Both doors now call this. It is deliberately a plain function over models
- * rather than an association cascade: the foreign keys here carry no `ON DELETE`
- * rule, so a cascade would have to be a migration on every table at once, and
- * the order below is readable in a way an implicit one is not.
+ * Both doors now call this, as an explicit list rather than as an association
+ * cascade.
+ *
+ * **The child-scoped deletes below are belt-and-braces, and it is worth knowing
+ * that rather than believing what this comment used to say.** It claimed these
+ * foreign keys carry no `ON DELETE` rule. They do: every `childId` here is an
+ * association Sequelize knows about, so `sync()` emits the column as
+ * `REFERENCES children(id) ON DELETE CASCADE`, and destroying the `Child` rows
+ * near the end of the transaction would take all of them on its own. Read the
+ * DDL before relying on either statement.
+ *
+ * The list stays, because it is worth more than the cascade is: it is the
+ * readable inventory of what an erasure actually covers, it does not depend on
+ * which engine created the table or on FK enforcement being switched on, and the
+ * rows keyed on something other than `childId` — `contact_messages` matched by
+ * email, the audit-log anonymisation, everything under `deviceIds` — have no
+ * cascade to fall back on and have to be written out regardless.
+ *
+ * A table added later belongs here too. Nothing fails if you forget, which is
+ * the hazard worth naming: `accountLifecycle.test.js` enumerates the tables by
+ * hand as well, so it only covers the ones somebody remembered to name.
  *
  * @param {User} user            the account to erase, already loaded
  * @param {object} [options]
@@ -48,6 +65,11 @@ const eraseAccount = async (user, { io } = {}) => {
       await AppRule.destroy(byChild);
       await WebsiteRule.destroy(byChild);
       await ScreenTimeRule.destroy(byChild);
+      // Grants are the newest child-scoped table and the one whose absence from
+      // this list would have been least visible: nothing ever reads them again,
+      // and their own age-based sweep only runs on the next write for this child,
+      // which after an erasure never comes. See models/ScreenTimeGrant.js.
+      await ScreenTimeGrant.destroy(byChild);
       await Message.destroy(byChild);
       await Contact.destroy(byChild);
     }

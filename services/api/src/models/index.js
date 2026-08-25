@@ -3,6 +3,7 @@ const Child = require('./Child');
 const Device = require('./Device');
 const ActivityLog = require('./ActivityLog');
 const ScreenTimeRule = require('./ScreenTimeRule');
+const ScreenTimeGrant = require('./ScreenTimeGrant');
 const AppRule = require('./AppRule');
 const WebsiteRule = require('./WebsiteRule');
 const Alert = require('./Alert');
@@ -32,6 +33,11 @@ ActivityLog.belongsTo(Device, { foreignKey: 'deviceId', as: 'device' });
 
 Child.hasOne(ScreenTimeRule, { foreignKey: 'childId', as: 'screenTimeRule' });
 ScreenTimeRule.belongsTo(Child, { foreignKey: 'childId', as: 'child' });
+
+// hasMany, not hasOne: grants stack, and a child accumulates one row per time a
+// parent says yes. They are pruned by age rather than replaced.
+Child.hasMany(ScreenTimeGrant, { foreignKey: 'childId', as: 'screenTimeGrants' });
+ScreenTimeGrant.belongsTo(Child, { foreignKey: 'childId', as: 'child' });
 
 Child.hasMany(AppRule, { foreignKey: 'childId', as: 'appRules' });
 AppRule.belongsTo(Child, { foreignKey: 'childId', as: 'child' });
@@ -78,7 +84,8 @@ Device.hasMany(PushToken, { foreignKey: 'deviceId', as: 'pushTokens' });
 PushToken.belongsTo(Device, { foreignKey: 'deviceId', as: 'device' });
 
 module.exports = {
-  User, Child, Device, ActivityLog, ScreenTimeRule, AppRule, WebsiteRule, Alert, AuditLog,
+  User, Child, Device, ActivityLog, ScreenTimeRule, ScreenTimeGrant, AppRule, WebsiteRule,
+  Alert, AuditLog,
   Location, SafeZone, Message, Contact, Session, Transaction, Notification, SystemSetting,
   PushToken, ContactMessage,
 };

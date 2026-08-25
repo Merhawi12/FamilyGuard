@@ -8,7 +8,9 @@
  * rules" with a badge and changed nothing on the child's phone, which is the
  * worst possible failure for a control a parent believes they have set.
  *
- * These pin the shape the API now refuses, and the one it now supports.
+ * These pin the shapes the API refuses, and the ones it supports. `allow` is back
+ * among the latter, meaning something much narrower than the dropdown once
+ * implied — see the block of cases at the bottom.
  */
 const request = require('supertest');
 const { app } = require('../src/app');
@@ -50,18 +52,61 @@ describe('an app rule has to name an app the device can recognise', () => {
     expect(res.status).toBe(400);
   });
 
-  it('refuses an action nothing implements', async () => {
-    // 'allow' was in the dropdown. For apps it meant blocking every other app on
-    // the phone, which the device has no way to express, so it meant nothing.
-    const res = await addRule({ appName: 'YouTube', appPackage: 'com.google.android.youtube', action: 'allow' });
+  it('refuses an action that is not an action at all', async () => {
+    const res = await addRule({ appName: 'X', appPackage: 'com.x', action: 'whatever' });
+    expect(res.status).toBe(400);
+    expect(await AppRule.count({ where: { childId: child.id } })).toBe(0);
+  });
+});
 
+/**
+ * `allow` was refused outright for a while, and the reason was sound: as a
+ * *whitelist* it would have meant blocking every other app on the phone including
+ * the dialer, and the device had no way to express an exception.
+ *
+ * It means something narrower now — "this app stays open once the daily limit
+ * runs out" — and the device has the mechanism. What the API stores is just a
+ * row; the tier rules that keep it away from bedtime live in the two clients'
+ * `schedule.js`, and the safety exception that no rule can reach is in
+ * `AppMonitorService.kt`. This pins the half the server owns.
+ */
+describe('an app can be kept open past the daily limit', () => {
+  it('stores an allow rule', async () => {
+    const res = await addRule({
+      appName: 'Kindle', appPackage: 'com.amazon.kindle', action: 'allow',
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.action).toBe('allow');
+    expect(res.body.appPackage).toBe('com.amazon.kindle');
+  });
+
+  it('carries no daily limit, which is not what it is for', async () => {
+    const res = await addRule({
+      appName: 'Kindle', appPackage: 'com.amazon.kindle', action: 'allow', dailyLimitMinutes: 30,
+    });
+
+    expect(res.status).toBe(201);
+    // Only a `limit` rule stores one. An allow rule carrying a number would make
+    // the device's "is this app over its limit" check answer for a rule that has
+    // no limit, which is the same trap the block case above pins.
+    expect(res.body.dailyLimitMinutes).toBeNull();
+  });
+
+  it('still needs a package name, like every other app rule', async () => {
+    const res = await addRule({ appName: 'Kindle', action: 'allow' });
     expect(res.status).toBe(400);
     expect(await AppRule.count({ where: { childId: child.id } })).toBe(0);
   });
 
-  it('refuses an action that is not an action at all', async () => {
-    const res = await addRule({ appName: 'X', appPackage: 'com.x', action: 'whatever' });
-    expect(res.status).toBe(400);
+  it('reaches the device it is narrowed to', async () => {
+    const device = await createDevice(child.id);
+    const res = await addRule({
+      appName: 'Kindle', appPackage: 'com.amazon.kindle', action: 'allow', deviceId: device.id,
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.deviceId).toBe(device.id);
   });
 });
 

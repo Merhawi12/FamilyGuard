@@ -93,11 +93,38 @@ const resolveWebsiteRules = (rows) => resolveScoped(rows, websiteKey);
 const resolveScreenTimeRule = (rows) =>
   rows.find((r) => r.deviceId) || rows.find((r) => !r.deviceId) || null;
 
+/**
+ * Extra minutes, which **add up instead of overriding** — the one exception to
+ * everything above, and the reason it is written here rather than left implicit
+ * at the call site.
+ *
+ * A rule is a statement about how things are, so a device-specific one and a
+ * child-wide one are two answers to the same question and the narrower has to
+ * win. A grant is not a statement; it is a parent saying yes to one request. Two
+ * yeses are more minutes, whichever scope each was given at — a parent who adds
+ * fifteen minutes to the whole child and then fifteen more to the laptop the
+ * child is actually working on has plainly given that laptop thirty, and an
+ * override would silently discard half of what they did.
+ *
+ * The rows are handed on with their timestamps rather than summed here, because
+ * only the device knows which of them still count: a grant is spent against the
+ * child's usage day, and that day opens at the *device's* local midnight. See
+ * models/ScreenTimeGrant.js.
+ */
+const resolveScreenTimeGrants = (rows) =>
+  rows
+    .map((row) => ({
+      minutes: Number(row.minutes) || 0,
+      grantedAt: new Date(row.createdAt).toISOString(),
+    }))
+    .filter((grant) => grant.minutes > 0);
+
 module.exports = {
   rulesVisibleTo,
   resolveAppRules,
   resolveWebsiteRules,
   resolveScreenTimeRule,
+  resolveScreenTimeGrants,
   appKey,
   websiteKey,
 };

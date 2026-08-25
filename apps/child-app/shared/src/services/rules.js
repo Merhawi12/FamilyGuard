@@ -10,7 +10,15 @@ const CACHE_KEY = 'fg_device_rules';
 // It rides the rules payload and the rules cache deliberately — a phone that was
 // blocked and then started with no signal must come up locked, and the cache is
 // the only thing that survives a restart offline.
-const EMPTY_RULES = { appRules: [], websiteRules: [], screenTimeRule: null, blocked: null };
+//
+// `screenTimeGrants` is `[{ minutes, grantedAt }]`, the extra time a parent
+// granted for today. It is cached for the opposite reason to `blocked` and is
+// just as important: a phone that goes offline after being given fifteen minutes
+// must not take them back, and the timestamps are what let it work out for itself
+// when they expire. See `bonusMinutesFrom` in schedule.js.
+const EMPTY_RULES = {
+  appRules: [], websiteRules: [], screenTimeRule: null, screenTimeGrants: [], blocked: null,
+};
 
 let _rules = { ...EMPTY_RULES };
 let _pollTimer = null;
@@ -51,7 +59,11 @@ onUnlinked(() => {
 export async function fetchRules() {
   try {
     const res = await deviceApi.getRules();
-    _rules = res.data;
+    // Merged over the defaults rather than assigned: an API older than this build
+    // sends no `screenTimeGrants`, and `bonusMinutesFrom` would then be handed
+    // undefined on every tick. It tolerates that, but the missing key would also
+    // reach the cache and the screens.
+    _rules = { ...EMPTY_RULES, ...res.data };
     _sync = { lastSyncAt: new Date().toISOString(), lastError: null };
     // Persisted before it is applied, so a device killed mid-apply still comes
     // back holding the newest rules rather than the ones before them.
@@ -105,6 +117,27 @@ export async function startRulesSync(onUpdate) {
   _unsubscribers.push(onSocket('connect', fetchRules));
   _unsubscribers.push(onSocket('screen_time_updated', async (rule) => {
     _rules = { ..._rules, screenTimeRule: rule };
+    await writeJson(CACHE_KEY, _rules).catch(() => {});
+    if (_onUpdate) await _onUpdate(_rules);
+  }));
+
+  /**
+   * The parent granting extra minutes for today.
+   *
+   * Appended from the event rather than by re-syncing, and that speed is the
+   * whole feature: a child asks from a locked phone, the parent taps "+15
+   * minutes", and the phone has to unlock now — not at the end of a five-minute
+   * poll while the two of them stand there looking at it.
+   *
+   * A malformed payload is dropped rather than appended. `bonusMinutesFrom`
+   * already ignores a grant it cannot read, but a bad row would still be written
+   * to the cache and re-read on every start for as long as the cache lived.
+   */
+  _unsubscribers.push(onSocket('screen_time_granted', async (grant) => {
+    const minutes = Number(grant?.minutes);
+    if (!Number.isFinite(minutes) || minutes <= 0) return;
+    const grantedAt = grant?.grantedAt || new Date().toISOString();
+    _rules = { ..._rules, screenTimeGrants: [...(_rules.screenTimeGrants || []), { minutes, grantedAt }] };
     await writeJson(CACHE_KEY, _rules).catch(() => {});
     if (_onUpdate) await _onUpdate(_rules);
   }));

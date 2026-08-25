@@ -6,7 +6,6 @@ import ProgressRing from '../components/ProgressRing';
 import { Card, Pill } from '../components/ui';
 import { loadChildName } from '../services/profile';
 import { startMonitoring, getMonitoringStatus } from '../services/monitoring';
-import { lockState } from '../services/schedule';
 import { colors, space, type } from '../theme';
 
 const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -41,10 +40,23 @@ function todayWindow(rule) {
  */
 export default function HomeScreen({ navigation }) {
   const [rules, setRules] = useState({
-    appRules: [], websiteRules: [], screenTimeRule: null, blocked: null,
+    appRules: [], websiteRules: [], screenTimeRule: null, screenTimeGrants: [], blocked: null,
   });
   const [blockedPackages, setBlockedPackages] = useState([]);
   const [todayMinutes, setTodayMinutes] = useState(0);
+  /**
+   * The lock as the blocker decided it, not as this screen would guess it.
+   *
+   * `lockState` used to be called again here, which meant re-deriving a decision
+   * from three inputs the screen holds copies of — and once granted minutes
+   * existed, a fourth it did not hold at all. A child who had just been given
+   * fifteen minutes would have watched the phone unlock while this screen went on
+   * saying their time was up. `monitoring.js` is where the answer is; this reads
+   * it, the same way "Paused right now" reads `blockedPackages`.
+   */
+  const [lock, setLock] = useState({ locked: false, reason: null, tier: null });
+  const [bonusMinutes, setBonusMinutes] = useState(0);
+  const [allowedPackages, setAllowedPackages] = useState([]);
   const [childName, setChildName] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const appState = useRef(AppState.currentState);
@@ -53,7 +65,14 @@ export default function HomeScreen({ navigation }) {
     const monitoring = getMonitoringStatus();
     setRules(monitoring.rules);
     setBlockedPackages(monitoring.blockedPackages || []);
+    setAllowedPackages(monitoring.allowedPackages || []);
     setTodayMinutes(monitoring.todayMinutes);
+    setBonusMinutes(monitoring.bonusMinutes || 0);
+    setLock({
+      locked: !!monitoring.locked,
+      reason: monitoring.lockReason,
+      tier: monitoring.lockTier,
+    });
     setChildName(await loadChildName());
   }, []);
 
@@ -81,12 +100,21 @@ export default function HomeScreen({ navigation }) {
   }, [refresh]);
 
   const rule = rules.screenTimeRule;
-  const limit = rule?.dailyLimitMinutes || null;
+  /**
+   * The limit the child is actually measured against, extra minutes included.
+   *
+   * Showing the rule's figure and the grant separately would be more literal and
+   * worse: the number on this screen is the one the child plans their evening
+   * around, and it has to be the one the lock uses. The grant is named underneath
+   * instead, because a parent who gave fifteen minutes should get the credit and
+   * the child should be able to see it arrive.
+   */
+  const baseLimit = rule?.dailyLimitMinutes || null;
+  const limit = baseLimit ? baseLimit + bonusMinutes : null;
   const used = Math.round(todayMinutes);
   const remaining = limit ? Math.max(limit - used, 0) : null;
   const progress = limit ? Math.min(used / limit, 1) : 0;
 
-  const lock = lockState(rule, todayMinutes, new Date(), rules.blocked);
   /**
    * What the blocker is actually enforcing, not what the rules could imply.
    *
@@ -100,7 +128,7 @@ export default function HomeScreen({ navigation }) {
   const blockedSites = rules.websiteRules.filter((r) => r.action === 'block');
   const window = todayWindow(rule);
 
-  const ringColor = lock.blocked ? colors.danger
+  const ringColor = lock.locked ? colors.danger
     : progress > 0.8 ? colors.warning
       : colors.teal500;
 
@@ -110,6 +138,22 @@ export default function HomeScreen({ navigation }) {
         : lock.reason === 'outside_schedule' ? 'Your phone is having a rest right now.'
         : remaining !== null && remaining <= 15 ? 'Nearly out of time — make it count!'
           : limit ? "You're doing great today." : 'No time limit today. Have fun.';
+
+  /**
+   * What a lock still leaves the child, said on the lock rather than hidden a tap
+   * away in Settings.
+   *
+   * The calling half is not a feature the parent switched on and cannot switch
+   * off, so it is stated flatly and always: a child who believes the phone is
+   * dead does not try to ring anyone with it, which is the whole problem a
+   * safety exception exists to solve.
+   */
+  const stillOpen = lock.locked
+    ? (lock.tier === 'limit' && allowedPackages.length > 0
+      ? `You can still call, message, and use ${allowedPackages.length} `
+        + `${allowedPackages.length === 1 ? 'app' : 'apps'} your parent left open.`
+      : 'You can still call and message — that never turns off.')
+    : null;
 
   return (
     <AppShell route="Home" navigation={navigation} refreshing={refreshing} onRefresh={pullToRefresh}>
@@ -122,6 +166,7 @@ export default function HomeScreen({ navigation }) {
             Hi{childName ? `, ${childName}` : ' there'}! 👋
           </Text>
           <Text style={styles.heroMessage}>{message}</Text>
+          {stillOpen && <Text style={styles.heroAside}>{stillOpen}</Text>}
         </View>
       </Card>
 
@@ -141,12 +186,21 @@ export default function HomeScreen({ navigation }) {
         <Pill
           style={{ marginTop: space.lg }}
           icon="time"
-          tone={lock.blocked ? 'danger' : 'teal'}
+          tone={lock.locked ? 'danger' : 'teal'}
           label={limit ? `Total limit: ${formatDuration(limit)}` : 'No daily limit set'}
         />
         {limit !== null && (
           <Text style={[type.caption, { marginTop: space.sm }]}>
             {formatDuration(used)} used so far
+          </Text>
+        )}
+        {/* Named rather than folded silently into the total. A child who asked
+            for more time and was given it should be able to see that happen —
+            and a total that grows on its own, with nothing to explain it, is the
+            kind of thing that gets a parental control distrusted. */}
+        {bonusMinutes > 0 && (
+          <Text style={[type.caption, styles.bonus]}>
+            {`+${formatDuration(bonusMinutes)} extra from your parent today`}
           </Text>
         )}
       </Card>
@@ -184,8 +238,14 @@ export default function HomeScreen({ navigation }) {
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={type.section}>Paused right now</Text>
             <Text style={[type.small, { marginTop: 2 }]}>
-              {lock.blocked
-                ? 'Every app is paused right now.'
+              {/* "Every app" was true when a lock took the whole phone and is
+                  not any more, so it no longer says it. Overstating a lock is
+                  the same class of error as understating one: a child told the
+                  phone is entirely dead does not try to ring anyone with it. */}
+              {lock.locked
+                ? (lock.tier === 'limit' && allowedPackages.length > 0
+                  ? `Most apps are paused · ${allowedPackages.length} still open`
+                  : 'Apps are paused — calls and messages still work.')
                 : pausedApps.length + blockedSites.length === 0
                   ? 'Nothing is blocked — everything is open.'
                   : `${pausedApps.length} app${pausedApps.length === 1 ? '' : 's'} · `
@@ -226,6 +286,12 @@ const styles = StyleSheet.create({
   },
   heroGreeting: { fontSize: 17, fontWeight: '800', color: colors.white },
   heroMessage: { fontSize: 13.5, fontWeight: '500', color: colors.teal100, marginTop: 3 },
+  // Deliberately not smaller than `heroMessage` by much: this is the sentence
+  // that tells a locked child they can still reach someone, and shrinking it to
+  // fine print would be the wrong thing to make quiet.
+  heroAside: { fontSize: 12.5, fontWeight: '600', color: colors.white, marginTop: 6, opacity: 0.92 },
+
+  bonus: { marginTop: 2, color: colors.teal700, fontWeight: '700' },
 
   ringCentre: { alignItems: 'center', justifyContent: 'center' },
   ringValue: { fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },

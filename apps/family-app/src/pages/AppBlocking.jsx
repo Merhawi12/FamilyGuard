@@ -29,16 +29,24 @@ const WEBSITE_CATEGORIES = CONTENT_CATEGORIES;
 /**
  * What an app rule can be.
  *
- * "Allow only" used to sit here too. Nothing implemented it — not the API, not
- * the phone — so choosing it produced a rule that showed up in the list with a
- * badge and changed nothing. It is gone rather than fixed, because for apps it
- * means blocking every other app on the phone including the dialer, and the
- * device has no way to express an exception. Website whitelisting, which is a
- * different feature and is implemented, is still on the Websites side.
+ * "Allow only" used to sit here and meant nothing: no API, no phone, a rule that
+ * showed up in the list with a badge and changed nothing. It was removed rather
+ * than fixed, because whitelisting *apps* would have meant blocking every other
+ * app on the phone including the dialer, and the device had no way to express an
+ * exception.
+ *
+ * The third entry is not that feature. It says what happens when the daily limit
+ * runs out — the one lock a parent routinely wants to be porous, since homework
+ * does not stop because the entertainment budget is spent — and it leaves bedtime
+ * and the allowed-hours schedule strict. The device now has the exception
+ * mechanism the old version lacked, and the things that must never be blocked
+ * (calls, messages, contacts, the clock) are not rules at all: they are built
+ * into the phone's blocker so no rule can reach them.
  */
 const APP_ACTIONS = [
   { value: 'block', label: 'Block completely' },
   { value: 'limit', label: 'Limit time per day' },
+  { value: 'allow', label: 'Keep open when time runs out' },
 ];
 
 const DEFAULT_APP_LIMIT = 60;
@@ -354,6 +362,16 @@ export default function AppBlocking() {
                     </span>
                   </label>
                 )}
+                {/* Said before the rule is saved, because it is the half a parent
+                    would otherwise discover from their child: this exception is
+                    for the daily limit and nothing else. */}
+                {appForm.action === 'allow' && (
+                  <p className="notice-info">
+                    This app keeps working after {selected?.name || 'your child'} runs out of screen
+                    time for the day. Bedtime and allowed hours still close it, and so does pausing
+                    the device.
+                  </p>
+                )}
                 <button
                   onClick={() => addApp()}
                   className="btn-primary btn-block"
@@ -379,7 +397,10 @@ export default function AppBlocking() {
                       r.appPackage || 'No package name — not enforced',
                       r.action === 'limit' && r.dailyLimitMinutes
                         ? `${r.dailyLimitMinutes}m/day`
-                        : r.action,
+                        // "allow" on its own read as "this app is permitted",
+                        // which is what every app with no rule is. The badge has
+                        // to name the lock it survives or it says nothing.
+                        : r.action === 'allow' ? 'after limit' : r.action,
                       () => removeApp(r.id),
                       r.deviceId
                     )

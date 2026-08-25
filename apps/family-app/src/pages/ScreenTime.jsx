@@ -23,6 +23,30 @@ const formatLimit = (minutes) => {
   return h ? `${h}h${m ? ` ${m}m` : ''}` : `${m}m`;
 };
 
+/** The top-ups worth one tap. Anything else is a change to the limit itself. */
+const GRANT_OPTIONS = [15, 30, 60];
+
+/**
+ * The granted minutes that are still in play, summed against *this browser's*
+ * calendar day.
+ *
+ * The API deliberately answers with rows and timestamps rather than a total: it
+ * runs in UTC and the families do not, so a total computed there would reset in
+ * front of the parent at 20:00 local — the same rollover that made every
+ * evening's screen time double-count until the day boundary moved to whoever
+ * actually knows one. The parent's browser knows one, so it applies it here, and
+ * the child's device applies its own when it spends them.
+ */
+const grantedTodayFrom = (grants) => {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  return (grants || []).reduce((total, grant) => {
+    const at = new Date(grant?.grantedAt ?? NaN);
+    if (Number.isNaN(at.getTime()) || at < midnight) return total;
+    return total + (Number(grant.minutes) || 0);
+  }, 0);
+};
+
 export default function ScreenTime() {
   const [childList, setChildList] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -37,6 +61,9 @@ export default function ScreenTime() {
   const [rule, setRule] = useState(null);
   // Device ids that already have their own rule, so the tabs can mark them.
   const [overridden, setOverridden] = useState([]);
+  /** Extra minutes granted recently, as rows — see `grantedTodayFrom`. */
+  const [grants, setGrants] = useState([]);
+  const [granting, setGranting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
@@ -62,6 +89,23 @@ export default function ScreenTime() {
   }, [selected, scope]);
 
   /**
+   * Extra minutes already in play for the scope on screen.
+   *
+   * Advisory — a failure leaves the total unshown rather than raising a banner,
+   * because the rules above are what this page is for and an empty grant list is
+   * also the ordinary case. Reloaded after each grant so the running total is the
+   * server's answer rather than an optimistic sum this page kept for itself.
+   */
+  useEffect(() => {
+    if (!selected) { setGrants([]); return undefined; }
+    let cancelled = false;
+    screenTimeApi.grants(selected.id, scope)
+      .then((r) => { if (!cancelled) setGrants(r.data?.grants || []); })
+      .catch(() => { if (!cancelled) setGrants([]); });
+    return () => { cancelled = true; };
+  }, [selected, scope]);
+
+  /**
    * Which of this child's devices already have an exception.
    *
    * Read by asking for each device's rule and seeing whether the answer carries
@@ -82,6 +126,7 @@ export default function ScreenTime() {
   }, [selected, saved]);
 
   const scopeDevice = (selected?.devices || []).find((d) => d.id === scope) || null;
+  const grantedToday = grantedTodayFrom(grants);
 
   const save = async () => {
     setSaving(true);
@@ -118,6 +163,40 @@ export default function ScreenTime() {
       setError(errorMessage(err, 'Could not remove that device rule.'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Give minutes back for today, without touching the rule.
+   *
+   * This is the answer to a request the product has been making for a while with
+   * nothing on this side to receive it: both lock screens and the child app's
+   * Messages offer "ask for more time", and until now saying yes meant raising
+   * `dailyLimitMinutes` and remembering to lower it in the morning. Nobody
+   * remembers, so limits crept upwards all term and children learned that asking
+   * changes the rule permanently.
+   *
+   * Deliberately not a confirmation step. A parent tapping this is usually
+   * standing next to the child who asked, and it expires by itself tonight — the
+   * cost of a mis-tap is fifteen minutes, and the cost of a dialog is that the
+   * feature is slower than editing the rule it exists to replace.
+   */
+  const grant = async (minutes) => {
+    if (!selected) return;
+    setGranting(true);
+    setError(''); setSaved('');
+    try {
+      await screenTimeApi.grant(selected.id, minutes, scope);
+      const r = await screenTimeApi.grants(selected.id, scope);
+      setGrants(r.data?.grants || []);
+      setSaved(scope
+        ? `${formatLimit(minutes)} added on this device for today.`
+        : `${formatLimit(minutes)} added for today.`);
+      setTimeout(() => setSaved(''), 3000);
+    } catch (err) {
+      setError(errorMessage(err, 'Could not add extra time.'));
+    } finally {
+      setGranting(false);
     }
   };
 
@@ -210,6 +289,47 @@ export default function ScreenTime() {
               <span>15m</span>
               <span>8h</span>
             </div>
+          </div>
+
+          {/* Separate from the slider on purpose. The slider is the policy —
+              what this child gets every day — and this is a one-off answer to a
+              question they asked tonight. Folding the two together is exactly the
+              habit that leaves a Tuesday's extra half-hour still in force in
+              November. */}
+          <div className="card">
+            <div className="flex items-baseline justify-between gap-3 mb-1">
+              <h2 className="section-title">Extra time today</h2>
+              {grantedToday > 0 && (
+                <span className="text-sm font-semibold text-primary-600 tabular-nums">
+                  +{formatLimit(grantedToday)}
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-gray-500 mb-3">
+              {grantedToday > 0
+                ? `${selected?.name || 'This child'} has ${formatLimit(grantedToday)} on top of the daily limit. It expires tonight.`
+                : 'Add minutes for today only. The daily limit above is unchanged, and the extra time expires at midnight.'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {GRANT_OPTIONS.map((minutes) => (
+                <button
+                  key={minutes}
+                  type="button"
+                  onClick={() => grant(minutes)}
+                  disabled={granting}
+                  /* min-h-[44px]: this is the control a parent reaches for while
+                     a child is asking them for it, usually one-handed. */
+                  className="btn-secondary min-h-[44px] px-5 disabled:opacity-50"
+                >
+                  +{formatLimit(minutes)}
+                </button>
+              ))}
+            </div>
+            {scope && (
+              <p className="text-xs text-gray-500 mt-3">
+                Only {scopeDevice?.name || 'this device'} gets these minutes.
+              </p>
+            )}
           </div>
 
           <div className="card">

@@ -13,24 +13,31 @@
 export const spy = {
   blockedApps: null,      // last argument to AppBlocker.setBlockedApps
   setBlockedAppsCalls: [],
+  allowedApps: null,      // last argument to AppBlocker.setAllowedApps
+  setAllowedAppsCalls: [],
   vpnDomains: null,       // last argument to VpnControl.startVpn
   vpnStarted: false,
   webHistoryFlushes: 0,   // times JS asked the DNS proxy for its buffer
   notificationHandler: null,
   notificationChannels: [],
   notificationPrompts: 0,
+  /** Notifications the app raised itself, e.g. the screen-time warning. */
+  localNotifications: [],
   pushTokenRequests: [],
   backgroundTasks: [],
   locationTaskOptions: null,
   reset() {
     this.blockedApps = null;
     this.setBlockedAppsCalls = [];
+    this.allowedApps = null;
+    this.setAllowedAppsCalls = [];
     this.vpnDomains = null;
     this.vpnStarted = false;
     this.webHistoryFlushes = 0;
     this.notificationHandler = null;
     this.notificationChannels = [];
     this.notificationPrompts = 0;
+    this.localNotifications = [];
     this.pushTokenRequests = [];
     this.backgroundTasks = [];
     this.locationTaskOptions = null;
@@ -83,8 +90,20 @@ export const NativeModules = {
       spy.blockedApps = packages;
       spy.setBlockedAppsCalls.push(packages);
     },
+    setAllowedApps(packages) {
+      spy.allowedApps = packages;
+      spy.setAllowedAppsCalls.push(packages);
+    },
     async isAccessibilityEnabled() { return platformState.permissions.accessibility; },
     openSettings() {},
+    /**
+     * The real one resolves the default dialer and messaging app from the OS.
+     * Fixed here, because what the harness has to be able to assert is that these
+     * are never blocked — not which package the emulator happens to ship.
+     */
+    async getAlwaysAllowedApps() {
+      return ['com.android.dialer', 'com.android.server.telecom', 'com.android.contacts'];
+    },
     addListener() {},
     removeListeners() {},
   },
@@ -181,6 +200,17 @@ export const notificationsStub = {
 
   async getLastNotificationResponseAsync() {
     return platformState.coldStartNotification;
+  },
+
+  /**
+   * A notification the app raised itself — the screen-time warning is the only
+   * caller. Recorded rather than displayed, so the harness can assert that a
+   * child is told *before* the phone locks and told once, which is the part that
+   * cannot be checked from the block list.
+   */
+  async scheduleNotificationAsync({ content, trigger }) {
+    spy.localNotifications.push({ ...content, trigger });
+    return 'e2e-notification-id';
   },
 };
 

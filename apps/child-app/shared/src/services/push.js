@@ -187,6 +187,40 @@ export async function registerForPush({ force = false } = {}) {
   }
 }
 
+/**
+ * Show a notification this device raised itself, with no server involved.
+ *
+ * The screen-time warning is the reason this exists. How much time is left is
+ * known only here — the phone measures its own usage and holds its own grants —
+ * so a warning that travelled through the server would be both slower and, on a
+ * device that is offline, absent. It is the one case that must work with no
+ * network at all, because a lock landing with no warning is exactly what happens
+ * when the network is down.
+ *
+ * Never throws: a notification is an advisory, and the tick that raised it has
+ * enforcement work to finish.
+ */
+export async function notifyLocally({ title, body, data = {} }) {
+  try {
+    await ensureAndroidChannel();
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        data,
+        ...(Platform.OS === 'android' ? { channelId: ANDROID_CHANNEL } : {}),
+      },
+      // Immediately. A scheduled trigger would survive the app being killed and
+      // fire a warning about a limit that has since been raised or reset.
+      trigger: null,
+    });
+    return true;
+  } catch (err) {
+    console.warn('[push] local notification failed:', err.message);
+    return false;
+  }
+}
+
 /** Stop this device receiving pushes — used when the device is unlinked. */
 export async function unregisterPush() {
   try {

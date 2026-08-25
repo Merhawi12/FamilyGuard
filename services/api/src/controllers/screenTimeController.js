@@ -1,4 +1,7 @@
-const { ScreenTimeRule, Child, Device } = require('../models');
+const { Op } = require('sequelize');
+const { ScreenTimeRule, ScreenTimeGrant, Child, Device } = require('../models');
+const { resolveScreenTimeGrants } = require('../utils/deviceScope');
+const { auditLog } = require('../utils/auditLogger');
 const { isUuid } = require('../utils/ids');
 
 // A malformed id is "not found", not a database error — see utils/ids.js for why
@@ -201,4 +204,162 @@ const clearDeviceRule = async (req, res) => {
   return res.json({ message: removed ? 'Device now follows the child rule' : 'No device rule to remove' });
 };
 
-module.exports = { getRule, updateRule, clearDeviceRule };
+// ── Extra minutes for today ───────────────────────────────────────────────────
+
+/**
+ * How far back a grant is worth reading.
+ *
+ * No device's "today" can reach further than this, whatever timezone it is in
+ * (26 hours would do it; 48 leaves room for a laptop whose clock is wrong). The
+ * parent's page filters the answer down to its own local day — see `listGrants`
+ * for why the server does not try to decide which day a grant belongs to.
+ */
+const GRANT_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+/** Grants older than this can apply to nobody's today and are swept on write. */
+const GRANT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** One grant's ceiling. A daily limit tops out at 24h, and a top-up is not that. */
+const MAX_GRANT_MINUTES = 240;
+const MIN_GRANT_MINUTES = 5;
+
+/**
+ * GET /api/screen-time/:childId/grant — the extra minutes in play right now.
+ *
+ * Returns the raw rows within the window rather than a total for "today",
+ * because this process cannot say when today started. It runs on Cloud Run in
+ * UTC and the family is in Canada; a total computed here would be right for
+ * about four hours a day and would reset in front of the parent at 20:00 — the
+ * exact failure that made every evening's screen time double-count before
+ * `usageDayWindow` existed.
+ *
+ * So the day boundary is applied by whoever knows one: the browser sums the
+ * grants that fall inside its own local day, and the child's device does the
+ * same against its own midnight when it spends them.
+ *
+ * Grants for a *device* are included in the child-wide read. They are not
+ * exceptions to be discovered scope by scope — they are minutes this child was
+ * given — and a parent looking at the shared tab should see the fifteen minutes
+ * they gave the laptop ten minutes ago rather than an empty total.
+ */
+const listGrants = async (req, res) => {
+  const child = await resolveChild(req.params.childId, req.user.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+
+  const scope = await resolveScope(child.id, req.query.deviceId);
+  if (scope.error) return res.status(400).json({ error: scope.error });
+
+  const where = { childId: child.id, createdAt: { [Op.gte]: new Date(Date.now() - GRANT_WINDOW_MS) } };
+  // A device scope narrows to what that device can actually spend: its own
+  // grants plus the child-wide ones it also receives. The same pair the sync
+  // sends it, so the two screens cannot disagree about what a device has.
+  if (scope.deviceId) where[Op.or] = [{ deviceId: null }, { deviceId: scope.deviceId }];
+
+  const grants = await ScreenTimeGrant.findAll({ where, order: [['createdAt', 'DESC']] });
+
+  return res.json({
+    grants: grants.map((g) => ({
+      id: g.id,
+      minutes: g.minutes,
+      deviceId: g.deviceId,
+      grantedAt: g.createdAt.toISOString(),
+    })),
+  });
+};
+
+/**
+ * POST /api/screen-time/:childId/grant — say yes to "can I have more time?".
+ *
+ * The request already existed on both lock screens and in the child app's
+ * Messages; what did not exist was an answer. A parent who wanted to give
+ * fifteen minutes had to raise `dailyLimitMinutes`, and then remember in the
+ * morning to put it back — so the usual outcome was a limit that crept upwards
+ * all term and a child who learned that asking works permanently.
+ *
+ * This does not touch the rule. It adds minutes that expire with the day, and
+ * the device is told at once rather than at the next five-minute poll, because a
+ * child who has just been locked out is standing next to the parent tapping it.
+ */
+const grantExtraTime = async (req, res) => {
+  const child = await resolveChild(req.params.childId, req.user.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+
+  const minutes = req.body.minutes;
+  if (!Number.isInteger(minutes) || minutes < MIN_GRANT_MINUTES || minutes > MAX_GRANT_MINUTES) {
+    return res.status(400).json({
+      error: `Extra time must be a whole number of minutes between ${MIN_GRANT_MINUTES} and ${MAX_GRANT_MINUTES}.`,
+    });
+  }
+
+  const scope = await resolveScope(child.id, req.query.deviceId ?? req.body.deviceId);
+  if (scope.error) return res.status(400).json({ error: scope.error });
+
+  const grant = await ScreenTimeGrant.create({
+    childId: child.id,
+    deviceId: scope.deviceId,
+    minutes,
+    grantedBy: req.user.id,
+  });
+
+  // Swept here rather than on a schedule: this is the only write to the table,
+  // it is rare, and a row this old cannot be inside any device's day.
+  ScreenTimeGrant.destroy({
+    where: { childId: child.id, createdAt: { [Op.lt]: new Date(Date.now() - GRANT_RETENTION_MS) } },
+  }).catch(() => { /* housekeeping — never fail the grant over it */ });
+
+  const io = req.app.get('io');
+  if (io) {
+    // Only the devices these minutes belong to. A child-wide grant reaches every
+    // device the child owns, which is what "another fifteen minutes" means when
+    // the parent has not narrowed it.
+    io.to(scope.deviceId ? `device:${scope.deviceId}` : `child:${child.id}`)
+      .emit('screen_time_granted', {
+        minutes: grant.minutes,
+        grantedAt: grant.createdAt.toISOString(),
+      });
+    // The parent's other open tabs, so the total updates without a reload.
+    io.to(`parent:${req.user.id}`).emit('screen_time_grant_added', {
+      childId: child.id, deviceId: scope.deviceId, minutes: grant.minutes,
+    });
+  }
+
+  auditLog(req, {
+    userId: req.user.id,
+    action: 'screen_time.granted',
+    entity: 'Child',
+    entityId: child.id,
+    metadata: { minutes, deviceId: scope.deviceId },
+  });
+
+  return res.status(201).json({
+    id: grant.id,
+    minutes: grant.minutes,
+    deviceId: grant.deviceId,
+    grantedAt: grant.createdAt.toISOString(),
+  });
+};
+
+/**
+ * The grants one device may spend, in the shape the sync sends.
+ *
+ * Lives here rather than in deviceController so the window and the read stay
+ * beside the write that produces them; `resolveScreenTimeGrants` says why they
+ * add up instead of overriding.
+ */
+const grantsForDevice = async (childId, deviceId) => {
+  const rows = await ScreenTimeGrant.findAll({
+    where: {
+      childId,
+      createdAt: { [Op.gte]: new Date(Date.now() - GRANT_WINDOW_MS) },
+      [Op.or]: [{ deviceId: null }, { deviceId }],
+    },
+    order: [['createdAt', 'ASC']],
+  });
+  return resolveScreenTimeGrants(rows);
+};
+
+module.exports = {
+  getRule, updateRule, clearDeviceRule,
+  listGrants, grantExtraTime, grantsForDevice,
+  __testing: { GRANT_WINDOW_MS, MAX_GRANT_MINUTES, MIN_GRANT_MINUTES },
+};

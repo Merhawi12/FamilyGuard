@@ -70,4 +70,20 @@ contextBridge.exposeInMainWorld('parentix', {
   onLockState: (handler) => {
     ipcRenderer.on('lock:state', (_event, state) => handler(state));
   },
+
+  lock: {
+    /**
+     * Dismiss a daily-limit lock into the parent's allowlist.
+     *
+     * The only call on this bridge that makes the machine *less* restricted, so
+     * it is worth being clear about what it is not: it does not lift a lock, it
+     * cannot touch a strict one, and the agent re-checks both facts before acting
+     * — see `useAllowedApps` there. What arrives here is a request from a window
+     * on a child's own computer, and a request is all it is treated as.
+     *
+     * Answers `{ ok, allowedApps }` rather than throwing on refusal: "not
+     * available right now" is an answer the lock screen shows, not a fault.
+     */
+    useAllowedApps: () => call('lock:use-allowed'),
+  },
 });

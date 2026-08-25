@@ -22,6 +22,8 @@ const COPY = {
     title: 'Time is up for today',
     detail: 'You have used all of your screen time. It starts again tomorrow morning.',
   },
+  // Kept in step with the phone's wording for the same reason `schedule.js` is a
+  // copy: a family with a laptop and a handset should be told the same thing.
   bedtime: {
     title: 'It is bedtime',
     detail: 'This computer is asleep until the morning.',
@@ -40,12 +42,40 @@ const COPY = {
   },
 };
 
+/** "Word", "Word and Chrome", "Word, Chrome and Notes" — never "Word, Chrome". */
+const list = (names) => (names.length <= 1
+  ? names.join('')
+  : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+
 function apply(state) {
   const copy = COPY[state?.reason] || { title: 'This computer is paused', detail: '' };
   document.getElementById('title').textContent = state?.childName
     ? `${copy.title}, ${state.childName}`
     : copy.title;
   document.getElementById('detail').textContent = copy.detail;
+
+  /**
+   * The way through, offered only where there is one.
+   *
+   * Both conditions matter. `tier === 'limit'` is the daily limit and nothing
+   * else — bedtime and an out-of-hours schedule are strict, and a button that
+   * lifted them would make them optional. A non-empty list matters because
+   * dismissing into an empty allowlist gives the child a desktop that closes
+   * everything they open, which is more confusing than the lock and no more
+   * permissive.
+   *
+   * The agent checks both again on its side. This is presentation; that is the
+   * boundary.
+   */
+  const allowed = Array.isArray(state?.allowedApps) ? state.allowedApps.filter(Boolean) : [];
+  const offer = state?.tier === 'limit' && allowed.length > 0;
+
+  const note = document.getElementById('allowed-note');
+  note.hidden = !offer;
+  note.textContent = offer ? `You can still use ${list(allowed)}.` : '';
+
+  document.getElementById('allowed').hidden = !offer;
+  document.getElementById('allowed-warning').hidden = !offer;
 }
 
 const clock = () => {
@@ -81,6 +111,33 @@ const sendOnce = (button, send) => {
 sendOnce(document.getElementById('ask'), () =>
   bridge.messages.send('Can I have more time on the computer, please?'));
 sendOnce(document.getElementById('sos'), () => bridge.messages.sendEmergency());
+
+/**
+ * Take the desktop back, on the allowlist's terms.
+ *
+ * Not routed through `sendOnce`: nothing is being sent to the parent, and the
+ * "Sent to your parent" line underneath would be a lie. A refusal from the agent
+ * — the lock changed to a strict one between the paint and the click — leaves the
+ * screen exactly as it is and says so, rather than leaving a dead button.
+ */
+document.getElementById('allowed').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await bridge.lock.useAllowedApps();
+    // On success this window is destroyed by the agent, so there is nothing left
+    // to re-enable. Only the refusal path gets here with a window still open.
+    if (!result?.ok) {
+      button.disabled = false;
+      document.getElementById('allowed-warning').textContent =
+        'That is not available right now.';
+    }
+  } catch {
+    button.disabled = false;
+    document.getElementById('allowed-warning').textContent =
+      'That did not work. Try again in a moment.';
+  }
+});
 
 // Keyboard shortcuts that would reload this window into a developer tool, or
 // close it, are not available to the child.

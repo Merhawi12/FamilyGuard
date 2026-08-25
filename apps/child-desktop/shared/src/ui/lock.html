@@ -21,16 +21,35 @@
       It is honest about being a deterrent rather than a cage. A child who knows
       how can still reach a terminal on either platform; the point is that they
       cannot do it *by accident* and cannot do it without knowing they did.
+
+      One lock is porous, and only one: the daily limit, when the parent has left
+      apps open for it. `#allowed` is how the child reaches those — the screen
+      goes, the allowlist keeps working, and everything else closes. It is offered
+      to nobody during bedtime, an out-of-hours schedule, or a parent's own pause,
+      because those exist to stop use rather than to ration it. The agent refuses
+      it again on its own side; this is not the boundary.
     -->
     <main class="lock">
       <p class="eyebrow">Parentix</p>
       <h1 id="title">This computer is paused</h1>
       <p class="lead" id="detail"></p>
 
+      <!-- Named, not counted. "You can still use Word and Chrome" is something a
+           child can act on; "2 apps are still available" sends them hunting. -->
+      <p class="allowed-note" id="allowed-note" hidden></p>
+
       <div class="actions">
         <button class="btn-primary" type="button" id="ask">Ask for more time</button>
+        <button class="btn-secondary" type="button" id="allowed" hidden>Use my allowed apps</button>
         <button class="btn-danger" type="button" id="sos">I need help now</button>
       </div>
+
+      <!-- On the button rather than discovered afterwards: taking this closes
+           whatever else is open, and a child who loses a half-finished drawing to
+           a button they did not understand will not trust the next one. -->
+      <p class="fine-print" id="allowed-warning" hidden>
+        Everything that is not on your list will close.
+      </p>
 
       <p class="sent" id="sent" hidden>Sent to your parent.</p>
       <p class="clock" id="clock"></p>

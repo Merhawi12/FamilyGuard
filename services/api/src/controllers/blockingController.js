@@ -101,14 +101,30 @@ const listKnownApps = async (req, res) => {
  *
  * `allow` and `limit` were both offered by the parent app's dropdown and neither
  * existed anywhere else: no server-side meaning, and nothing on the device that
- * read them. A parent could set "Allow only" on an app and the phone would carry
- * on exactly as before. `limit` is now real — the column it needs was already on
- * this model — and `allow` is gone rather than left as a switch that does
- * nothing. Whitelisting apps is not the same feature as whitelisting websites:
- * it means blocking everything else on the phone, including the dialer, and the
- * device has no exception mechanism to express it.
+ * read them. `limit` was made real first — the column it needs was already on
+ * this model — and `allow` was removed outright, on the grounds that whitelisting
+ * apps means blocking every *other* app on the phone including the dialer, and
+ * the device had no way to express an exception.
+ *
+ * It is back, and it means something narrower and safer than it did. An `allow`
+ * rule does not whitelist the phone: it names an app that stays open **when the
+ * daily limit runs out**, which is the one lock a parent routinely wants to be
+ * porous. Homework does not stop because the entertainment budget is spent.
+ *
+ * Three things bound it, and all three are enforced on the device rather than
+ * here, because that is where a lock is applied:
+ *
+ *  - it applies to the `daily_limit` lock only. Bedtime, an out-of-hours
+ *    schedule and a parent's own pause are strict — those exist to stop use, not
+ *    to ration it, and an allowlist would quietly gut all three.
+ *  - it never overrides a `block` rule. "Blocked" outranks "allowed" whichever
+ *    order the rows arrive in.
+ *  - it is not the safety exception. The dialer, messaging, contacts and the
+ *    clock are never blocked by anything, with or without a rule — that lives in
+ *    the accessibility service itself so it survives the app being killed. See
+ *    AppMonitorService.kt.
  */
-const APP_ACTIONS = new Set(['block', 'limit']);
+const APP_ACTIONS = new Set(['block', 'limit', 'allow']);
 
 const addAppRule = async (req, res) => {
   if (!(await verifyChild(req.user.id, req.params.childId))) return res.status(404).json({ error: 'Child not found' });
@@ -132,7 +148,9 @@ const addAppRule = async (req, res) => {
   }
 
   if (!APP_ACTIONS.has(action)) {
-    return res.status(400).json({ error: 'An app rule can either block the app or limit its daily use.' });
+    return res.status(400).json({
+      error: 'An app rule can block the app, limit its daily use, or keep it open once the daily limit is reached.',
+    });
   }
 
   let dailyLimitMinutes = null;

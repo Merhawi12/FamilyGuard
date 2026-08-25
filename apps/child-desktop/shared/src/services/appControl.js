@@ -22,6 +22,14 @@ import { emitEvent } from './rules.js';
  * - **A full lock does not close anything.** Bedtime arriving mid-essay must not
  *   be the thing that loses the essay. A lock raises the lock screen over the
  *   desktop; the work underneath is still there in the morning.
+ *
+ * The daily limit is the one lock that can be porous, and on a desktop it is
+ * porous only when the child says so. A `'limit'` lock with an allowlist behind
+ * it still raises the lock screen — the essay is still safe — but the screen now
+ * offers a way through to the apps the parent left open. Taking it is what puts
+ * this file into `allowlistMode`, and only then does anything get closed. The
+ * child chose that, having been told on the button that everything else would
+ * close; nothing does it to them while they are away from the machine.
  */
 
 /** Least time between two enforcement passes on the same app. */
@@ -62,6 +70,47 @@ export function blockedAppsFor(rules, locked, appMinutes = {}) {
   return [...blocked];
 }
 
+/**
+ * The apps that stay open when the daily limit runs out.
+ *
+ * Only for the `'limit'` tier — bedtime, an out-of-hours schedule and a parent's
+ * own pause hand back an empty list. A `block` rule beats an `allow` rule on the
+ * same app whichever order the rows arrive in: the two together are a parent who
+ * blocked something and later added it to the homework list, and the safe reading
+ * of that contradiction is the restrictive one.
+ *
+ * Character-for-character the phone's `allowedPackagesFor`, for the same reason
+ * `schedule.js` is a copy of the phone's: one set of rules must not have two
+ * interpretations.
+ */
+export function allowedAppsFor(rules, tier) {
+  if (tier !== 'limit') return [];
+
+  const blocked = new Set(
+    (rules?.appRules || [])
+      .filter((r) => r.action === 'block' && r.appPackage)
+      .map((r) => r.appPackage.toLowerCase()),
+  );
+
+  const allowed = new Set();
+  for (const rule of rules?.appRules || []) {
+    if (rule.action !== 'allow' || !rule.appPackage) continue;
+    const appId = rule.appPackage.toLowerCase();
+    if (blocked.has(appId)) continue;
+    allowed.add(appId);
+  }
+  return [...allowed];
+}
+
+/** The labels for those apps, so the lock screen can name what is still open. */
+export function allowedAppNames(rules, allowedApps) {
+  return allowedApps.map((appId) => {
+    const rule = (rules?.appRules || [])
+      .find((r) => String(r.appPackage || '').toLowerCase() === appId);
+    return rule?.appName || appId;
+  });
+}
+
 /** Blocked domains from the parent's website rules. The column is `url`. */
 export function blockedDomainsFor(rules) {
   return (rules?.websiteRules || [])
@@ -77,17 +126,36 @@ export function blockedDomainsFor(rules) {
  * on it rather than on a side effect.
  *
  * @param {{appId: string, appName?: string}|null} sample
- * @param {{blockedApps: string[], locked: boolean, rules: object}} context
+ * @param {object} context
+ * @param {string[]} context.blockedApps
+ * @param {string[]} [context.allowedApps]   survives a `'limit'` lock
+ * @param {boolean} context.locked
+ * @param {boolean} [context.allowlistMode]  the child chose to work past a limit lock
+ * @param {object} context.rules
  */
-export async function enforce(sample, { blockedApps, locked, rules }) {
+export async function enforce(sample, {
+  blockedApps, allowedApps = [], locked, allowlistMode = false, rules,
+}) {
   if (!sample?.appId) return { action: 'none' };
 
-  // A lock is handled by the lock screen. Closing every application the child
-  // brings forward during bedtime would be a way to lose an evening's homework.
-  if (locked) return { action: 'locked' };
-
   const appId = sample.appId.toLowerCase();
-  if (!blockedApps.includes(appId)) return { action: 'none' };
+
+  if (locked) {
+    /**
+     * The lock screen has the display, so there is nothing to close — and
+     * closing every application the child brings forward during bedtime would be
+     * a way to lose an evening's homework.
+     *
+     * The exception is a child who has dismissed a `daily_limit` lock into their
+     * allowlist. They asked for the desktop back on those terms and were told
+     * what it costs, so from here the limit behaves like an ordinary block on
+     * everything that is not on the list.
+     */
+    if (!allowlistMode) return { action: 'locked' };
+    if (allowedApps.includes(appId)) return { action: 'allowed' };
+  } else if (!blockedApps.includes(appId)) {
+    return { action: 'none' };
+  }
 
   const now = Date.now();
   if (now - (_lastAction.get(appId) || 0) < REPEAT_ACTION_MS) return { action: 'throttled' };
@@ -108,22 +176,39 @@ export async function enforce(sample, { blockedApps, locked, rules }) {
     }
   }
 
+  /**
+   * Three reasons an app can close, and they must not be described as one.
+   *
+   * The third is new and is the one that would have been wrong by default: an
+   * app closed because the child is working inside their allowlist has no rule of
+   * its own, so it would have taken the "your parent has paused this" wording —
+   * telling a child their parent singled out the game they just opened, when what
+   * actually happened is that the day's time ran out.
+   */
   p.notify({
     title: `${label} is paused`,
-    body: rule?.action === 'limit'
-      ? `You have used all your time on ${label} today.`
-      : `Your parent has paused ${label} on this computer.`,
-    data: { type: 'app_blocked', appPackage: sample.appId },
+    body: locked
+      ? `Your screen time is used up. ${label} is closed until tomorrow — the apps your parent left open still work.`
+      : rule?.action === 'limit'
+        ? `You have used all your time on ${label} today.`
+        : `Your parent has paused ${label} on this computer.`,
+    data: { type: locked ? 'screen_time_blocked' : 'app_blocked', appPackage: sample.appId },
   });
 
   // The parent hears about it, but not once a minute. A child re-opening a
   // blocked app is one piece of news, however many times they try.
-  if (now - (_lastAlert.get(appId) || 0) > REPEAT_ALERT_MS) {
+  //
+  // Not while the limit is what is closing things: the parent has already been
+  // told the limit was reached, once, and a child working through their allowlist
+  // will brush against a dozen other apps in an evening. That would be a stream
+  // of "tried to open a blocked app" alerts describing nothing the parent did not
+  // already know, which is how an alert feed stops being read.
+  if (!locked && now - (_lastAlert.get(appId) || 0) > REPEAT_ALERT_MS) {
     _lastAlert.set(appId, now);
     emitEvent('alert:blocked_app', { appName: label });
   }
 
-  return { action: 'blocked', appId: sample.appId, appName: label, closed };
+  return { action: locked ? 'limit_blocked' : 'blocked', appId: sample.appId, appName: label, closed };
 }
 
 /** Test seam, and what `stopAgent` calls so a new link starts with no history. */

@@ -347,7 +347,7 @@ const run = async () => {
   // fail depending on when CI happened to run.
   step('Bedtime and schedule rules decide the lock');
   {
-    const { lockState, withinWindow } = await import(
+    const { lockState, withinWindow, bonusMinutesFrom, minutesUntilLimit, tierFor } = await import(
       pathToFileURL(path.join(SHARED_ROOT, 'src/services/schedule.js')).href
     );
     const wednesdayAt = (hhmm, dayOffset = 0) => {
@@ -419,6 +419,79 @@ const run = async () => {
       }
     }
     check('a freshly created rule restricts no hour of the week', openAllWeek);
+
+    /*
+     * ── Tiers ────────────────────────────────────────────────────────────────
+     *
+     * Every lock used to be the same lock, so a child who spent their ninety
+     * minutes on YouTube lost the dialer with it. The daily limit is now the one
+     * reason the parent's allowlist survives; everything else is strict, and the
+     * strictness of a *parent's pause* in particular must not be softened by an
+     * allowlist they set up months ago for homework.
+     */
+    check('the daily limit is the porous lock',
+      lockState(bedtime, 500, wednesdayAt('10:00')).tier === 'limit');
+    check('bedtime is strict', lockState(bedtime, 0, wednesdayAt('22:30')).tier === 'strict');
+    check('an out-of-hours schedule is strict',
+      lockState(school, 0, wednesdayAt('21:00')).tier === 'strict');
+    check('a parent\'s pause is strict',
+      lockState(base, 0, wednesdayAt('10:00'), paused).tier === 'strict');
+    check('an unlocked device has no tier',
+      lockState(base, 0, wednesdayAt('10:00')).tier === null);
+    check('tierFor agrees with what lockState returns',
+      tierFor('daily_limit') === 'limit' && tierFor('bedtime') === 'strict'
+      && tierFor('blocked_by_parent') === 'strict' && tierFor('anything_new') === 'strict');
+
+    /*
+     * ── Granted minutes ──────────────────────────────────────────────────────
+     *
+     * A grant expires against *this device's* midnight, not the server's. The
+     * server runs in UTC and the families are in Canada, so a server-side "today"
+     * rolls over at 20:00 local — which would take back minutes during the very
+     * evening they were granted. Same class of bug as the screen-time double
+     * count; this is the side of it nobody sees until a parent is standing there.
+     */
+    const at = (date) => date.toISOString();
+    const noon = wednesdayAt('12:00');
+    const thisMorning = wednesdayAt('09:00');
+    const lastNight = wednesdayAt('21:00', -1);
+
+    check('a grant from this morning counts at noon',
+      bonusMinutesFrom([{ minutes: 15, grantedAt: at(thisMorning) }], noon) === 15);
+    check('a grant from last night does not',
+      bonusMinutesFrom([{ minutes: 15, grantedAt: at(lastNight) }], noon) === 0);
+    check('grants stack',
+      bonusMinutesFrom([
+        { minutes: 15, grantedAt: at(thisMorning) },
+        { minutes: 30, grantedAt: at(thisMorning) },
+      ], noon) === 45);
+    check('a grant stamped in the future is ignored',
+      bonusMinutesFrom([{ minutes: 15, grantedAt: at(wednesdayAt('23:00')) }], noon) === 0);
+    check('a malformed grant is ignored rather than counted',
+      bonusMinutesFrom([{ minutes: 'lots', grantedAt: at(noon) }, { minutes: 20 }, null], noon) === 0);
+    check('no grants is no bonus',
+      bonusMinutesFrom(undefined, noon) === 0 && bonusMinutesFrom([], noon) === 0);
+
+    const spent = { ...base, dailyLimitMinutes: 120 };
+    check('the limit locks the device with no grant',
+      lockState(spent, 120, noon).reason === 'daily_limit');
+    check('a grant lifts the lock',
+      lockState(spent, 120, noon, null, 15).blocked === false);
+    check('the lock returns once the granted minutes are spent too',
+      lockState(spent, 135, noon, null, 15).reason === 'daily_limit');
+    check('a grant does not lift bedtime',
+      lockState({ ...spent, bedtimeEnabled: true }, 0, wednesdayAt('22:30'), null, 60).reason === 'bedtime');
+    check('a grant does not lift a parent\'s pause',
+      lockState(spent, 0, noon, paused, 60).blocked === true);
+
+    check('the countdown includes granted minutes',
+      minutesUntilLimit(spent, 110, 15) === 25);
+    check('the countdown is null once the limit is spent',
+      minutesUntilLimit(spent, 130, 0) === null);
+    check('the countdown is null with no limit set',
+      minutesUntilLimit({ ...spent, dailyLimitMinutes: 0 }, 500, 0) === null);
+    check('the countdown is null for a switched-off rule',
+      minutesUntilLimit({ ...spent, isActive: false }, 0, 0) === null);
   }
 
   // ── Bedtime reaches the device ─────────────────────────────────────────────
@@ -538,6 +611,236 @@ const run = async () => {
       () => !monitoring.getMonitoringStatus().rules.appRules.some((r) => r.appPackage === 'com.example.video'),
       'the limit rule to be withdrawn'
     );
+  }
+
+  /*
+   * ── The daily limit no longer takes the whole phone ────────────────────────
+   *
+   * Two halves, and the second is the one that matters most.
+   *
+   * The parent's allowlist is a rule and travels like one: an `allow` app stays
+   * open when the limit runs out, and is cleared the instant the lock becomes a
+   * strict one. The *safety* exception — calls, messages, contacts, the clock —
+   * is not a rule at all and is not asserted here, because it lives in the
+   * accessibility service so it survives this whole layer being dead. What can be
+   * checked from here is that the phone never asks the native side to block them,
+   * and that it hands down an allowlist rather than a bare wildcard.
+   */
+  step('Apps the parent left open survive the daily limit');
+  {
+    const allowRule = await call('POST', `/blocking/${childId}/apps`, {
+      token: parentToken,
+      body: { appName: 'Homework', appPackage: 'com.example.homework', action: 'allow' },
+    });
+    check('the parent can mark an app as open past the limit',
+      allowRule.status === 201, JSON.stringify(allowRule.data));
+
+    await waitFor(
+      () => monitoring.getMonitoringStatus().rules.appRules.some((r) => r.action === 'allow'),
+      'the allow rule to reach the device'
+    );
+
+    // Well under the limit: nothing is locked, so nothing needs an exception.
+    await call('PUT', `/screen-time/${childId}`, {
+      token: parentToken, body: { dailyLimitMinutes: 60, bedtimeEnabled: false },
+    });
+    await waitFor(
+      () => monitoring.getMonitoringStatus().rules.screenTimeRule?.dailyLimitMinutes === 60,
+      'the 60-minute limit to reach the device'
+    );
+    platformState.usageStats = { 'com.example.game': { appName: 'Example Game', minutes: 5 } };
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('an unlocked phone hands down no allowlist',
+      Array.isArray(spy.allowedApps) && spy.allowedApps.length === 0, JSON.stringify(spy.allowedApps));
+
+    // Over the limit: the wildcard goes down, and so does the way through it.
+    platformState.usageStats = { 'com.example.game': { appName: 'Example Game', minutes: 90 } };
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('the limit locks the phone',
+      spy.blockedApps.includes('*'), JSON.stringify(spy.blockedApps));
+    check('the allowed app is handed to the blocker as an exception',
+      spy.allowedApps.includes('com.example.homework'), JSON.stringify(spy.allowedApps));
+    check('the lock is the porous tier',
+      monitoring.getMonitoringStatus().lockTier === 'limit');
+
+    /*
+     * The check this whole feature exists for. `allow` is an exception to the
+     * daily limit and to nothing else — a bedtime that inherited it would be a
+     * bedtime a child could work around by asking for one homework app in
+     * September.
+     */
+    /*
+     * A window covering all but one minute of the day, anchored so the excluded
+     * minute is never the minute this runs in — the same construction, and for
+     * the same reason, as the bedtime step above. A fixed `00:00 → 23:59` looks
+     * equivalent and fails for exactly one minute a night, because a
+     * non-wrapping window is `start <= minute < end`.
+     */
+    const pad = (n) => String(n).padStart(2, '0');
+    const hhmm = (minute) => {
+      const wrapped = ((minute % 1440) + 1440) % 1440;
+      return `${pad(Math.floor(wrapped / 60))}:${pad(wrapped % 60)}`;
+    };
+    const nowMinute = new Date().getHours() * 60 + new Date().getMinutes();
+
+    await call('PUT', `/screen-time/${childId}`, {
+      token: parentToken,
+      body: {
+        dailyLimitMinutes: 600,
+        bedtimeEnabled: true,
+        bedtimeStart: hhmm(nowMinute),
+        bedtimeEnd: hhmm(nowMinute - 1),
+      },
+    });
+    await waitFor(
+      () => monitoring.getMonitoringStatus().rules.screenTimeRule?.bedtimeEnabled === true,
+      'the bedtime to reach the device'
+    );
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('bedtime locks the phone',
+      spy.blockedApps.includes('*'), JSON.stringify(spy.blockedApps));
+    check('bedtime is strict', monitoring.getMonitoringStatus().lockTier === 'strict');
+    check('the allowlist is withdrawn during bedtime',
+      Array.isArray(spy.allowedApps) && spy.allowedApps.length === 0, JSON.stringify(spy.allowedApps));
+
+    await call('PUT', `/screen-time/${childId}`, {
+      token: parentToken, body: { dailyLimitMinutes: 600, bedtimeEnabled: false },
+    });
+    await call('DELETE', `/blocking/${childId}/apps/${allowRule.data.id}`, { token: parentToken });
+    await waitFor(
+      () => !monitoring.getMonitoringStatus().rules.appRules.some((r) => r.action === 'allow'),
+      'the allow rule to be withdrawn'
+    );
+  }
+
+  /*
+   * ── "Can I have more time?" now has an answer ──────────────────────────────
+   *
+   * Both lock screens have offered to ask for years. Saying yes meant editing
+   * `dailyLimitMinutes` and remembering to put it back in the morning, which
+   * nobody does — so limits crept upward all term. A grant is minutes that expire
+   * tonight, and it has to reach a locked phone in about a second, because the
+   * parent tapping it is standing next to the child who asked.
+   */
+  step('Extra time granted by the parent unlocks the phone');
+  {
+    await call('PUT', `/screen-time/${childId}`, {
+      token: parentToken, body: { dailyLimitMinutes: 60, bedtimeEnabled: false },
+    });
+    await waitFor(
+      () => monitoring.getMonitoringStatus().rules.screenTimeRule?.dailyLimitMinutes === 60,
+      'the 60-minute limit to reach the device'
+    );
+
+    platformState.usageStats = { 'com.example.game': { appName: 'Example Game', minutes: 75 } };
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('the phone is locked with the limit spent',
+      spy.blockedApps.includes('*'), JSON.stringify(spy.blockedApps));
+
+    const granted = await call('POST', `/screen-time/${childId}/grant`, {
+      token: parentToken, body: { minutes: 30 },
+    });
+    check('the parent can grant extra time', granted.status === 201, JSON.stringify(granted.data));
+
+    // Over the socket, not at the next five-minute poll: the whole point is that
+    // this happens while the two of them are looking at the phone.
+    await waitFor(
+      () => monitoring.getMonitoringStatus().bonusMinutes === 30,
+      'the grant to reach the device over the socket'
+    );
+    check('the grant is applied without a re-sync',
+      monitoring.getMonitoringStatus().bonusMinutes === 30);
+
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('the granted minutes lift the lock',
+      !spy.blockedApps.includes('*'), JSON.stringify(spy.blockedApps));
+    check('the parent\'s app rules survive the release',
+      spy.blockedApps.includes('com.example.game'), JSON.stringify(spy.blockedApps));
+
+    // Spent again: the grant raised the bar, it did not remove it.
+    platformState.usageStats = { 'com.example.game': { appName: 'Example Game', minutes: 95 } };
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('the lock returns once the granted minutes are spent too',
+      spy.blockedApps.includes('*'), JSON.stringify(spy.blockedApps));
+
+    // And a grant rides the ordinary sync as well as the socket, which is what
+    // covers a phone that was switched off when the parent tapped it.
+    const rulesModule = await import(src('services/rules.js'));
+    await rulesModule.fetchRules();
+    check('the sync carries the grant too',
+      rulesModule.getRules().screenTimeGrants?.some((g) => g.minutes === 30),
+      JSON.stringify(rulesModule.getRules().screenTimeGrants));
+  }
+
+  /*
+   * ── The child is told before the phone stops ───────────────────────────────
+   *
+   * The Home screen has always said "Nearly out of time" to a child who happens
+   * to be looking at it, which is not the child who is about to run out. A lock
+   * that lands with no warning reads as a fault, and the reasonable response to a
+   * phone that has apparently broken is to keep trying it.
+   */
+  step('The child is warned before the daily limit lands');
+  {
+    await call('PUT', `/screen-time/${childId}`, {
+      token: parentToken, body: { dailyLimitMinutes: 120, bedtimeEnabled: false },
+    });
+    await waitFor(
+      () => monitoring.getMonitoringStatus().rules.screenTimeRule?.dailyLimitMinutes === 120,
+      'the 120-minute limit to reach the device'
+    );
+
+    const warnings = () => spy.localNotifications.filter((n) => n.data?.type === 'screen_time_warning');
+
+    // Comfortably inside the limit: nothing to say. The grant from the previous
+    // step is still live, so the usage figures here allow for it.
+    platformState.usageStats = { 'com.example.game': { appName: 'Example Game', minutes: 60 } };
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('no warning while there is plenty of time left', warnings().length === 0,
+      JSON.stringify(warnings()));
+
+    // Ten minutes out — 120 limit + 30 granted, so 140 used leaves 10.
+    platformState.usageStats = { 'com.example.game': { appName: 'Example Game', minutes: 140 } };
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('the child is warned at ten minutes', warnings().length === 1, JSON.stringify(warnings()));
+    check('the warning says how long is left', /10 minutes/.test(warnings()[0]?.title || ''),
+      warnings()[0]?.title);
+
+    // Still at ten minutes on the next tick: one warning, not one a minute.
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('the same warning is not repeated', warnings().length === 1, JSON.stringify(warnings()));
+
+    // Five minutes out: a second, different warning.
+    platformState.usageStats = { 'com.example.game': { appName: 'Example Game', minutes: 146 } };
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('a second warning arrives at five minutes', warnings().length === 2, JSON.stringify(warnings()));
+
+    // Past the limit: the lock speaks for itself, and a warning about time that
+    // has already run out would be describing the past.
+    platformState.usageStats = { 'com.example.game': { appName: 'Example Game', minutes: 200 } };
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('no warning once the phone is already locked', warnings().length === 2,
+      JSON.stringify(warnings()));
+
+    /*
+     * Put the phone back where the following steps expect to find it.
+     *
+     * A locked device reports `['*']` and nothing else, so leaving it locked here
+     * makes every later assertion about a *named* package fail — which is exactly
+     * how this block first broke "a rule change pushes to the device" three steps
+     * further down, with an error that pointed at the socket rather than at here.
+     */
+    await call('PUT', `/screen-time/${childId}`, {
+      token: parentToken, body: { dailyLimitMinutes: 600, bedtimeEnabled: false },
+    });
+    await waitFor(
+      () => monitoring.getMonitoringStatus().rules.screenTimeRule?.dailyLimitMinutes === 600,
+      'the limit to be raised again'
+    );
+    platformState.usageStats = { 'com.example.game': { appName: 'Example Game', minutes: 3 } };
+    await stubs.taskManagerStub.__run('fg-monitoring-task');
+    check('the phone is unlocked again for the steps that follow',
+      !spy.blockedApps.includes('*'), JSON.stringify(spy.blockedApps));
   }
 
   // ── Blocked-app attempt ────────────────────────────────────────────────────

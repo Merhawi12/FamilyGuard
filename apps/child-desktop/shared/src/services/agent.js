@@ -9,10 +9,12 @@ import {
   startWebFilter, stopWebFilter, setBlockedDomains, flushVisits, getWebFilterStatus, repairSystemDns,
 } from './webFilter.js';
 import { startScreenTime, stopScreenTime, uploadUsage, getScreenTime } from './screenTime.js';
-import { blockedAppsFor, blockedDomainsFor, enforce, resetEnforcement } from './appControl.js';
+import {
+  blockedAppsFor, blockedDomainsFor, allowedAppsFor, allowedAppNames, enforce, resetEnforcement,
+} from './appControl.js';
 import { reportNewApps } from './newApps.js';
 import { connectSocket, disconnectSocket, onSocket } from './socket.js';
-import { lockState } from './schedule.js';
+import { lockState, bonusMinutesFrom, minutesUntilLimit } from './schedule.js';
 import { loadChildName } from './profile.js';
 
 /**
@@ -66,9 +68,31 @@ const _state = {
    */
   blockedApps: [],
   blockedDomains: [],
+  /**
+   * How much of the machine the current lock is entitled to take: `'limit'` can
+   * be worked around through the allowlist, `'strict'` cannot. See schedule.js.
+   */
+  lockTier: null,
+  /** The apps that survive a `'limit'` lock, and the labels to name them by. */
+  allowedApps: [],
+  allowedAppNames: [],
+  /**
+   * The child has dismissed a `'limit'` lock to work inside their allowlist.
+   *
+   * Only ever set by them, from the lock screen, and cleared by any change in the
+   * lock itself — a new day, a new reason, a grant that lifts the lock — so it
+   * cannot outlive the lock it was granted against. This is what turns the daily
+   * limit from "the screen is taken" into "everything but the allowlist closes",
+   * and nothing sets it on the child's behalf.
+   */
+  allowlistMode: false,
+  /** Extra minutes the parent granted for today, already filtered to this day. */
+  bonusMinutes: 0,
   childName: null,
   lastHeartbeatAt: null,
   screenTimeAlertedDate: null,
+  /** Last "you have N minutes left" shown, as `'YYYY-MM-DD:N'` — see `warnBeforeLimit`. */
+  lastLimitWarning: null,
 };
 
 let _lockTimer = null;
@@ -108,33 +132,134 @@ export function getAgentStatus() {
 // ── The decision ──────────────────────────────────────────────────────────────
 
 /**
- * Re-derive what should be blocked from the current rules, usage and clock, and
- * push it wherever it has to go.
+ * How many minutes before the daily limit the child is warned.
  *
- * This runs on a timer as well as after a sync, because bedtime and the daily
- * schedule turn on and off with the clock rather than with anything the agent
- * does — and it has to be able to *release* a lock as well as apply one.
+ * **Ascending, and it has to be.** `find` takes the first threshold the remaining
+ * time is at or under, so descending order answers "10" for four minutes left —
+ * a threshold that has already fired, which silently swallows the five-minute
+ * warning entirely. Ascending gives the tightest threshold that still applies.
+ */
+const LIMIT_WARNINGS = [5, 10];
+
+const dayKey = (now) =>
+  `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+/**
+ * Tell the child before the screen goes, not as it goes.
+ *
+ * A lock screen that arrives without warning reads as a fault, and the reasonable
+ * response to a computer that has apparently seized is to keep clicking at it. On
+ * a desktop it is also the difference between saving the essay and not.
+ *
+ * Fires at most once per threshold per day. The key carries the threshold as well
+ * as the date so a grant that puts the child back above ten minutes re-arms the
+ * warning — otherwise the second lock of the evening would arrive silently, which
+ * is the one they least expect.
+ */
+function warnBeforeLimit(rule, todayMinutes, now) {
+  const remaining = minutesUntilLimit(rule, todayMinutes, _state.bonusMinutes);
+  if (remaining === null) return;
+
+  const threshold = LIMIT_WARNINGS.find((t) => remaining <= t);
+  if (threshold === undefined) return;
+
+  const key = `${dayKey(now)}:${threshold}`;
+  if (_state.lastLimitWarning === key) return;
+  _state.lastLimitWarning = key;
+
+  platform().notify({
+    // The real figure, not the threshold that matched it. The threshold decides
+    // *whether* to speak; saying "5 minutes left" to a child who has four is a
+    // small lie that the lock arriving early will make them notice.
+    title: `${remaining} ${remaining === 1 ? 'minute' : 'minutes'} left`,
+    body: threshold <= 5
+      ? 'Your screen time is nearly up. Save what you are working on, or ask your parent for more.'
+      : 'Nearly out of screen time for today. Ask your parent if you need more.',
+    data: { type: 'screen_time_warning', minutesLeft: remaining },
+  });
+}
+
+/**
+ * Re-derive what should be blocked from the current rules, usage, grants and
+ * clock, and push it wherever it has to go.
+ *
+ * This runs on a timer as well as after a sync, because bedtime, the daily
+ * schedule and the expiry of a granted fifteen minutes all turn over on the clock
+ * rather than on anything the agent does — and it has to be able to *release* a
+ * lock as well as apply one.
  */
 function refreshBlocking() {
   const rules = getRules();
   const { todayMinutes, appMinutes } = getScreenTime();
-  const { blocked, reason } = lockState(rules.screenTimeRule, todayMinutes, new Date(), rules.blocked);
+  const now = new Date();
+
+  // Recomputed every pass rather than cached, because a grant expires on the
+  // clock: a machine left running past midnight has to stop honouring yesterday's
+  // extra minutes without anything else having happened.
+  _state.bonusMinutes = bonusMinutesFrom(rules.screenTimeGrants, now);
+
+  const { blocked, reason, tier } = lockState(
+    rules.screenTimeRule, todayMinutes, now, rules.blocked, _state.bonusMinutes,
+  );
 
   const wasLocked = _state.locked;
+  const wasReason = _state.lockReason;
   _state.locked = blocked;
   _state.lockReason = reason;
+  _state.lockTier = tier;
   _state.blockedApps = blockedAppsFor(rules, blocked, appMinutes);
+  _state.allowedApps = allowedAppsFor(rules, tier);
+  _state.allowedAppNames = allowedAppNames(rules, _state.allowedApps);
+
+  /**
+   * The child's dismissal dies with the lock it was given against.
+   *
+   * Anything else and a "let me use my homework apps" tap at six o'clock would
+   * still be in force at bedtime, which is a strict lock that has no allowlist and
+   * must not acquire one by inheritance. Cleared on the reason changing as well as
+   * on the lock lifting, because `daily_limit` → `bedtime` is a transition where
+   * the machine never unlocks in between.
+   *
+   * The third condition is the one that is easy to miss: the parent deleting the
+   * last `allow` rule while the child is working inside it. The reason has not
+   * changed and the lock has not lifted, but the list they were let through to is
+   * now empty — leaving a desktop that closes everything the child opens, with no
+   * lock screen to explain why. That is worse than the lock and no more
+   * permissive, so it goes back to being a lock.
+   */
+  const strandedByAnEmptyList = _state.allowlistMode && _state.allowedApps.length === 0;
+  if (!blocked || reason !== wasReason || strandedByAnEmptyList) _state.allowlistMode = false;
+
+  const lockPayload = () => ({
+    reason: _state.lockReason,
+    tier: _state.lockTier,
+    childName: _state.childName,
+    // Named on the lock screen rather than counted, so "you can still use Word"
+    // is something the child can act on instead of a promise to go and discover.
+    allowedApps: _state.allowedAppNames,
+  });
 
   if (blocked && !wasLocked) {
-    platform().lockScreen.show({ reason, childName: _state.childName });
+    platform().lockScreen.show(lockPayload());
     platform().notify({
       title: lockTitle(reason),
       body: 'Ask your parent if you need more time.',
       data: { type: 'locked', reason },
     });
+  } else if (blocked && (reason !== wasReason || strandedByAnEmptyList)) {
+    // Still locked, but not saying the right thing any more.
+    //
+    // Two cases. The reason changed under a screen that never went away — the
+    // daily limit rolling into bedtime, where the copy and the allowlist both
+    // move. Or the child was working inside an allowlist the parent has just
+    // emptied, and the screen they dismissed has to come back rather than leave
+    // them on a desktop that closes everything with nothing to explain it.
+    platform().lockScreen.show(lockPayload());
   } else if (!blocked && wasLocked) {
     platform().lockScreen.hide();
   }
+
+  if (!blocked) warnBeforeLimit(rules.screenTimeRule, todayMinutes, now);
 
   /**
    * Notify the parent once per day that the limit was reached.
@@ -147,16 +272,43 @@ function refreshBlocking() {
    * looking.
    */
   if (reason === 'daily_limit') {
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const today = dayKey(now);
     if (_state.screenTimeAlertedDate !== today) {
       _state.screenTimeAlertedDate = today;
       emitEvent('alert:screen_time_exceeded');
     }
   }
 
-  if (wasLocked !== blocked) publish();
-  return { blocked, blockedApps: _state.blockedApps };
+  if (wasLocked !== blocked || reason !== wasReason) publish();
+  return {
+    blocked,
+    blockedApps: _state.blockedApps,
+    allowedApps: _state.allowedApps,
+    allowlistMode: _state.allowlistMode,
+  };
+}
+
+/**
+ * The child asking for the desktop back under a daily-limit lock.
+ *
+ * Refused for anything else, and the refusal is the important half: bedtime, an
+ * out-of-hours schedule and a parent's own pause are strict, and a button that
+ * lifted them would make every one of them optional. The lock screen only offers
+ * this when the tier is `'limit'`, but the check lives here too — a renderer on a
+ * child's own computer is not where a policy decision belongs.
+ *
+ * Also refused when there is nothing on the allowlist, since dismissing into an
+ * empty list is a machine that closes everything the child opens, which is worse
+ * than the lock screen and a great deal more confusing.
+ */
+export function useAllowedApps() {
+  if (!_state.locked || _state.lockTier !== 'limit' || _state.allowedApps.length === 0) {
+    return { ok: false, allowedApps: _state.allowedAppNames };
+  }
+  _state.allowlistMode = true;
+  platform().lockScreen.hide();
+  publish();
+  return { ok: true, allowedApps: _state.allowedAppNames };
 }
 
 const lockTitle = (reason) => ({
@@ -280,10 +432,12 @@ export async function startAgent() {
       // Re-derived every tick rather than only on a rules change: an app
       // crossing its own daily limit changes what is blocked without changing
       // anything else, which is the case the phone's first version got wrong.
-      const { blocked, blockedApps } = refreshBlocking();
+      const { blocked, blockedApps, allowedApps, allowlistMode } = refreshBlocking();
       await enforce(screenTime.current, {
         blockedApps,
+        allowedApps,
         locked: blocked,
+        allowlistMode,
         rules: getRules(),
       });
     },
@@ -341,8 +495,15 @@ export async function stopAgent() {
   _state.running = false;
   _state.locked = false;
   _state.lockReason = null;
+  _state.lockTier = null;
+  _state.allowlistMode = false;
+  _state.bonusMinutes = 0;
   _state.blockedApps = [];
+  _state.allowedApps = [];
+  _state.allowedAppNames = [];
   _state.blockedDomains = [];
+  // Not `lastLimitWarning`: it is keyed by date, and a child who restarts the
+  // agent after being warned at ten minutes has not earned a second warning.
   publish();
 }
 

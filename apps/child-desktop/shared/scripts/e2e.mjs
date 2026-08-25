@@ -466,6 +466,179 @@ const run = async () => {
   await waitFor(() => fake.spy.lockHides > 0, 'the lock to be lifted');
   check('lifting the limit unlocks the computer', agent.getAgentStatus().locked === false);
 
+  /*
+   * ── The daily limit does not have to take the whole desktop ────────────────
+   *
+   * Every lock used to be the same lock: a child who spent their twenty minutes
+   * lost the essay editor along with the game. The daily limit is now the one
+   * reason the parent's allowlist survives, and on a desktop it survives only if
+   * the child asks — the lock screen still comes up, so bedtime arriving mid-essay
+   * still cannot be the thing that loses the essay.
+   */
+  step('Apps the parent left open survive the daily limit');
+  fake.resetSpy();
+  const allowRule = await call('POST', `/blocking/${childId}/apps`, {
+    token: parentToken,
+    body: { appName: 'Visual Studio Code', appPackage: 'code.exe', action: 'allow' },
+  });
+  check('the parent can mark an app as open past the limit',
+    allowRule.status === 201, JSON.stringify(allowRule.data));
+
+  await call('PUT', `/screen-time/${childId}`, {
+    token: parentToken,
+    body: { dailyLimitMinutes: 20, bedtimeStart: '21:00', bedtimeEnd: '07:00' },
+  });
+  await waitFor(() => fake.spy.lock !== null, 'the lock screen');
+
+  check('the lock is the porous tier', fake.spy.lock?.tier === 'limit', JSON.stringify(fake.spy.lock));
+  check('the lock screen names what is still open',
+    (fake.spy.lock?.allowedApps || []).includes('Visual Studio Code'), JSON.stringify(fake.spy.lock));
+  check('the agent knows which apps those are',
+    agent.getAgentStatus().allowedApps.includes('code.exe'),
+    JSON.stringify(agent.getAgentStatus().allowedApps));
+
+  /*
+   * Until the child asks, nothing changes: the screen is taken and the work
+   * underneath it is untouched. This is the half that must not regress.
+   */
+  fake.emitForeground({ appId: 'steam.exe', appName: 'Steam' });
+  await sleep(300);
+  check('a lock still closes nothing before the child asks',
+    fake.spy.closed.length === 0, JSON.stringify(fake.spy.closed));
+
+  const taken = agent.useAllowedApps();
+  check('the child can take the desktop back on the allowlist\'s terms', taken.ok === true);
+  check('the lock screen goes when they do', fake.spy.lockHides > 0, String(fake.spy.lockHides));
+  check('the computer is still locked underneath',
+    agent.getAgentStatus().locked === true && agent.getAgentStatus().allowlistMode === true);
+
+  fake.resetSpy();
+  fake.emitForeground({ appId: 'code.exe', appName: 'Visual Studio Code' });
+  await sleep(300);
+  check('the allowed app is left alone', fake.spy.closed.length === 0, JSON.stringify(fake.spy.closed));
+
+  /*
+   * A fresh application, not Steam. Steam was closed a few steps ago and
+   * `REPEAT_ACTION_MS` is fifteen seconds, so re-using it here asserts the
+   * throttle rather than the allowlist — and passes or fails on how fast the
+   * harness happens to run.
+   *
+   * It also has no rule of its own, which is the point: in allowlist mode the
+   * absence of a rule is what closes an app, not the presence of one.
+   */
+  fake.emitForeground({ appId: 'minecraft.exe', appName: 'Minecraft' });
+  await waitFor(() => fake.spy.closed.length > 0, 'the non-allowed app to be closed');
+  check('an app that is not on the list closes',
+    fake.spy.closed[0]?.appId === 'minecraft.exe', JSON.stringify(fake.spy.closed));
+  /*
+   * And says why *this* closed it. A child told "your parent has paused
+   * Minecraft" when what actually happened is that the day ran out has been given
+   * the wrong story about their own parent — and it is the story they will repeat
+   * back at them.
+   */
+  check('the child is told it was the time limit, not a singling-out',
+    fake.spy.notifications.some((n) => /screen time/i.test(n.body || '')),
+    JSON.stringify(fake.spy.notifications));
+
+  /*
+   * The parent emptying the allowlist while the child is working inside it.
+   *
+   * Neither the reason nor the lock changes, so nothing in the obvious set of
+   * transitions fires — and what the child is left with is a desktop that closes
+   * everything they open, with the screen that would have explained it already
+   * dismissed. Worse than the lock and no more permissive, so it goes back to
+   * being a lock.
+   */
+  fake.resetSpy();
+  await call('DELETE', `/blocking/${childId}/apps/${allowRule.data.id}`, { token: parentToken });
+  await waitFor(() => agent.getAgentStatus().allowedApps.length === 0, 'the allow rule to be withdrawn');
+  await waitFor(() => fake.spy.lock !== null, 'the lock screen to come back');
+  check('emptying the allowlist puts the lock screen back',
+    fake.spy.lock?.reason === 'daily_limit', JSON.stringify(fake.spy.lock));
+  check('and takes the child out of allowlist mode',
+    agent.getAgentStatus().allowlistMode === false);
+
+  fake.emitForeground({ appId: 'notepad.exe', appName: 'Notepad' });
+  await sleep(300);
+  check('nothing is closed once the lock screen is back',
+    fake.spy.closed.length === 0, JSON.stringify(fake.spy.closed));
+
+  // Put it back for the bedtime case below.
+  const allowAgain = await call('POST', `/blocking/${childId}/apps`, {
+    token: parentToken,
+    body: { appName: 'Visual Studio Code', appPackage: 'code.exe', action: 'allow' },
+  });
+  await waitFor(() => agent.getAgentStatus().allowedApps.includes('code.exe'),
+    'the allow rule to come back');
+  check('the child can take the desktop back again', agent.useAllowedApps().ok === true);
+
+  /*
+   * The check the whole tier split exists for. `allow` is an exception to the
+   * daily limit and nothing else — and the child's dismissal must not survive the
+   * lock it was granted against, or a tap at six o'clock would still be lifting
+   * the lock screen at bedtime.
+   */
+  const nowMinute = new Date().getHours() * 60 + new Date().getMinutes();
+  const pad = (n) => String(n).padStart(2, '0');
+  const hhmm = (minute) => {
+    const wrapped = ((minute % 1440) + 1440) % 1440;
+    return `${pad(Math.floor(wrapped / 60))}:${pad(wrapped % 60)}`;
+  };
+  fake.resetSpy();
+  await call('PUT', `/screen-time/${childId}`, {
+    token: parentToken,
+    body: {
+      dailyLimitMinutes: 600,
+      bedtimeEnabled: true,
+      bedtimeStart: hhmm(nowMinute),
+      bedtimeEnd: hhmm(nowMinute - 1),
+    },
+  });
+  await waitFor(() => fake.spy.lock?.reason === 'bedtime', 'the bedtime lock');
+  check('bedtime is strict', fake.spy.lock?.tier === 'strict', JSON.stringify(fake.spy.lock));
+  check('the lock screen offers no way through at bedtime',
+    (fake.spy.lock?.allowedApps || []).length === 0, JSON.stringify(fake.spy.lock));
+  check('the child\'s earlier dismissal did not survive the change of lock',
+    agent.getAgentStatus().allowlistMode === false);
+  check('and cannot be taken again', agent.useAllowedApps().ok === false);
+
+  fake.emitForeground({ appId: 'code.exe', appName: 'Visual Studio Code' });
+  await sleep(300);
+  check('bedtime closes nothing either', fake.spy.closed.length === 0, JSON.stringify(fake.spy.closed));
+
+  /*
+   * ── "Can I have more time?" now has an answer ──────────────────────────────
+   *
+   * The lock screen has offered to ask since it was written. Saying yes meant
+   * editing the daily limit and remembering to put it back, which nobody does.
+   */
+  step('Extra time granted by the parent lifts the lock');
+  fake.resetSpy();
+  await call('PUT', `/screen-time/${childId}`, {
+    token: parentToken,
+    body: { dailyLimitMinutes: 20, bedtimeEnabled: false, bedtimeStart: '21:00', bedtimeEnd: '07:00' },
+  });
+  await waitFor(() => fake.spy.lock?.reason === 'daily_limit', 'the daily-limit lock');
+
+  const granted = await call('POST', `/screen-time/${childId}/grant`, {
+    token: parentToken, body: { minutes: 60 },
+  });
+  check('the parent can grant extra time', granted.status === 201, JSON.stringify(granted.data));
+
+  // Over the socket, not at the next five-minute poll — the parent tapping this
+  // is standing next to the child who asked.
+  await waitFor(() => agent.getAgentStatus().locked === false, 'the grant to lift the lock');
+  check('the granted minutes lift the lock', agent.getAgentStatus().locked === false);
+  check('the granted minutes are counted', agent.getAgentStatus().bonusMinutes === 60,
+    String(agent.getAgentStatus().bonusMinutes));
+  check('the lock screen is taken down', fake.spy.lockHides > 0, String(fake.spy.lockHides));
+
+  await call('DELETE', `/blocking/${childId}/apps/${allowAgain.data.id}`, { token: parentToken });
+  await call('PUT', `/screen-time/${childId}`, {
+    token: parentToken,
+    body: { dailyLimitMinutes: 600, bedtimeEnabled: false, bedtimeStart: '21:00', bedtimeEnd: '07:00' },
+  });
+
   // ── A new app ──────────────────────────────────────────────────────────────
   step('A new app on the computer reaches the parent, and the first pass does not');
   /*
@@ -516,7 +689,8 @@ const run = async () => {
 
   // ── Bedtime maths, shared with the phone ───────────────────────────────────
   step('Bedtime is interpreted the same way as on the phone');
-  const { lockState } = await import(src('services/schedule.js'));
+  const { lockState, bonusMinutesFrom, minutesUntilLimit, tierFor } =
+    await import(src('services/schedule.js'));
   const at = (hours, minutes = 0) => new Date(2026, 0, 5, hours, minutes); // a Monday
   const bedtime = { bedtimeEnabled: true, bedtimeStart: '21:00', bedtimeEnd: '07:00' };
 
@@ -548,6 +722,51 @@ const run = async () => {
     lockState(bedtime, 0, at(10), { since: null }).reason === 'blocked_by_parent');
   check('no block leaves the ordinary rules in charge',
     lockState(bedtime, 0, at(10), null).blocked === false);
+
+  /*
+   * ── Tiers and granted minutes, also shared with the phone ──────────────────
+   *
+   * `schedule.js` is a deliberate character-for-character copy of the phone's,
+   * because the two clients must not arrive at two readings of one rule. These
+   * are the phone's own cases run against this copy — a bedtime that starts at a
+   * different minute on a laptop, or a granted fifteen minutes that expires on
+   * one and not the other, is a support call nobody can reproduce.
+   */
+  const spent = { dailyLimitMinutes: 120, isActive: true };
+  check('the daily limit is the porous lock', lockState(spent, 130, at(10)).tier === 'limit');
+  check('bedtime is strict here too', lockState(bedtime, 0, at(22)).tier === 'strict');
+  check('a parent\'s pause is strict', lockState(spent, 0, at(10), paused).tier === 'strict');
+  check('an unlocked computer has no tier', lockState(spent, 0, at(10)).tier === null);
+  check('tierFor agrees with what lockState returns',
+    tierFor('daily_limit') === 'limit' && tierFor('bedtime') === 'strict'
+    && tierFor('anything_new') === 'strict');
+
+  const iso = (date) => date.toISOString();
+  check('a grant from this morning counts at noon',
+    bonusMinutesFrom([{ minutes: 15, grantedAt: iso(at(9)) }], at(12)) === 15);
+  check('a grant from last night does not',
+    bonusMinutesFrom([{ minutes: 15, grantedAt: iso(new Date(2026, 0, 4, 21)) }], at(12)) === 0);
+  check('grants stack',
+    bonusMinutesFrom([
+      { minutes: 15, grantedAt: iso(at(9)) }, { minutes: 30, grantedAt: iso(at(10)) },
+    ], at(12)) === 45);
+  check('a grant stamped in the future is ignored',
+    bonusMinutesFrom([{ minutes: 15, grantedAt: iso(at(23)) }], at(12)) === 0);
+  check('a malformed grant is ignored rather than counted',
+    bonusMinutesFrom([{ minutes: 'lots', grantedAt: iso(at(10)) }, { minutes: 20 }, null], at(12)) === 0);
+
+  check('a grant lifts the daily limit', lockState(spent, 120, at(10), null, 15).blocked === false);
+  check('the lock returns once the granted minutes are spent',
+    lockState(spent, 135, at(10), null, 15).reason === 'daily_limit');
+  check('a grant does not lift bedtime',
+    lockState({ ...spent, ...bedtime }, 0, at(22), null, 60).reason === 'bedtime');
+  check('a grant does not lift a parent\'s pause',
+    lockState(spent, 0, at(10), paused, 60).blocked === true);
+
+  check('the countdown includes granted minutes', minutesUntilLimit(spent, 110, 15) === 25);
+  check('the countdown is null once the limit is spent', minutesUntilLimit(spent, 130, 0) === null);
+  check('the countdown is null with no limit set',
+    minutesUntilLimit({ ...spent, dailyLimitMinutes: 0 }, 500, 0) === null);
 
   // ── Recovering from a run that did not shut down cleanly ───────────────────
   /*
