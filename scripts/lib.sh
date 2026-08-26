@@ -35,6 +35,19 @@ require_web_dependencies() {
   die "Web dependencies are not installed. Run 'npm ci' in ${REPO_ROOT} first."
 }
 
+# The same trap on the API side, and it misdiagnoses rather than merely confusing.
+#
+# `scripts/check-mail.js` loads the config and the mailer at require time, so on a
+# fresh clone it crashes before a single SMTP packet is sent — and Node exits 1,
+# which is the same exit code it uses for a relay that refused the credentials.
+# `setup-google-mail.sh` reads that as "Gmail refused those credentials" and sends
+# whoever ran it to the Google account console to re-issue an app password that
+# was never the problem. Checked here so the install is named instead.
+require_api_dependencies() {
+  [ -d "${REPO_ROOT}/services/api/node_modules" ] && return 0
+  die "API dependencies are not installed. Run 'npm ci' in ${REPO_ROOT}/services/api first."
+}
+
 # Reads a Terraform output. Outputs are the single source of truth for resource
 # names, so nothing here has to guess at or duplicate a naming convention.
 #

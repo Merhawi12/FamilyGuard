@@ -59,6 +59,15 @@ esac
 
 # ── The credential ───────────────────────────────────────────────────────────
 
+# Checked before the password is asked for, not after: the test below runs
+# check-mail.js, which loads the API's config and mailer at require time and so
+# cannot start at all on a fresh clone. Node exits 1 for that crash and 1 for a
+# relay that refused the credentials, so step 1 cannot tell them apart and blames
+# the password — sending you to re-issue an app password that was never wrong.
+# After --help and argument validation, so neither needs an install.
+require_tool node
+require_api_dependencies
+
 if [ -t 0 ]; then
   printf 'Gmail app password for %s (input hidden): ' "$ACCOUNT" >&2
   read -rs APP_PASSWORD
@@ -108,8 +117,9 @@ CHECK_STATUS=$?
 set -e
 
 if [ "$CHECK_STATUS" != 0 ]; then
-  die "Gmail refused those credentials — nothing was written. The three causes,
-       in the order they happen:
+  die "The credential test failed — nothing was written. The check's own output is
+       above and says which stage failed; trust it over this list. If it reached
+       'Connection' and Gmail refused, the three causes, in the order they happen:
          1. 2-Step Verification is off, so what you pasted is not an app password.
          2. The app password was revoked (they die when the account password changes).
          3. A Workspace admin has disabled app passwords for the domain.
