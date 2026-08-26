@@ -4,6 +4,33 @@ import { auth as authApi } from '../api/endpoints.js';
 const GSI_SRC = 'https://accounts.google.com/gsi/client';
 
 /**
+ * Whether this is the Capacitor shell rather than a browser.
+ *
+ * Identity Services is a *browser* SDK and Google will not run its sign-in in an
+ * embedded WebView — that is their policy, not a bug to work around, and it is
+ * why the mobile answer is a native plugin talking to Play Services rather than
+ * this script. In the APK the script does not even load: what the parent sees is
+ * "Could not reach Google to sign in" in red, under an "or continue with"
+ * divider with nothing beneath it, on every visit to the sign-in screen.
+ *
+ * That is precisely the dead button this component's contract exists to avoid,
+ * one layer up — the check below only asked whether Google was *configured*,
+ * never whether it could work here. Login.jsx says the same thing about the
+ * reset flow: inside the Capacitor shell, "bouncing out to a browser and back
+ * was never going to" work.
+ *
+ * Guarded because `window.Capacitor` is undefined in a browser and this runs
+ * during render on both.
+ */
+const inNativeShell = () => {
+  try {
+    return !!window.Capacitor?.isNativePlatform?.();
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Sign in with Google, rendered by Google.
  *
  * The button is Google's own, injected into `ref` by their Identity Services
@@ -24,7 +51,10 @@ const GSI_SRC = 'https://accounts.google.com/gsi/client';
 export default function GoogleSignInButton({ onCredential, onError, text = 'signin_with' }) {
   const ref = useRef(null);
   const [available, setAvailable] = useState(false);
-  const clientId = import.meta.env?.VITE_GOOGLE_CLIENT_ID || '';
+  // Treated exactly like an absent client ID: a deployment state in which this
+  // button cannot work, so it is never offered. Not an error — nothing has gone
+  // wrong, and a red notice on every sign-in says otherwise.
+  const clientId = inNativeShell() ? '' : (import.meta.env?.VITE_GOOGLE_CLIENT_ID || '');
 
   // The server is asked as well as the bundle, because the two are configured
   // separately and independently: a client ID baked into a build that the API
