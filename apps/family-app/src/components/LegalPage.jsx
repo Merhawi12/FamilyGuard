@@ -35,9 +35,21 @@ export default function LegalPage({ title, updated, children }) {
   return (
     <div className="min-h-dvh bg-white flex flex-col">
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-gray-100">
-        <div className="max-w-5xl mx-auto h-16 px-4 sm:px-6 flex items-center justify-between gap-3">
+        {/* The bar grows with the mark rather than cropping it — 64px on a phone,
+            80px from `sm` up, which is the same height AuthShell gives it. */}
+        <div className="max-w-5xl mx-auto h-16 sm:h-20 px-4 sm:px-6 flex items-center justify-between gap-3">
           <Link to={home} className="shrink-0">
-            <BrandLogo className="h-9 w-auto" />
+            {/* `logo.png` is the 500×500 *square* lockup — the shield stacked over
+                the wordmark — so its height is shared between the two. At the h-9
+                this used to be, the whole lockup was 36px and the word "Parentix"
+                under it came out around 8px: present, and unreadable. Every other
+                placement of this mark is 48–80px (AuthShell h-16 sm:h-20, Sidebar
+                h-12 lg:h-16); this was the one outlier.
+
+                It was shrunk for a reason — see the header comment, where the old
+                per-page copies paired a 64px logo with two *full-size* buttons and
+                overflowed a phone. Those are `btn-sm` now, so the room is there. */}
+            <BrandLogo className="h-11 sm:h-14 w-auto" />
           </Link>
           <div className="flex items-center gap-2">
             {user ? (
@@ -82,7 +94,9 @@ export default function LegalPage({ title, updated, children }) {
 
       <footer className="bg-gray-900 px-4 py-10 text-center pb-safe">
         <Link to={home}>
-          <BrandLogo className="h-9 w-auto mx-auto mb-4 opacity-80" />
+          {/* Same square-lockup problem, and worse here: this one sits on a dark
+              background at 80% opacity, so a 36px wordmark was fainter still. */}
+          <BrandLogo className="h-14 w-auto mx-auto mb-4 opacity-80" />
         </Link>
         <div className="flex justify-center gap-6 mb-4">
           <Link to="/privacy-policy" className="text-gray-400 hover:text-white text-sm transition">
