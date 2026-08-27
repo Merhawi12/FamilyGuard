@@ -403,6 +403,24 @@ const guardServer = (srv) => {
     if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
     else socket.destroy();
   });
+
+  /**
+   * The same hazard one layer lower, and the one `ignoreAbort` cannot reach.
+   *
+   * `ignoreAbort` covers a request or response aborted mid-flight, because it is
+   * handed the request and response objects. A connection that resets while no
+   * request is in flight — a keep-alive socket the browser drops when a page
+   * closes, which every `page.close()` in this file can produce — emits 'error'
+   * on the socket itself, where nothing was listening. Node's default for an
+   * unhandled 'error' event is to throw, so the process died with `ECONNRESET`
+   * and took the run with it.
+   *
+   * It is deliberately silent rather than logged. This is the normal way a
+   * browser hangs up, it says nothing about the app under test, and a line per
+   * closed page would bury the checks. The failure it replaces was a full run of
+   * passing assertions thrown away minutes from the end, with nothing red.
+   */
+  srv.on('connection', (socket) => socket.on('error', () => {}));
   return srv;
 };
 
