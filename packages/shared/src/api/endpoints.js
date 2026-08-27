@@ -310,4 +310,16 @@ export const admin = {
   listSentNotifications: (params) => api.get('/notifications/sent', { params }),
 
   getAuditLogs: (params) => api.get('/audit', { params }),
+  /**
+   * Removing entries from the log stream. Super Admin only — `view_audit_logs`
+   * is not enough, so these 403 for the Operations role that can read the same
+   * screen, and the console hides the controls rather than offering them.
+   *
+   * `clearAuditLogs` takes the same filters the listing does, so it clears what
+   * the screen is showing. Passing none clears everything. Either way the API
+   * records the deletion itself as a `audit.entries_deleted` entry that cannot
+   * in turn be deleted.
+   */
+  deleteAuditLog: (id) => api.delete(`/audit/${id}`),
+  clearAuditLogs: (params) => api.delete('/audit', { params }),
 };

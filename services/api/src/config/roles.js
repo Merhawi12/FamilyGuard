@@ -34,6 +34,20 @@ const PERMISSIONS = {
    * edit customer records without also letting them seize one.
    */
   RESET_PASSWORDS: 'reset_passwords',
+  /**
+   * Removing entries from the log stream, separable from reading it for the
+   * same reason `reset_passwords` is separable from `manage_users` — and with
+   * more at stake.
+   *
+   * `view_audit_logs` is held by Operations as well as Super Admin, because
+   * reading the stream is ordinary work. Deleting from it is not: the audit
+   * trail is the record of what staff did, so anyone who can erase it can erase
+   * their own tracks. This is granted to Super Admin alone, which is why it is
+   * its own key rather than an extension of the permission next to it.
+   *
+   * It does not make the trail erasable without trace — see `clearLogs`.
+   */
+  MANAGE_AUDIT_LOGS: 'manage_audit_logs',
 };
 
 const PERMISSION_KEYS = Object.values(PERMISSIONS);

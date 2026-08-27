@@ -34,7 +34,15 @@ const { Op } = require('sequelize');
 const LEVEL_RULES = [
   {
     level: 'critical',
-    actions: ['admin.user_deleted', 'staff.deleted', 'auth.login_blocked_locked'],
+    /**
+     * `audit.entries_deleted` is here rather than left to the `_deleted` suffix
+     * two rules down, which would call it a warning. It is the one entry that
+     * describes the stream being edited, it is irreversible — the first half of
+     * the critical rule above — and it is the entry an operator is most likely
+     * to be looking for when they are looking for one at all. A warning badge on
+     * "4,812 entries removed" is the wrong size for what it says.
+     */
+    actions: ['admin.user_deleted', 'staff.deleted', 'auth.login_blocked_locked', 'audit.entries_deleted'],
     suffixes: [],
   },
   {

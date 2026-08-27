@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { admin as adminApi, errorMessage, EmptyState, Icon, Toggle } from '@parentix/shared';
+import {
+  admin as adminApi, errorMessage, EmptyState, Icon, Toggle, Modal,
+  useAuth, hasPermission, PERMISSIONS,
+} from '@parentix/shared';
 import DataTable from '../components/DataTable';
 
 /**
@@ -140,7 +143,26 @@ const stampOf = (value) => {
 
 const actorOf = (log) => (log.user ? `${log.user.name} · ${log.user.email}` : 'System');
 
+/**
+ * The one action that cannot be deleted — the entry a deletion leaves behind.
+ *
+ * The API refuses these with a 403; the row hides its own trash button so an
+ * operator is not offered a control that is going to fail. Kept in step with
+ * `TOMBSTONE` in services/api/src/controllers/auditController.js.
+ */
+const TOMBSTONE = 'audit.entries_deleted';
+
 export default function AdminSystemLogs() {
+  const { user: me } = useAuth();
+  // Reading this screen needs `view_audit_logs`, which Operations also holds.
+  // Deleting from it is Super Admin only, so the controls are hidden rather than
+  // shown and then 403'd — see config/roles.js.
+  const mayDelete = hasPermission(me, PERMISSIONS.MANAGE_AUDIT_LOGS);
+
+  const [removing, setRemoving] = useState(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
   const [logs, setLogs] = useState([]);
   const [count, setCount] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -288,6 +310,58 @@ export default function AdminSystemLogs() {
   });
 
   /**
+   * One entry, from the trash button on its row.
+   *
+   * Reloads rather than splicing the row out locally: the count under the table
+   * and the paginator beside it both describe the server's set, and dropping a
+   * row from `logs` alone would leave "Showing 1–50 of 12,480" one too high and
+   * the last page short.
+   */
+  const removeEntry = async (log) => {
+    setRemoving(log.id);
+    try {
+      await adminApi.deleteAuditLog(log.id);
+      setFresh(new Set());
+      await load({ quiet: true });
+      setError('');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to delete that log entry'));
+    } finally {
+      setRemoving(null);
+    }
+  };
+
+  /**
+   * Everything the current filters describe — the same set the table is showing,
+   * not the fifty rows on this page and not silently all of history.
+   *
+   * `q` is deliberately not sent: the API refuses to clear a text search, because
+   * that filter reaches the actor through a join that `DELETE` cannot use. The
+   * button is disabled while one is applied rather than quietly clearing a wider
+   * set than the operator can see.
+   */
+  const clearLogs = async () => {
+    setClearing(true);
+    try {
+      // Dropped rather than sent: `q` the API refuses (the join a DELETE cannot
+      // use), and the paging pair describes a page rather than the set.
+      const { q: _q, limit: _limit, offset: _offset, ...filters } = query();
+      const { data } = await adminApi.clearAuditLogs(filters);
+      setConfirmClear(false);
+      setFresh(new Set());
+      goToOffset(0);
+      await load({ quiet: true });
+      setError(data.deleted
+        ? `Removed ${data.deleted.toLocaleString()} ${data.deleted === 1 ? 'entry' : 'entries'}. The deletion itself is recorded above.`
+        : 'Nothing matched those filters, so nothing was removed.');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to clear the log stream'));
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  /**
    * The filtered stream as a spreadsheet — an incident write-up needs the rows,
    * not a screenshot of them. It refetches rather than exporting the fifty on
    * screen, because an "export" that means "export this page" is a trap.
@@ -419,6 +493,43 @@ export default function AdminSystemLogs() {
         </span>
       ),
     },
+    /**
+     * The trash column, only for staff who can actually use it — a disabled
+     * control on every row of a fifty-row table is noise for the roles that can
+     * read this screen but not edit it.
+     *
+     * A tombstone shows a lock instead: the API refuses to delete one, and
+     * offering a button that is going to 403 is worse than explaining why.
+     */
+    ...(mayDelete ? [{
+      key: 'actions',
+      header: '',
+      align: 'right',
+      cell: (log) => (log.action === TOMBSTONE ? (
+        <span
+          className="inline-flex items-center justify-center w-11 h-11 text-gray-300 ml-auto"
+          title="A record of a previous deletion cannot itself be deleted"
+        >
+          <Icon name="lock" size={15} />
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => removeEntry(log)}
+          disabled={removing === log.id}
+          aria-label={`Delete this ${describe(log.action).toLowerCase()} entry`}
+          // 44px on every breakpoint: it is a destructive control, and the one
+          // place a cramped target costs an entry nobody meant to remove.
+          className="inline-flex items-center justify-center w-11 h-11 rounded-lg ml-auto
+                     text-gray-400 hover:text-danger hover:bg-red-50 transition
+                     disabled:opacity-40 disabled:pointer-events-none"
+        >
+          {/* No spinner icon exists in the set — the disabled dimming above is
+              the pending state, and the row reloads the moment it lands. */}
+          <Icon name="trash" size={15} />
+        </button>
+      )),
+    }] : []),
   ];
 
   const labelClass = 'block text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400 mb-1.5';
@@ -444,6 +555,19 @@ export default function AdminSystemLogs() {
             <Icon name="download" size={15} />
             {exporting ? 'Exporting…' : 'Export CSV'}
           </button>
+          {/* Export sits to its left on purpose: taking a copy before removing
+              anything is the order these two are used in. */}
+          {mayDelete && (
+            <button
+              type="button"
+              onClick={() => setConfirmClear(true)}
+              disabled={loading || clearing || count === 0}
+              className="btn-danger btn-sm"
+            >
+              <Icon name="trash" size={15} />
+              {filtered ? 'Clear filtered' : 'Clear all'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -569,6 +693,68 @@ export default function AdminSystemLogs() {
         )}
         pagination={{ offset, limit: PAGE_SIZE, count, onChange: goToOffset, disabled: loading, label: 'events' }}
       />
+
+      {/**
+        * The dialog names the number and the scope, because "Clear all" on a
+        * filtered table is ambiguous in the direction that costs the most: an
+        * operator who has narrowed to `auth` errors and presses it is asking
+        * about those, and an operator who has narrowed to nothing is asking
+        * about the entire history of the platform. Both are legitimate; only
+        * one of them is recoverable, and neither is guessable from the button.
+        */}
+      <Modal
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        title={filtered ? 'Clear the filtered entries?' : 'Clear the entire log stream?'}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            This permanently removes{' '}
+            <strong className="text-gray-900 tabular-nums">{count.toLocaleString()}</strong>{' '}
+            {count === 1 ? 'entry' : 'entries'}
+            {filtered ? ' matching the current filters' : ' — the platform\'s whole recorded history'}.
+            It cannot be undone.
+          </p>
+
+          {appliedSearch && (
+            <p className="notice-error text-sm">
+              <Icon name="warning" size={16} className="mt-0.5" />
+              <span className="flex-1">
+                A text search cannot be cleared in bulk. Clear the search box, or narrow by
+                level, service or time range instead.
+              </span>
+            </p>
+          )}
+
+          {/* Said plainly rather than left as a pleasant surprise: an operator
+              deciding whether to do this is entitled to know it will be visible. */}
+          <p className="text-sm text-gray-500">
+            The deletion is itself recorded — a <span className="font-mono text-xs">audit.entries_deleted</span>{' '}
+            entry naming you, the count and the filters. That record cannot be deleted.
+          </p>
+
+          {!filtered && (
+            <p className="text-sm text-gray-500">
+              Consider <strong>Export CSV</strong> first — it takes a copy of what is about to go.
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={() => setConfirmClear(false)} className="btn-secondary">
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={clearLogs}
+              disabled={clearing || !!appliedSearch}
+              className="btn-danger"
+            >
+              <Icon name="trash" size={16} />
+              {clearing ? 'Clearing…' : `Delete ${count.toLocaleString()} ${count === 1 ? 'entry' : 'entries'}`}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

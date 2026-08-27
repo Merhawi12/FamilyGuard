@@ -41,6 +41,7 @@ export const PERMISSIONS = {
   SEND_NOTIFICATIONS: 'send_notifications',
   VIEW_AUDIT_LOGS: 'view_audit_logs',
   RESET_PASSWORDS: 'reset_passwords',
+  MANAGE_AUDIT_LOGS: 'manage_audit_logs',
 };
 
 export const PERMISSION_LABELS = {
@@ -51,6 +52,7 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.SEND_NOTIFICATIONS]: 'Send notifications',
   [PERMISSIONS.VIEW_AUDIT_LOGS]: 'View audit logs',
   [PERMISSIONS.RESET_PASSWORDS]: 'Reset passwords',
+  [PERMISSIONS.MANAGE_AUDIT_LOGS]: 'Delete audit logs',
 };
 
 export const PERMISSION_DESCRIPTIONS = {
@@ -61,6 +63,7 @@ export const PERMISSION_DESCRIPTIONS = {
   [PERMISSIONS.SEND_NOTIFICATIONS]: 'Send announcements to customers.',
   [PERMISSIONS.VIEW_AUDIT_LOGS]: 'Read the audit trail of staff actions.',
   [PERMISSIONS.RESET_PASSWORDS]: "Set a customer's password, taking over their account.",
+  [PERMISSIONS.MANAGE_AUDIT_LOGS]: 'Remove entries from the log stream. Every deletion is itself recorded.',
 };
 
 export const PERMISSION_KEYS = Object.values(PERMISSIONS);
