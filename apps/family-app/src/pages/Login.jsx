@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   useAuth, payments, auth as authApi, errorMessage, Icon, PAID_PLAN_KEYS, GoogleSignInButton,
@@ -13,15 +13,15 @@ import { DEFAULT_COUNTRY } from '../countries';
  *
  * `tab` is the step, not the identifier: 'login' and 'register' are the two
  * entry screens and everything else ('verify', 'code', 'mfa', and the three-step
- * 'forgot' → 'reset-code' → 'reset-new') is a step reached from one of them.
- * `method` is the identifier — 'email' or 'phone' — and is what the segmented
+ * 'forgot' â†’ 'reset-code' â†’ 'reset-new') is a step reached from one of them.
+ * `method` is the identifier â€” 'email' or 'phone' â€” and is what the segmented
  * control switches. Keeping them separate is what lets the phone path reuse the
  * code screen, the MFA challenge and the post-sign-in redirect rather than
  * growing parallel copies of each.
  *
  * Password reset lives here rather than on its own route because it is now three
  * screens rather than one: since the email carries a code instead of a link,
- * nothing arrives at a URL, and the whole flow can finish where it started —
+ * nothing arrives at a URL, and the whole flow can finish where it started â€”
  * which also means it works inside the Capacitor shell, where bouncing out to a
  * browser and back was never going to.
  */
@@ -31,12 +31,12 @@ export default function Login() {
    * Which entry screen the current step came from.
    *
    * `tab` is the step, so it stops being 'register' the moment the code screen
-   * opens — and `isRegister` is derived from it. Everything the code screen still
+   * opens â€” and `isRegister` is derived from it. Everything the code screen still
    * has to do with the original intent was therefore reading 'login': resending
    * an SMS during *signup* asked for `mode: 'login'`, which for a number with no
    * verified account is the one case the API refuses, so the parent who tapped
    * "Resend code" on the screen the signup had just put them on was told "No
-   * account found for that number. Create one instead." — about the account they
+   * account found for that number. Create one instead." â€” about the account they
    * were in the middle of creating. "Use a different number" landed them on Sign
    * In for the same reason.
    */
@@ -61,7 +61,7 @@ export default function Login() {
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [pendingEmail, setPendingEmail] = useState('');
   /**
-   * Whether the code failed to leave the building — a flag, not the API's words.
+   * Whether the code failed to leave the building â€” a flag, not the API's words.
    *
    * The API reports delivery honestly (it used to always answer "sent", which
    * stranded every new account on a screen waiting for a message that was never
@@ -71,7 +71,7 @@ export default function Login() {
    * deployment. Check the SMS settings for this deployment, then use Resend code."
    *
    * Holding a boolean rather than the string is what makes that unrepeatable
-   * instead of merely fixed — there is no longer a server sentence here to
+   * instead of merely fixed â€” there is no longer a server sentence here to
    * concatenate. It also settles the more important half: `message` is written
    * for an operator reading logs, and "check the SMS settings for this
    * deployment" is not something a parent trying to sign in can act on. The
@@ -90,7 +90,7 @@ export default function Login() {
    * The reset ticket, held for exactly one screen.
    *
    * `verify-reset-code` mints it once the six digits come back and
-   * `reset-password` spends it. It is never emailed and never stored — a reload
+   * `reset-password` spends it. It is never emailed and never stored â€” a reload
    * on the "choose a new password" step means starting the flow again, which is
    * the correct outcome for a fifteen-minute credential.
    */
@@ -99,20 +99,20 @@ export default function Login() {
   const [mfa, setMfa] = useState({ preAuthToken: '', code: '' });
   const [country, setCountry] = useState(DEFAULT_COUNTRY);
   const [national, setNational] = useState('');
-  // Masked by the API — the whole number is never echoed back to be displayed.
+  // Masked by the API â€” the whole number is never echoed back to be displayed.
   const [pendingPhone, setPendingPhone] = useState({ e164: '', masked: '' });
   /**
    * The code itself, when the API had nowhere to send it.
    *
    * Only ever populated outside production, where the server returns `devCode`
-   * instead of paying a provider to deliver it — see `sms.echoCode`. Without
+   * instead of paying a provider to deliver it â€” see `sms.echoCode`. Without
    * this the phone flow could be started locally but not finished, which is the
    * state it was in.
    */
   const [devCode, setDevCode] = useState('');
 
   // Ticking here rather than inside the resend handler means the interval is
-  // always torn down with the component — navigating away mid-countdown used to
+  // always torn down with the component â€” navigating away mid-countdown used to
   // leave a timer running against unmounted state.
   useEffect(() => {
     if (resendCooldown <= 0) return undefined;
@@ -128,12 +128,12 @@ export default function Login() {
         if (cancelled) return;
         const enabled = !!res.data?.phone;
         setPhoneAvailable(enabled);
-        // Nothing routes here today — 'email' is the initial method and the tab
-        // is what changes it — but an identifier the deployment cannot prove
+        // Nothing routes here today â€” 'email' is the initial method and the tab
+        // is what changes it â€” but an identifier the deployment cannot prove
         // must not survive as the selected one.
         if (!enabled) setMethod('email');
       })
-      .catch(() => { /* offline, or an API without the phone routes — stay hidden */ });
+      .catch(() => { /* offline, or an API without the phone routes â€” stay hidden */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -208,7 +208,7 @@ export default function Login() {
           name: form.name,
         });
         setPendingPhone({ e164, masked: data.phone });
-        // A returned code is not a delivery problem — it is the code. Showing
+        // A returned code is not a delivery problem â€” it is the code. Showing
         // both would tell the parent something went wrong while handing them
         // the thing they need.
         setDevCode(data.devCode || '');
@@ -230,10 +230,50 @@ export default function Login() {
       await settle(await login(form.email, form.password));
     } catch (err) {
       const data = err.response?.data;
-      // Email not verified — switch to the verification step automatically.
+      /**
+       * Email not verified â€” switch to the verification step, and send a code,
+       * because the screen we are about to show says we did.
+       *
+       * It used to only switch. The screen it switches to reads "We sent a
+       * 6-digit code to â€¦", and on this path nothing had been sent: the only
+       * code in existence was the one `register` issued, which expires after
+       * fifteen minutes. So anybody returning to an account they had not
+       * finished verifying â€” the next morning, or at all during the weeks
+       * outbound mail was down â€” was shown a sentence that was false, and then
+       * waited for a message that was never coming.
+       *
+       * The visible half of that is what it drives people to do next: the only
+       * other button offering to email them anything is Forgot Password, so
+       * they end up holding a *password reset* code on the *email verification*
+       * screen, where it does not work. Two codes, two purposes, and the one
+       * they were told to expect was the one nobody sent.
+       *
+       * Deliberately after `setTab`, so the screen appears immediately and the
+       * request settles under it rather than delaying it behind a round trip.
+       */
       if (data?.emailVerificationRequired) {
         setPendingEmail(form.email);
+        setDeliveryProblem(false);
+        setCode(['', '', '', '', '', '']);
         setTab('verify');
+
+        try {
+          const res = await authApi.resendCode({ email: form.email });
+          setDeliveryProblem(res.data?.emailDelivered === false);
+          setResendCooldown(60);
+        } catch (resendErr) {
+          /**
+           * A 429 is the account's own cooldown, and it means a code went out
+           * recently and is still live â€” so the screen's sentence is true and
+           * there is nothing to report. Anything else is a real failure to
+           * send, and the banner says so rather than leaving them waiting.
+           */
+          if (resendErr.response?.status === 429) {
+            setResendCooldown(resendErr.response.data?.retryAfter || 60);
+          } else {
+            setDeliveryProblem(true);
+          }
+        }
         return;
       }
       setError(
@@ -321,7 +361,7 @@ export default function Login() {
    * The API deliberately gives the same 200 for an address with an account and
    * one without, so waiting on the response to decide would be inventing an
    * answer it refused to give. Someone who mistyped their address types a code
-   * that never arrives and gets "That code is invalid" — which is the cost of an
+   * that never arrives and gets "That code is invalid" â€” which is the cost of an
    * endpoint that will not confirm who has an account, and the right price.
    */
   const handleForgotPassword = async (e) => {
@@ -362,7 +402,7 @@ export default function Login() {
   /**
    * Step three. Ends at the sign-in screen rather than in the app: a reset is
    * what somebody does when they think their account is compromised, and it
-   * revokes every session — including any this browser was holding.
+   * revokes every session â€” including any this browser was holding.
    */
   const handleSetNewPassword = async (e) => {
     e.preventDefault();
@@ -397,7 +437,7 @@ export default function Login() {
         setDeliveryProblem(data.smsDelivered === false && !data.devCode);
       } else if (tab === 'reset-code') {
         // The same call that started the flow. It answers 200 whatever happens,
-        // including when the server's own cooldown refuses to send — so there is
+        // including when the server's own cooldown refuses to send â€” so there is
         // nothing here to report and the countdown below is the honest signal.
         await authApi.forgotPassword({ email: forgotEmail });
       } else {
@@ -428,7 +468,7 @@ export default function Login() {
           id={`code-${idx}`}
           type="text"
           inputMode="numeric"
-          // An id alone gives no accessible name — without this a screen
+          // An id alone gives no accessible name â€” without this a screen
           // reader announces six unlabelled edit fields.
           aria-label={`Verification code, digit ${idx + 1} of ${code.length}`}
           autoComplete={idx === 0 ? 'one-time-code' : 'off'}
@@ -458,7 +498,7 @@ export default function Login() {
 
   return (
     <AuthShell>
-      {/* ── Two-factor challenge ─────────────────────────────────────────── */}
+      {/* â”€â”€ Two-factor challenge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {tab === 'mfa' ? (
         <>
           <div className="text-center mb-6">
@@ -485,14 +525,14 @@ export default function Login() {
             />
             {error && <p className="notice-error">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary btn-block">
-              {loading ? 'Verifying…' : 'Verify'}
+              {loading ? 'Verifyingâ€¦' : 'Verify'}
             </button>
           </form>
 
           {backButton(() => { setTab('login'); setError(''); setMfa({ preAuthToken: '', code: '' }); })}
         </>
       ) : tab === 'code' ? (
-        /* ── SMS verification ───────────────────────────────────────────── */
+        /* â”€â”€ SMS verification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
         <>
           <div className="text-center mb-6">
             <span className="inline-flex w-14 h-14 bg-primary-50 text-primary-600 rounded-2xl items-center justify-center mb-3">
@@ -510,7 +550,7 @@ export default function Login() {
               <Icon name="warning" size={16} className="mt-0.5" />
               <span>
                 We could not text that number. Nothing is wrong with the number you
-                entered — this is a problem at our end.
+                entered â€” this is a problem at our end.
                 {' '}You can try Resend below, or sign in with an email address instead.
                 <button
                   type="button"
@@ -523,7 +563,7 @@ export default function Login() {
             </div>
           )}
 
-          {/* Development only — the API returns the code when it has no provider
+          {/* Development only â€” the API returns the code when it has no provider
               to send it with, so the flow can be finished locally. It cannot
               reach production: see `sms.echoCode`. */}
           {devCode && (
@@ -541,7 +581,7 @@ export default function Login() {
             {codeBoxes}
             {error && <p className="notice-error">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary btn-block">
-              {loading ? 'Verifying…' : 'Verify & continue'}
+              {loading ? 'Verifyingâ€¦' : 'Verify & continue'}
             </button>
           </form>
 
@@ -549,7 +589,7 @@ export default function Login() {
           {backButton(() => { setTab(entry); setError(''); }, 'Use a different number')}
         </>
       ) : tab === 'verify' ? (
-        /* ── Email verification ─────────────────────────────────────────── */
+        /* â”€â”€ Email verification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
         <>
           <div className="text-center mb-6">
             <span className="inline-flex w-14 h-14 bg-primary-50 text-primary-600 rounded-2xl items-center justify-center mb-3">
@@ -565,10 +605,14 @@ export default function Login() {
           {deliveryProblem && (
             <p className="notice-warning mb-4 text-left">
               <Icon name="warning" size={16} className="mt-0.5" />
+              {/* Says nothing about *when* the account was made: this screen is
+                  now reached both from signing up and from signing in to an
+                  account that was never verified, and "Your account was created"
+                  read as news to someone who made it a fortnight ago. */}
               <span>
-                Your account was created, but we could not send the code to that address.
-                Nothing you typed is wrong — this is a problem at our end. Try Resend in a
-                moment, and if it keeps failing{' '}
+                We could not send the code to that address. Nothing you typed is wrong â€”
+                this is a problem at our end. Your account is fine and still waiting for you.
+                Try Resend in a moment, and if it keeps failing{' '}
                 <a href="/contact" className="font-semibold underline">contact support</a>.
               </span>
             </p>
@@ -580,7 +624,7 @@ export default function Login() {
             {codeBoxes}
             {error && <p className="notice-error">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary btn-block">
-              {loading ? 'Verifying…' : 'Verify email'}
+              {loading ? 'Verifyingâ€¦' : 'Verify email'}
             </button>
           </form>
 
@@ -588,7 +632,7 @@ export default function Login() {
           {backButton(() => { setTab('register'); setError(''); }, 'Back')}
         </>
       ) : tab === 'forgot' ? (
-        /* ── Forgotten password, step 1 of 3 ────────────────────────────── */
+        /* â”€â”€ Forgotten password, step 1 of 3 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
         <>
           <div className="text-center mb-6">
             <h2 className="text-xl font-bold text-gray-900">Reset your password</h2>
@@ -613,14 +657,14 @@ export default function Login() {
             </label>
             {error && <p className="notice-error">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary btn-block">
-              {loading ? 'Sending…' : 'Send reset code'}
+              {loading ? 'Sendingâ€¦' : 'Send reset code'}
             </button>
           </form>
 
           {backButton(() => { setTab('login'); setError(''); })}
         </>
       ) : tab === 'reset-code' ? (
-        /* ── Forgotten password, step 2 of 3 ────────────────────────────── */
+        /* â”€â”€ Forgotten password, step 2 of 3 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
         <>
           <div className="text-center mb-6">
             <span className="inline-flex w-14 h-14 bg-primary-50 text-primary-600 rounded-2xl items-center justify-center mb-3">
@@ -638,7 +682,7 @@ export default function Login() {
             {codeBoxes}
             {error && <p className="notice-error">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary btn-block">
-              {loading ? 'Checking…' : 'Continue'}
+              {loading ? 'Checkingâ€¦' : 'Continue'}
             </button>
           </form>
 
@@ -646,7 +690,7 @@ export default function Login() {
           {backButton(() => { setTab('forgot'); setError(''); }, 'Use a different address')}
         </>
       ) : tab === 'reset-new' ? (
-        /* ── Forgotten password, step 3 of 3 ────────────────────────────── */
+        /* â”€â”€ Forgotten password, step 3 of 3 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
         <>
           <div className="text-center mb-6">
             <h2 className="text-xl font-bold text-gray-900">Choose a new password</h2>
@@ -680,22 +724,22 @@ export default function Login() {
             </p>
             {error && <p className="notice-error">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary btn-block">
-              {loading ? 'Saving…' : 'Reset password'}
+              {loading ? 'Savingâ€¦' : 'Reset password'}
             </button>
           </form>
 
           {backButton(() => { setTab('login'); setError(''); setResetToken(''); })}
         </>
       ) : (
-        /* ── Sign in / sign up ──────────────────────────────────────────── */
+        /* â”€â”€ Sign in / sign up â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
         <>
-          {/* No name or tagline here — AuthShell shows the mark above the card,
+          {/* No name or tagline here â€” AuthShell shows the mark above the card,
               and repeating it inside was the whole of what made this screen top
               heavy on a phone.
 
               Identifier, not step: switching this keeps you on the same screen
               and changes only which field proves who you are. */}
-          {/* Hidden entirely when the deployment cannot send an SMS — see
+          {/* Hidden entirely when the deployment cannot send an SMS â€” see
               `phoneAvailable`. One method left is not a choice, so the control
               that offers the choice goes with it. */}
           {phoneAvailable && (
@@ -760,7 +804,7 @@ export default function Login() {
                   <PasswordField
                     label="Password"
                     autoComplete={isRegister ? 'new-password' : 'current-password'}
-                    placeholder="••••••••"
+                    placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
                     required
@@ -775,8 +819,8 @@ export default function Login() {
                 onChange={setNational}
                 required
                 hint={isRegister
-                  ? 'We’ll text you a code to confirm this number. No password needed.'
-                  : 'We’ll text you a 6-digit code to sign in.'}
+                  ? 'Weâ€™ll text you a code to confirm this number. No password needed.'
+                  : 'Weâ€™ll text you a 6-digit code to sign in.'}
               />
             )}
 
@@ -810,7 +854,7 @@ export default function Login() {
                 />
                 {/* Links, not anchors. An anchor here is a full page load, so a
                     parent part-way through signing up who wanted to read what
-                    they were agreeing to came back to an empty form — including
+                    they were agreeing to came back to an empty form â€” including
                     the box they had just ticked. */}
                 <span>
                   I agree to the{' '}
@@ -825,7 +869,7 @@ export default function Login() {
 
             <button type="submit" disabled={loading} className="btn-primary btn-block">
               {loading
-                ? 'Please wait…'
+                ? 'Please waitâ€¦'
                 : (
                   <>
                     {isRegister ? 'Create Account' : 'Sign In'}
@@ -836,7 +880,7 @@ export default function Login() {
           </form>
 
           {/* The "or continue with" divider belongs to the button and renders
-              with it — see GoogleSignInButton. A copy here would be a heading
+              with it â€” see GoogleSignInButton. A copy here would be a heading
               over nothing wherever Google is not configured.
 
               One button for both tabs: the API registers on the first Google

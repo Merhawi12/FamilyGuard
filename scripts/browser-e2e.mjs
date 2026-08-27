@@ -732,6 +732,80 @@ try {
     await page.close();
   }
 
+  step('Family app — signing in unverified sends a code rather than only claiming to');
+  {
+    /*
+     * The screen this lands on says "We sent a 6-digit code to …", and on this
+     * path that sentence used to be false. Signing in to an account that was
+     * never verified only switched the tab: the newest code in existence was the
+     * one `register` issued, which expires after fifteen minutes — and through
+     * the weeks outbound mail was down, was never delivered at all.
+     *
+     * What made that worse than a stale sentence is what it drove people to do
+     * next. The only other control offering to email them anything is Forgot
+     * Password, so they arrived holding a *password reset* code on the *email
+     * verification* screen, where it does not work. Two codes, two purposes, and
+     * the one they were told to expect was the one nobody sent.
+     *
+     * The invariant is therefore about the request, not the digits: this screen
+     * may not claim a send it never attempted. Asserted that way deliberately —
+     * the account's own 60-second cooldown legitimately refuses a resend moments
+     * after signup, and a test demanding fresh digits would be asserting the
+     * throttle away.
+     */
+    const email = `unverified${stamp}@example.com`;
+    const page = await browser.newPage();
+    const w = watch(page, 'unverified sign-in');
+
+    await api('POST', '/auth/register', {
+      body: { name: 'Unverified Parent', email, password: PARENT_PASSWORD },
+    });
+
+    const asked = [];
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && r.url().includes('/auth/resend-code')) asked.push(r.url());
+    });
+
+    await page.goto(`${FAMILY}/login`, { waitUntil: 'networkidle' });
+    await page.fill('input[type="email"]', email);
+    await page.fill('input[type="password"]', PARENT_PASSWORD);
+    await page.click('button[type="submit"]');
+
+    const reached = await page.getByRole('heading', { name: 'Check your email' })
+      .waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+    check('an unverified sign-in reaches the verification screen', reached);
+
+    await page.waitForTimeout(900);
+    check('and a verification code is actually requested for it',
+      asked.length === 1, `${asked.length} resend-code requests`);
+
+    /*
+     * The refusal that request meets is the account's cooldown, which means a
+     * code went out seconds ago — so the sentence on screen is true and there is
+     * nothing to warn about. Reporting a cooldown as a delivery failure would
+     * send a parent to support over the system working.
+     */
+    const warned = await page.getByText('could not send the code', { exact: false })
+      .isVisible().catch(() => false);
+    check('a cooldown refusal is not reported as a delivery failure', warned === false);
+
+    /*
+     * 403 (unverified) and 429 (cooldown) are this flow working, not faults, so
+     * they are named rather than demanded away — `watch` records every response
+     * over 400 and a blanket zero here would be a test that could only pass by
+     * the feature being broken.
+     *
+     * Both spellings, because each of those responses is recorded twice: once by
+     * the `response` listener as `HTTP 429 <url>`, and again by the `console`
+     * one, since Chromium logs an unhandled 4xx as a page console error of its
+     * own ("Failed to load resource: … status of 429").
+     */
+    const unexpected = w.problems.filter((p) => !/^HTTP (403|429) |status of (403|429)/.test(p));
+    check('the unverified sign-in screen is otherwise clean',
+      unexpected.length === 0, unexpected.join(' | '));
+    await page.close();
+  }
+
   step('Family app — the alert bell reflects history, not just this session');
   {
     const badge = familyPage.locator('button[aria-label*="Alerts"]');
