@@ -9,7 +9,7 @@
 const request = require('supertest');
 const { app } = require('../src/app');
 const { Session } = require('../src/models');
-const { createUser, uniqueEmail, DEFAULT_PASSWORD } = require('./helpers');
+const { createUser, uniqueEmail, signIn: fullSignIn, DEFAULT_PASSWORD } = require('./helpers');
 const { hashTicket } = require('../src/utils/otp');
 
 jest.mock('../src/services/sms', () => ({
@@ -209,11 +209,17 @@ describe('the account holder is told when someone signs in from somewhere new', 
    * opened. Every notification was about the child, so a stolen password was
    * completely silent — the only record was an audit row visible to staff.
    */
-  const signIn = (email, agent) =>
-    request(app)
-      .post('/api/auth/login')
-      .set('User-Agent', agent)
-      .send({ email, password: DEFAULT_PASSWORD });
+  /*
+   * A whole sign-in, both requests, with the agent set on each.
+   *
+   * The notice is raised by whatever creates the session, and since every
+   * password sign-in is finished with an emailed code that is now
+   * `POST /auth/login/verify` rather than `POST /auth/login`. A helper that
+   * stopped at the password would create no session at all — and every
+   * assertion here would then pass by finding no notice for a sign-in that
+   * never happened.
+   */
+  const signIn = (email, agent) => fullSignIn(email, DEFAULT_PASSWORD, { userAgent: agent });
 
   it('says nothing on the first ever sign-in', async () => {
     // That is the person who just registered. Telling them their brand-new
@@ -221,7 +227,7 @@ describe('the account holder is told when someone signs in from somewhere new', 
     const email = uniqueEmail('signin-first');
     await createUser({ email });
 
-    await signIn(email, 'Chrome/Known').expect(200);
+    expect((await signIn(email, 'Chrome/Known')).status).toBe(200);
     await drainPendingSends();
 
     expect(sentTo(email).filter((m) => /new sign-in/i.test(m.subject))).toHaveLength(0);
@@ -231,9 +237,9 @@ describe('the account holder is told when someone signs in from somewhere new', 
     const email = uniqueEmail('signin-same');
     await createUser({ email });
 
-    await signIn(email, 'Chrome/Known').expect(200);
+    expect((await signIn(email, 'Chrome/Known')).status).toBe(200);
     mailer.send.mockClear();
-    await signIn(email, 'Chrome/Known').expect(200);
+    expect((await signIn(email, 'Chrome/Known')).status).toBe(200);
     await drainPendingSends();
 
     expect(sentTo(email).filter((m) => /new sign-in/i.test(m.subject))).toHaveLength(0);
@@ -243,10 +249,10 @@ describe('the account holder is told when someone signs in from somewhere new', 
     const email = uniqueEmail('signin-new');
     await createUser({ email });
 
-    await signIn(email, 'Chrome/Known').expect(200);
+    expect((await signIn(email, 'Chrome/Known')).status).toBe(200);
     await drainPendingSends();
     mailer.send.mockClear();
-    await signIn(email, 'Firefox/Stranger').expect(200);
+    expect((await signIn(email, 'Firefox/Stranger')).status).toBe(200);
     await drainPendingSends();
 
     const notices = sentTo(email).filter((m) => /new sign-in/i.test(m.subject));
@@ -265,7 +271,7 @@ describe('the account holder is told when someone signs in from somewhere new', 
      */
     const email = uniqueEmail('signin-verify');
     const user = await createUser({ email });
-    await signIn(email, 'Chrome/Known').expect(200);
+    expect((await signIn(email, 'Chrome/Known')).status).toBe(200);
     await drainPendingSends();
 
     // What `updateProfile` leaves behind after an address change.
@@ -289,10 +295,19 @@ describe('the account holder is told when someone signs in from somewhere new', 
   it('does not fail the sign-in when the notice cannot be delivered', async () => {
     const email = uniqueEmail('signin-mailfail');
     await createUser({ email });
-    await signIn(email, 'Chrome/Known').expect(200);
+    expect((await signIn(email, 'Chrome/Known')).status).toBe(200);
     await drainPendingSends();
 
-    mailer.send.mockResolvedValue(false);
+    /*
+     * Only the notice fails, not every message.
+     *
+     * A blanket `mockResolvedValue(false)` also breaks the emailed sign-in
+     * code, and *that* failure is supposed to refuse the session — a second
+     * factor that stops applying when the mail relay is sick is no factor at
+     * all. Failing the one subject under test keeps this about what it says it
+     * is about: a notice nobody is waiting on must not take the sign-in with it.
+     */
+    mailer.send.mockImplementation(async (msg) => !/new sign-in/i.test(msg?.subject || ''));
     const res = await signIn(email, 'Firefox/Stranger');
 
     expect(res.status).toBe(200);
@@ -304,7 +319,7 @@ describe('a password that changes is confirmed to its owner', () => {
   it('emails the holder when they change it themselves', async () => {
     const email = uniqueEmail('pw-changed');
     const user = await createUser({ email });
-    const login = await request(app).post('/api/auth/login').send({ email, password: DEFAULT_PASSWORD });
+    const login = await fullSignIn(email);
 
     await request(app)
       .put('/api/auth/password')

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   useAuth, auth as authApi, payments, errorMessage, EmptyState, Icon, Toggle, TwoFactorSetup,
-  PLAN_CATALOGUE, planLabel, isPaidPlan,
+  PLAN_CATALOGUE, planLabel, isPaidPlan, clearTrustedDeviceToken,
 } from '@parentix/shared';
 import PageIntro from '../components/PageIntro';
 import PushSettings from '../components/PushSettings';
@@ -109,10 +109,24 @@ export default function Settings() {
    */
   const [billingAvailable, setBillingAvailable] = useState(true);
 
+  /**
+   * Whether this deployment confirms a password sign-in with an emailed code.
+   *
+   * Starts false and is only ever turned on by an explicit answer, which is the
+   * opposite default from `billingAvailable` above and for the opposite reason:
+   * that one hides a way to pay, this one *describes* a step. Claiming a second
+   * factor that a deployment has switched off would be the expensive mistake
+   * here, so silence means nothing is said.
+   */
+  const [loginCodeOn, setLoginCodeOn] = useState(false);
+
   useEffect(() => {
     payments.getSubscription().then((r) => setSubscription(r.data)).catch(() => {});
     authApi.providers()
-      .then((r) => { if (r.data?.billing === false) setBillingAvailable(false); })
+      .then((r) => {
+        if (r.data?.billing === false) setBillingAvailable(false);
+        if (r.data?.loginCode === true) setLoginCodeOn(true);
+      })
       .catch(() => {});
     loadNotifPrefs();
   }, [loadNotifPrefs]);
@@ -149,6 +163,10 @@ export default function Settings() {
         newPassword: passwords.next,
       });
       setPasswords({ current: '', next: '', confirm: '' });
+      // A password change withdraws every "remember this device" claim on the
+      // account — the API does that end. Dropping the local copy keeps this
+      // browser from presenting a credential that is already dead.
+      clearTrustedDeviceToken();
       // A password change now signs out every other session, so say which — a
       // parent who changed it because they suspected someone else was in the
       // account needs to see that the someone else was actually evicted.
@@ -161,6 +179,37 @@ export default function Settings() {
     }
   };
 
+  /**
+   * A checkout that failed because this deployment's Stripe setup is wrong
+   * withdraws the offer, rather than reporting the failure under a button that
+   * repeats it.
+   *
+   * `billingAvailable` is answered once, at mount, by `/auth/providers` — and
+   * that flag can only see whether a key is *present*. A key that is present and
+   * revoked, belongs to another account, or names a price that has been archived
+   * all pass it and then fail here, which is how the plan screen ends up saying
+   * "payments are not set up correctly on this deployment" directly above
+   * "Upgrade to Premium Plan". The button is an invitation to reproduce the
+   * error, and pressing it is the only way to find out it will not work.
+   *
+   * `configurationError` is the API's own flag for that class (a Stripe
+   * authentication failure, or a price it does not recognise) as opposed to a
+   * network fault, which is worth retrying and leaves the button alone. Once it
+   * arrives, the page knows what `/auth/providers` could not tell it, and moves
+   * to the state it should have started in — no purchase controls, and the
+   * standing notice explaining why.
+   *
+   * The message is cleared with it: that notice says the same thing, and two
+   * sentences saying it is the duplicate the code screen already learned not to
+   * print.
+   */
+  const withdrawIfMisconfigured = (err) => {
+    if (!err.response?.data?.configurationError) return false;
+    setBillingAvailable(false);
+    setPlanError('');
+    return true;
+  };
+
   const handleUpgrade = async (plan) => {
     setLoadingPlan(plan);
     setPlanError('');
@@ -168,7 +217,9 @@ export default function Settings() {
       const res = await payments.createCheckoutSession(plan);
       window.location.href = res.data.url;
     } catch (err) {
-      setPlanError(errorMessage(err, 'Could not start checkout.'));
+      if (!withdrawIfMisconfigured(err)) {
+        setPlanError(errorMessage(err, 'Could not start checkout.'));
+      }
       setLoadingPlan(null);
     }
   };
@@ -180,7 +231,9 @@ export default function Settings() {
       const res = await payments.customerPortal();
       window.location.href = res.data.url;
     } catch (err) {
-      setPlanError(errorMessage(err, 'Could not open the billing portal.'));
+      if (!withdrawIfMisconfigured(err)) {
+        setPlanError(errorMessage(err, 'Could not open the billing portal.'));
+      }
       setPortalLoading(false);
     }
   };
@@ -297,6 +350,39 @@ export default function Settings() {
                 </button>
               </form>
             </div>
+
+            {/*
+              * The second factor everybody already has, said out loud.
+              *
+              * It is applied by the API to every password sign-in and was
+              * described nowhere in the product: a parent met it for the first
+              * time as an unexplained code screen, and the only thing on this
+              * page called a second factor was the authenticator below — which
+              * *replaces* it rather than adding to it. Two undocumented factors
+              * with an either/or between them is how a security feature gets
+              * read as a fault.
+              *
+              * Only for accounts that actually get it. An account with an
+              * authenticator is challenged for that instead, and one signed in
+              * with Google or a phone number is not challenged at all, so this
+              * would be describing a step those parents never see.
+              */}
+            {loginCodeOn && user?.email && !user?.mfaEnabled && (
+              <div className="card">
+                <h2 className="section-title mb-1">Sign-in codes</h2>
+                <p className="text-sm text-gray-500">
+                  When you sign in with your password, we email a 6-digit code to{' '}
+                  <span className="font-medium text-gray-700 break-all">{user.email}</span>{' '}
+                  and ask for it before opening the account. You can tick
+                  &ldquo;Trust this device&rdquo; on that screen to skip it for 30 days on the
+                  phone or computer you are using.
+                </p>
+                <p className="text-sm text-gray-500 mt-2">
+                  Changing your password, or signing other devices out below, asks every
+                  device for a code again.
+                </p>
+              </div>
+            )}
 
             <TwoFactorSetup />
 

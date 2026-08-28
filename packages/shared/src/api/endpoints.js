@@ -21,6 +21,19 @@ export const auth = {
   resendCode: (data) => api.post('/auth/resend-code', data),
   login: (data) => api.post('/auth/login', data),
   /**
+   * The emailed second factor that finishes a password sign-in.
+   *
+   * `login` answers `{ loginCodeRequired, preAuthToken, email }` instead of a
+   * session whenever this deployment has the factor on; these two calls are the
+   * rest of it. `verifyLoginCode` takes `{ preAuthToken, code, rememberDevice }`
+   * and returns the session — plus a `trustedDeviceToken` when the box was
+   * ticked. `resendLoginCode` takes the pre-auth token alone: the caller has
+   * already proved the password, so there is no address to re-supply and no way
+   * to aim the message at somebody else's inbox.
+   */
+  verifyLoginCode: (data) => api.post('/auth/login/verify', data),
+  resendLoginCode: (data) => api.post('/auth/login/resend', data),
+  /**
    * Sign in with Google. `credential` is the ID token Google Identity Services
    * hands the page — the API verifies its signature and audience, so nothing
    * here has to be trusted. Registers on first use and signs in thereafter.

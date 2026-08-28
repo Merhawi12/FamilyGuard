@@ -457,7 +457,11 @@ export default function AdminOverview() {
         <div className="card">
           <h2 className="section-title mb-4">Signups (last 30 days)</h2>
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={signupData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+            {/* `left: 0`. A negative margin moves the tick labels off the left
+                edge of the SVG, where they are cut rather than shrunk — 16px of
+                usable width drew a three-figure signup count as its last two
+                digits. Same trap as the family app's screen-time chart. */}
+            <BarChart data={signupData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
               <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} />
               <YAxis
                 axisLine={false} tickLine={false} allowDecimals={false} width={40}

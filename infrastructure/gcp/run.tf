@@ -209,6 +209,14 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "ADMIN_EMAIL"
         value = var.admin_email
       }
+      # The emailed second factor on password sign-in. Present here rather than
+      # left to the API's default because the whole point of it being a switch
+      # is that an operator can reach it during a mail outage — see
+      # `login_code_required` in variables.tf.
+      env {
+        name  = "LOGIN_CODE_REQUIRED"
+        value = var.login_code_required ? "1" : "0"
+      }
 
       dynamic "env" {
         for_each = {

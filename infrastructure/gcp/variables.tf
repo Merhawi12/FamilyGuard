@@ -328,6 +328,29 @@ variable "admin_email" {
   default     = "support@parentix.ca"
 }
 
+variable "login_code_required" {
+  description = <<-EOT
+    Whether a password sign-in is finished with a code emailed to the account.
+
+    On by default, and it should stay on. It exists as a variable because it
+    couples *all* password sign-in to the mail relay, and this deployment has
+    lost that relay for weeks at a time. While outbound mail is down, leaving
+    this on means nobody can sign in at all: the code is generated, written to
+    the Cloud Run log, and delivered to nobody.
+
+    So the choice during an outage is between no sign-ins and password-only
+    sign-ins, and that is an operator's decision to make deliberately rather
+    than one the code should make for them. Turning it off is visible from
+    outside — `GET /auth/providers` reports it and the boot log states it — and
+    the API logs an error at startup if it is on with no relay configured.
+
+    Accounts with an authenticator app are unaffected either way: they are
+    challenged for that instead, and never for an emailed code.
+  EOT
+  type        = bool
+  default     = true
+}
+
 # ── Monitoring ───────────────────────────────────────────────────────────────
 
 variable "alert_email" {

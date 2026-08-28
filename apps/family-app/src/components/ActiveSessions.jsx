@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { auth as authApi, errorMessage, timeAgo, EmptyState, Icon } from '@parentix/shared';
+import {
+  auth as authApi, errorMessage, timeAgo, EmptyState, Icon, clearTrustedDeviceToken,
+} from '@parentix/shared';
 
 /**
  * Where this account is signed in, and how to end any of it.
@@ -84,6 +86,10 @@ export default function ActiveSessions() {
     setBusy('others'); setError(''); setMessage('');
     try {
       const res = await authApi.revokeOtherSessions();
+      // The server has stopped honouring every "remember this device" claim on
+      // the account, this browser's included, so the copy here is dead — kept
+      // only long enough to be sent once and refused.
+      if (res.data?.trustedDevicesRevoked) clearTrustedDeviceToken();
       setMessage(res.data?.message || 'Other devices have been signed out.');
       await load();
     } catch (err) {

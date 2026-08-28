@@ -20,17 +20,31 @@ const {
   ScreenTimeRule, ScreenTimeGrant, Message, Contact, Alert, SafeZone, Notification,
   AuditLog, ContactMessage,
 } = require('../src/models');
-const { createUser, createChild, createDevice, DEFAULT_PASSWORD } = require('./helpers');
+const {
+  createUser, createChild, createDevice, signIn: fullSignIn, DEFAULT_PASSWORD,
+} = require('./helpers');
 
-const signIn = (email, agent = 'Chrome/Test') =>
-  request(app).post('/api/auth/login').set('User-Agent', agent).send({ email, password: DEFAULT_PASSWORD });
+/**
+ * One sign-in, both steps.
+ *
+ * These suites want *a session on a named device* — the user agent is what makes
+ * two of them distinguishable in the session list below. Since every password
+ * sign-in is finished with an emailed code, that is two requests, and the agent
+ * has to be set on both or the session is recorded against the wrong device.
+ * `helpers.signIn` does exactly that.
+ */
+const signIn = (email, agent = 'Chrome/Test', password = DEFAULT_PASSWORD) =>
+  fullSignIn(email, password, { userAgent: agent });
 
 describe('an account holder can see where their account is signed in', () => {
   it('lists a session per device, marking the one asking', async () => {
     const user = await createUser();
 
-    const first = await signIn(user.email, 'Chrome/Laptop').expect(200);
-    await signIn(user.email, 'Firefox/Phone').expect(200);
+    // Awaited responses rather than supertest's chained `.expect(200)`: a
+    // sign-in is two requests now, so the helper hands back a plain response.
+    const first = await signIn(user.email, 'Chrome/Laptop');
+    expect(first.status).toBe(200);
+    expect((await signIn(user.email, 'Firefox/Phone')).status).toBe(200);
 
     const res = await request(app)
       .get('/api/auth/sessions')
@@ -291,9 +305,7 @@ describe('an account with no password can set one', () => {
       .send({ newPassword: 'brand-new-pw-9' })
       .expect(200);
 
-    const login = await request(app)
-      .post('/api/auth/login')
-      .send({ email: user.email, password: 'brand-new-pw-9' });
+    const login = await signIn(user.email, 'Chrome/Test', 'brand-new-pw-9');
 
     expect(login.status).toBe(200);
     expect(login.body.token).toEqual(expect.any(String));

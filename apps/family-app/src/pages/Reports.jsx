@@ -146,9 +146,12 @@ export default function Reports() {
           <div className="card">
             <h2 className="section-title mb-4">Screen time by day</h2>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={weeklyChartData} margin={{ top: 4, right: 4, left: -22, bottom: 0 }}>
+              {/* `left: 0` — a negative margin here cuts the leading digits off
+                  the minute labels and turns "105m" into "5m". See the note in
+                  components/WeeklyUsageChart.jsx. */}
+              <BarChart data={weeklyChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} />
-                <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} width={48} />
+                <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} width={46} />
                 <Tooltip cursor={{ fill: '#f3f4f6' }} contentStyle={TOOLTIP_STYLE} />
                 <Bar dataKey="minutes" fill={PRIMARY} radius={[6, 6, 0, 0]} maxBarSize={40} />
               </BarChart>

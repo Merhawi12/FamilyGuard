@@ -1,7 +1,7 @@
 const request = require('supertest');
 const { app } = require('../src/app');
 const { User, Session } = require('../src/models');
-const { createUser, tokenFor, DEFAULT_PASSWORD } = require('./helpers');
+const { createUser, tokenFor, signIn, DEFAULT_PASSWORD } = require('./helpers');
 
 const bearer = (u) => ({ Authorization: `Bearer ${tokenFor(u)}` });
 
@@ -67,7 +67,7 @@ describe('Admin user management', () => {
     const admin = await createUser({ role: 'super_admin' });
     const client = await createUser({ role: 'parent' });
     // Give the client a live session.
-    const login = await request(app).post('/api/auth/login').send({ email: client.email, password: DEFAULT_PASSWORD });
+    const login = await signIn(client.email);
     expect(login.body.token).toBeTruthy();
 
     const block = await request(app).patch(`/api/admin/clients/${client.id}/toggle-block`).set(bearer(admin));
@@ -104,7 +104,7 @@ describe('Admin sessions', () => {
   it('lists active sessions and force-logout-user revokes the token', async () => {
     const admin = await createUser({ role: 'super_admin' });
     const user = await createUser({ role: 'parent' });
-    const login = await request(app).post('/api/auth/login').send({ email: user.email, password: DEFAULT_PASSWORD });
+    const login = await signIn(user.email);
     const userToken = login.body.token;
 
     // The session-backed token works before revocation.

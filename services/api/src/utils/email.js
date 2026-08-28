@@ -63,6 +63,35 @@ const sendVerificationEmail = ({ name, email, code }) => {
 };
 
 /**
+ * The sign-in code — a second factor everybody gets.
+ *
+ * Deliberately worded around the thing the recipient can act on: if they are not
+ * signing in, someone else has their password, and the useful instruction is to
+ * change it rather than to ignore the message. That is the opposite of the
+ * verification and reset mails above, where "you can ignore this" is right,
+ * because those are reached by typing an address anyone could type. This one is
+ * only ever sent after a correct password.
+ */
+const sendLoginCodeEmail = ({ name, email, code }) => {
+  if (!isEnabled()) {
+    logger.info('Login code (email disabled)', { email, code });
+    return Promise.resolve(false);
+  }
+  return send({
+    to: email,
+    subject: 'Your Parentix sign-in code',
+    html: layout(`
+      <h2>Hi ${escapeHtml(name)},</h2>
+      <p>Enter this code to finish signing in to Parentix:</p>
+      <h1 style="letter-spacing:8px;font-size:40px;color:#4F46E5">${escapeHtml(code)}</h1>
+      <p>This code expires in <strong>15 minutes</strong> and can be used once.</p>
+      <p><strong>If you are not signing in right now, someone else has your password.</strong>
+         Change it as soon as you can — this code alone will not let them in.</p>
+    `),
+  });
+};
+
+/**
  * A code, where there used to be a link.
  *
  * A reset link is a credential in a URL: it is logged by every mail gateway and
@@ -244,6 +273,7 @@ module.exports = {
   sendWelcomeEmail,
   sendAdminRegistrationNotification,
   sendVerificationEmail,
+  sendLoginCodeEmail,
   sendAlertEmail,
   sendContactFormEmail,
   sendContactFormReceiptEmail,

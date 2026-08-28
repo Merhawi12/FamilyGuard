@@ -262,6 +262,21 @@ printf 'apikey'            | gcloud secrets versions add parentix-$ENV-smtp-user
 printf 'SG.…'              | gcloud secrets versions add parentix-$ENV-smtp-pass --data-file=-
 ```
 
+> **The SMTP credential now gates sign-in, not just signup and reset.** Every
+> password sign-in is finished with a 6-digit code emailed to the account
+> (`LOGIN_CODE_REQUIRED`, on by default). With no working relay the code is
+> written to the Cloud Run log and delivered to nobody, so **no one can sign in
+> at all** — the API says so with an error at boot, and `GET /api/auth/providers`
+> reports `loginCode: true` whether or not mail works.
+>
+> So verify mail *before* releasing an API that has this on, with
+> `scripts/setup-google-mail.sh <address> --deploy` — it authenticates against
+> Gmail before storing anything, because every mail outage here has been a
+> credential stored without being tested. If mail is down and a release cannot
+> wait, set `login_code_required = false` in the environment's tfvars and apply;
+> password sign-in then works as it did before. Accounts with an authenticator
+> app are unaffected either way, and so are Google and phone sign-in.
+
 Push notifications to a parent's browser need a VAPID keypair. Generate it once
 and add both halves:
 

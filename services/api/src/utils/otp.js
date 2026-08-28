@@ -79,6 +79,10 @@ const PURPOSES = {
   email: { code: 'emailVerificationCode', expires: 'emailVerificationExpires' },
   phone: { code: 'phoneVerificationCode', expires: 'phoneVerificationExpires' },
   reset: { code: 'passwordResetCode', expires: 'passwordResetCodeExpires' },
+  // The second factor on a password sign-in. Separate storage for the same
+  // reason as the rest: somebody part-way through verifying their address can
+  // also be part-way through signing in, and one must not clear the other.
+  login: { code: 'loginCode', expires: 'loginCodeExpires' },
 };
 
 const columnsFor = (purpose) => {

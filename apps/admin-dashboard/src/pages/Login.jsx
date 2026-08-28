@@ -3,9 +3,18 @@ import { Navigate } from 'react-router-dom';
 import { useAuth, errorMessage, isStaff, BrandLogo } from '@parentix/shared';
 
 export default function Login() {
-  const { user, loading, login, completeMfa } = useAuth();
+  const { user, loading, login, completeMfa, completeLoginCode, resendLoginCode } = useAuth();
   const [form, setForm] = useState({ email: '', password: '' });
   const [mfa, setMfa] = useState({ required: false, preAuthToken: '', code: '' });
+  /**
+   * The emailed second factor, which staff get exactly like parents do — the API
+   * applies it to every password sign-in, so a console that only knew about
+   * authenticator codes would answer the challenge by doing nothing at all.
+   */
+  const [emailCode, setEmailCode] = useState({
+    required: false, preAuthToken: '', address: '', code: '', remember: false,
+  });
+  const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -18,6 +27,15 @@ export default function Login() {
     try {
       const result = await login(form.email.trim(), form.password);
       if (result.mfaRequired) setMfa({ required: true, preAuthToken: result.preAuthToken, code: '' });
+      else if (result.loginCodeRequired) {
+        setEmailCode({
+          required: true,
+          preAuthToken: result.preAuthToken,
+          address: result.email || '',
+          code: '',
+          remember: false,
+        });
+      }
     } catch (err) {
       setError(errorMessage(err, 'Sign in failed. Check your email and password.'));
     } finally {
@@ -35,6 +53,40 @@ export default function Login() {
       setError(errorMessage(err, 'That code was not accepted.'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const submitEmailCode = async (e) => {
+    e.preventDefault();
+    setError('');
+    setNotice('');
+    setBusy(true);
+    try {
+      await completeLoginCode(emailCode.preAuthToken, emailCode.code.trim(), emailCode.remember);
+    } catch (err) {
+      // An expired ticket cannot be retyped past — say so rather than letting a
+      // correct code be entered until the account locks.
+      if (err.response?.status === 401 && /pre-auth/i.test(err.response.data?.error || '')) {
+        setEmailCode({ required: false, preAuthToken: '', address: '', code: '', remember: false });
+        setError('That sign-in attempt timed out. Enter your password again for a new code.');
+        return;
+      }
+      setError(errorMessage(err, 'That code was not accepted.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resendEmailCode = async () => {
+    setError('');
+    setNotice('');
+    try {
+      const data = await resendLoginCode(emailCode.preAuthToken);
+      setNotice(data?.emailDelivered === false
+        ? 'We could not send that code. Check the mail relay for this deployment.'
+        : 'A new code is on its way.');
+    } catch (err) {
+      setError(errorMessage(err, 'Could not resend the code.'));
     }
   };
 
@@ -83,8 +135,51 @@ export default function Login() {
         <p className="text-sm text-gray-500 mb-5">Staff access only. Sign in to continue.</p>
 
         {error && <p className="notice-error mb-4">{error}</p>}
+        {notice && <p className="notice-success mb-4">{notice}</p>}
 
-        {mfa.required ? (
+        {emailCode.required ? (
+          <form onSubmit={submitEmailCode} className="space-y-4">
+            <div>
+              <label htmlFor="login-code" className="block text-sm font-medium text-gray-700 mb-1">
+                Sign-in code
+              </label>
+              <input
+                id="login-code"
+                className="input tracking-[0.4em] text-center"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus
+                maxLength={6}
+                value={emailCode.code}
+                onChange={(e) => setEmailCode((c) => ({ ...c, code: e.target.value }))}
+                required
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                We emailed a 6-digit code to {emailCode.address || 'your address'}.
+              </p>
+            </div>
+            <label className="flex items-start gap-2 text-sm text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={emailCode.remember}
+                onChange={(e) => setEmailCode((c) => ({ ...c, remember: e.target.checked }))}
+                className="mt-0.5 w-4 h-4 shrink-0 rounded border-gray-300 text-navy-700"
+              />
+              <span>Trust this device for 30 days</span>
+            </label>
+            <button type="submit" className="btn-primary btn-block" disabled={busy}>
+              {busy ? 'Verifying…' : 'Verify'}
+            </button>
+            <button
+              type="button"
+              onClick={resendEmailCode}
+              className="btn-ghost btn-sm btn-block"
+              disabled={busy}
+            >
+              Resend code
+            </button>
+          </form>
+        ) : mfa.required ? (
           <form onSubmit={submitMfa} className="space-y-4">
             <div>
               <label htmlFor="code" className="block text-sm font-medium text-gray-700 mb-1">

@@ -16,11 +16,25 @@ const { stripe } = require('../services/billing');
 // from the entitlement table and bill for features nothing granted.
 const CHECKOUT_PLANS = Object.fromEntries(
   PAID_PLAN_KEYS.map((key) => [key, {
-    priceId: env.stripe[PLAN_CATALOGUE[key].priceEnv],
     name: PLAN_CATALOGUE[key].label,
     amount: PLAN_CATALOGUE[key].amount,
   }])
 );
+
+/**
+ * The Stripe price a plan sells at, read when it is needed rather than copied
+ * into the map above at import.
+ *
+ * The map used to carry it, which made the price this file believed in a
+ * snapshot of the configuration as it stood when the module was first required.
+ * Nothing in production changes it afterwards, so that was harmless there and
+ * quietly awkward everywhere else: it is why the "plan with no price" branch
+ * could not be reached without resetting the module graph, and the same reason
+ * `billingAvailability.test.js` can vary `env.stripe` and this could not.
+ * Reading it here costs one property lookup on a path that is about to make an
+ * HTTPS request to Stripe.
+ */
+const priceIdFor = (key) => env.stripe[PLAN_CATALOGUE[key].priceEnv];
 
 /**
  * Which plan a Stripe price grants.
@@ -35,7 +49,7 @@ const CHECKOUT_PLANS = Object.fromEntries(
  * but it is logged, since it means a Stripe price nobody configured here.
  */
 const planForPrice = (priceId) => {
-  const known = PAID_PLAN_KEYS.find((key) => priceId && CHECKOUT_PLANS[key].priceId === priceId);
+  const known = PAID_PLAN_KEYS.find((key) => priceId && priceIdFor(key) === priceId);
   if (known) return known;
   if (priceId && priceId !== env.stripe.legacyFamilyPriceId) {
     logger.warn('Stripe subscription on an unrecognised price — defaulting to premium', { priceId });
@@ -82,11 +96,22 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
 
   const { plan } = req.body;
   if (!CHECKOUT_PLANS[plan]) return res.status(400).json({ error: 'Invalid plan' });
-  if (!CHECKOUT_PLANS[plan].priceId) {
+  if (!priceIdFor(plan)) {
     // A plan with no Stripe price would send the customer to a checkout that
     // fails on Stripe's side with nothing to explain it.
+    //
+    // Flagged as a configuration fault like the Stripe failures below, because
+    // that is exactly what it is — and the flag is what tells the plan screen to
+    // stop offering a purchase it cannot complete. Without it this branch was
+    // the one way to reach a permanently-failing Upgrade button that survived
+    // being pressed: a key good enough to pass `/auth/providers` plus a price ID
+    // that is missing or the wrong kind of value, which is one careless paste
+    // apart from a working setup.
     logger.error('Checkout attempted for a plan with no Stripe price configured', { plan });
-    return res.status(503).json({ error: 'That plan is not available for purchase right now' });
+    return res.status(503).json({
+      error: 'That plan is not available for purchase right now',
+      configurationError: true,
+    });
   }
 
   try {
@@ -109,7 +134,7 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
-      line_items: [{ price: CHECKOUT_PLANS[plan].priceId, quantity: 1 }],
+      line_items: [{ price: priceIdFor(plan), quantity: 1 }],
       mode: 'subscription',
       success_url: `${env.clientUrl}/dashboard/settings?payment=success`,
       cancel_url:  `${env.clientUrl}/dashboard/settings?payment=cancelled`,

@@ -1,7 +1,9 @@
 const request = require('supertest');
 const { app } = require('../src/app');
 const { User } = require('../src/models');
-const { createUser, tokenFor, uniqueEmail, DEFAULT_PASSWORD, seedResetCode } = require('./helpers');
+const {
+  createUser, tokenFor, uniqueEmail, signIn, DEFAULT_PASSWORD, seedResetCode,
+} = require('./helpers');
 
 describe('Auth', () => {
   describe('POST /api/auth/register', () => {
@@ -60,11 +62,22 @@ describe('Auth', () => {
       expect(res.body.emailVerificationRequired).toBe(true);
     });
 
-    it('logs in a verified user and returns a token', async () => {
+    it('answers a correct password with a challenge, not a session', async () => {
+      // The password is the first factor now, not the whole of it. What comes
+      // back is a five-minute ticket and the masked address the code went to;
+      // `loginCode.test.js` covers the rest of that flow.
       const user = await createUser();
       const res = await request(app)
         .post('/api/auth/login')
         .send({ email: user.email, password: DEFAULT_PASSWORD });
+      expect(res.status).toBe(200);
+      expect(res.body.loginCodeRequired).toBe(true);
+      expect(res.body.token).toBeUndefined();
+    });
+
+    it('logs in a verified user and returns a token', async () => {
+      const user = await createUser();
+      const res = await signIn(user.email);
       expect(res.status).toBe(200);
       expect(typeof res.body.token).toBe('string');
       expect(res.body.user.email).toBe(user.email);

@@ -121,6 +121,33 @@ const call = async (method, urlPath, { token, body } = {}) => {
   return { status: res.status, data };
 };
 
+/**
+ * A whole password sign-in, second factor and all.
+ *
+ * `POST /auth/login` answers a correct password with a challenge; the code goes
+ * to the address on the account, which with no mail relay here means the server
+ * log — the same place this file already reads verification codes from.
+ *
+ * Only the staff sign-in below needs it. Everything else in this harness is a
+ * *device*, and a device authenticates with the token a link code bought it,
+ * which no second factor touches.
+ */
+const signIn = async (address, secret) => {
+  const first = await call('POST', '/auth/login', { body: { email: address, password: secret } });
+  if (!first.data?.loginCodeRequired) return first;
+
+  // The last match, not the first: one address can have several codes in the
+  // buffer, and only the newest is live.
+  const pattern = new RegExp(`Login code[^\\n]*"email":"${address}","code":"(\\d{6})"`, 'g');
+  const digits = await waitFor(
+    () => [...serverOutput.matchAll(pattern)].at(-1)?.[1],
+    'the sign-in code in the server log',
+  );
+  return call('POST', '/auth/login/verify', {
+    body: { preAuthToken: first.data.preAuthToken, code: digits },
+  });
+};
+
 const cleanup = () => {
   server.kill('SIGTERM');
   setTimeout(() => server.kill('SIGKILL'), 3000).unref();
@@ -1422,7 +1449,7 @@ const run = async () => {
     env: { ...process.env, ADMIN_PASSWORD: adminPass, DATABASE_URL: '', DB_PATH: path.join(dataDir, 'child-e2e.sqlite'), NODE_ENV: 'development' },
     encoding: 'utf8',
   });
-  const adminLogin = await call('POST', '/auth/login', { body: { email: adminEmail, password: adminPass } });
+  const adminLogin = await signIn(adminEmail, adminPass);
   const adminToken = adminLogin.data?.token;
   check('a staff account can sign in', !!adminToken);
 

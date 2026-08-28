@@ -16,6 +16,27 @@ export const getToken = () => localStorage.getItem(tokenKey);
 export const setToken = (token) => localStorage.setItem(tokenKey, token);
 export const clearToken = () => localStorage.removeItem(tokenKey);
 
+/**
+ * "Don't ask me for a sign-in code on this browser again."
+ *
+ * A 30-day claim the API mints when someone ticks the box on the code screen,
+ * and presents on the next `POST /auth/login` so the challenge is skipped. It is
+ * bound to one account and useless without the password; the API refuses it
+ * after a password change or reset.
+ *
+ * Derived from `tokenKey` rather than given its own setter, so the Admin Console
+ * and the Family App keep separate ones for free and neither app can forget to
+ * name it. Deliberately *not* cleared by `clearToken`: skipping the code after
+ * signing out and back in is the case it exists for, and clearing it on logout
+ * would push an ordinary parent into the five-sends-an-hour ceiling. Only a
+ * password change clears it, and the API does that end.
+ */
+const trustedDeviceKey = () => `${tokenKey}_trusted_device`;
+
+export const getTrustedDeviceToken = () => localStorage.getItem(trustedDeviceKey());
+export const setTrustedDeviceToken = (token) => localStorage.setItem(trustedDeviceKey(), token);
+export const clearTrustedDeviceToken = () => localStorage.removeItem(trustedDeviceKey());
+
 /** Where to send the browser when a live session turns out to be dead. */
 let loginPath = '/login';
 
@@ -48,6 +69,9 @@ api.interceptors.request.use((config) => {
  * a wrong code is an answer to a question the form asked, not a dead session.
  */
 const AUTH_ATTEMPT_PATHS = [
+  // Covers `/auth/login`, `/auth/login/verify` and `/auth/login/resend` — the
+  // last two answer 401 for a wrong code or a challenge that has expired, and
+  // both are answers to a question the form asked rather than a dead session.
   '/auth/login',
   '/auth/register',
   '/auth/me',

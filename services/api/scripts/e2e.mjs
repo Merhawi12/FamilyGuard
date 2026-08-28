@@ -74,6 +74,54 @@ const waitFor = (predicate, { timeout = 8000, interval = 50, label = 'condition'
     tick();
   });
 
+/**
+ * A whole password sign-in, second factor and all.
+ *
+ * `POST /auth/login` answers a correct password with a challenge rather than a
+ * session, and the code goes to the address on the account — which, with no mail
+ * relay configured here, means it is written to the server log. That is the same
+ * route this file already takes for the signup and reset codes.
+ *
+ * The log is searched only from where it stood *before* the request, because by
+ * the second sign-in the buffer holds earlier codes for the same address and a
+ * first-match search would return one of those: a code that was already spent,
+ * refused, and impossible to tell apart from a broken second factor.
+ *
+ * Returns the login response untouched when no code was asked for, so a wrong
+ * password and a locked account come back exactly as they did.
+ */
+const signIn = async (address, secret) => {
+  const seen = serverOutput.length;
+  const first = await call('POST', '/auth/login', { body: { email: address, password: secret } });
+  if (!first.data?.loginCodeRequired) return first;
+
+  /**
+   * Where to look depends on whether this challenge sent anything.
+   *
+   * A sign-in inside the account's 60-second cooldown is answered with a
+   * challenge against the code *already* in flight — `codeAlreadySent` — and
+   * nothing new is logged, so a tail search finds nothing and times out. That is
+   * not a hypothetical: the check just above this one signs in on purpose to
+   * prove a password alone is not a session, which starts the cooldown, and the
+   * very next call lands in it.
+   *
+   * Otherwise the search is limited to what arrived after this request, because
+   * by the second sign-in the buffer holds earlier codes for the same address
+   * and an older one is indistinguishable from a broken second factor. The last
+   * match wins in both cases: it is the live code either way.
+   */
+  const pattern = new RegExp(`Login code[^\\n]*"email":"${address}","code":"(\\d{6})"`, 'g');
+  const from = first.data.codeAlreadySent ? 0 : seen;
+
+  const digits = await waitFor(
+    () => [...serverOutput.slice(from).matchAll(pattern)].at(-1)?.[1],
+    { label: 'the sign-in code in the server log' },
+  );
+  return call('POST', '/auth/login/verify', {
+    body: { preAuthToken: first.data.preAuthToken, code: digits },
+  });
+};
+
 const connectSocket = (token) =>
   new Promise((resolve, reject) => {
     const socket = io(BASE, { auth: { token }, transports: ['websocket'], reconnection: false });
@@ -178,8 +226,16 @@ const run = async () => {
   const badLogin = await call('POST', '/auth/login', { body: { email, password: 'wrong-password1' } });
   check('a wrong password is rejected', badLogin.status === 401, `got ${badLogin.status}`);
 
-  const login = await call('POST', '/auth/login', { body: { email, password } });
-  check('login returns a session token', login.status === 200 && !!login.data?.token);
+  // The password is the first factor, not the whole of it: what comes back here
+  // is a challenge, and the code sent to the address turns it into a session.
+  const challenge = await call('POST', '/auth/login', { body: { email, password } });
+  check('a correct password is answered with a code challenge, not a session',
+    challenge.status === 200 && challenge.data?.loginCodeRequired === true && !challenge.data?.token,
+    JSON.stringify(challenge.data));
+
+  const login = await signIn(email, password);
+  check('the emailed code completes the sign-in', login.status === 200 && !!login.data?.token,
+    JSON.stringify(login.data));
   // Reassigned after the password reset below, which revokes every session.
   let parentToken = login.data.token;
 
@@ -223,10 +279,10 @@ const run = async () => {
   });
   check('the ticket sets a new password', changed.status === 200, JSON.stringify(changed.data));
 
-  const oldPassword = await call('POST', '/auth/login', { body: { email, password } });
+  const oldPassword = await signIn(email, password);
   check('the old password stops working', oldPassword.status === 401, `got ${oldPassword.status}`);
 
-  const reLogin = await call('POST', '/auth/login', { body: { email, password: resetPassword } });
+  const reLogin = await signIn(email, resetPassword);
   check('the new password signs in', reLogin.status === 200 && !!reLogin.data?.token);
 
   // A reset revokes every session, this one included — everything below runs on

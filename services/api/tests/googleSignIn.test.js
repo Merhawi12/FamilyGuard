@@ -261,8 +261,14 @@ describe('what the sign-in page is told', () => {
     //
     // Still an exact match, so a field cannot appear here unnoticed — which is
     // how both of those arrived deliberately rather than by accident.
+    // `loginCode` joined it when the emailed second factor did, for the same
+    // reason as `maintenance`: the sign-in screen has to be able to say what is
+    // about to happen before anyone types a password, and an operator who has
+    // switched the factor off during a mail outage has to be able to see that
+    // from outside the container.
     expect(res.body).toEqual({
       password: true, google: true, phone: false, maintenance: false, billing: true,
+      loginCode: true,
     });
   });
 

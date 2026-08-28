@@ -20,9 +20,23 @@ import { PRIMARY } from '../brand';
 export default function WeeklyUsageChart({ data, height }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+      {/*
+        `left: 0`, not the negative margin that was here.
+
+        A negative left margin is the usual recharts trick for closing the gap
+        between the axis and the bars, and it does it by moving the whole chart
+        left — including the tick labels, which are then cut off by the edge of
+        the SVG. With `width={44}` and `left: -20` the labels had 24px, so a
+        four-figure value lost its leading digits *silently*: a week where the
+        axis ran to 140 minutes drew "140m, 105m, 70m, 35m, 0m" as
+        "0m, 5m, 0m, 5m, 0m". Not a clipped label — a wrong number, in the same
+        shape as a right one, on the screen a parent uses to judge how long their
+        child has been on a phone.
+      */}
+      <BarChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
         <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} />
-        <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} width={44} />
+        {/* Wide enough for a whole day: "1440m" is the longest label possible. */}
+        <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} width={46} />
         <Tooltip
           cursor={{ fill: '#f3f4f6' }}
           formatter={(v) => [`${v} min`, 'Screen time']}

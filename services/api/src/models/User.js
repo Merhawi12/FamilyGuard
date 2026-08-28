@@ -128,6 +128,30 @@ const User = sequelize.define('User', {
   passwordResetToken: { type: DataTypes.STRING },
   passwordResetExpires: { type: DataTypes.DATE },
   /**
+   * The code emailed on every password sign-in — a second factor everybody gets,
+   * rather than the one `mfaSecret` holds for people who went and set it up.
+   *
+   * Its own pair rather than reusing `emailVerificationCode`, for the reason the
+   * three purposes in utils/otp.js already have separate storage: a sign-in
+   * challenge and an address confirmation can legitimately be outstanding at the
+   * same moment — a parent who never finished verifying and then tries to sign
+   * in is exactly that case — and sharing a column would let the second overwrite
+   * the first, so completing one would silently invalidate the other.
+   */
+  loginCode: codeColumn('loginCode'),
+  loginCodeExpires: { type: DataTypes.DATE },
+  /**
+   * When this account's trusted browsers stopped being trusted.
+   *
+   * A trusted-device token is stateless — a signed 30-day claim held by the
+   * browser — which makes it fast and free to check, and impossible to withdraw
+   * one at a time. This is the blunt instrument that withdraws them all at once:
+   * anything issued at or before this instant is refused. Password changes and
+   * resets bump it, on the same reasoning that already revokes every other
+   * session there. Null means nothing has ever been revoked.
+   */
+  trustedDevicesRevokedAt: { type: DataTypes.DATE },
+  /**
    * Per-purpose counters for the code flows: how many have been sent, when the
    * last one went, and how many wrong guesses the live one has taken. TEXT
    * holding JSON — see `utils/otp.js` for the shape and for why it is not a

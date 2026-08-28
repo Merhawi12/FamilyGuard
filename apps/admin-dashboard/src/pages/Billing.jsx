@@ -138,7 +138,9 @@ function RevenueTrend({ summary, range, onRange }) {
           </p>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ top: 4, right: 4, left: -12, bottom: 0 }}>
+            {/* `left: 0` — the axis needs its whole declared width, or a money
+                label loses its leading digits. See Overview.jsx. */}
+            <BarChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
               <XAxis
                 dataKey="label" axisLine={false} tickLine={false} interval={tickInterval}
                 tick={{ fontSize: 11, fill: '#9ca3af' }}

@@ -134,6 +134,37 @@ describe('Payments', () => {
       expect(res.body.configurationError).toBe(true);
     });
 
+    it('reports a plan with no price as a configuration fault too', async () => {
+      /*
+       * The one configuration fault that never reaches Stripe, and so never went
+       * through `sendStripeFailure` with the others. A deployment in this state
+       * passes every check the plan screen can make — `/auth/providers` sees a
+       * key and reports `billing: true` — and then draws an Upgrade button that
+       * fails every single time it is pressed. It is one careless paste away
+       * from a working setup: this repo's own `.env` had a publishable key
+       * sitting in the price slot.
+       */
+      const { env } = require('../src/config/env');
+      const user = await createUser();
+      const saved = env.stripe.premiumPriceId;
+      env.stripe.premiumPriceId = '';
+
+      try {
+        const res = await request(app)
+          .post('/api/payments/create-checkout-session')
+          .set('Authorization', `Bearer ${tokenFor(user)}`)
+          .send({ plan: 'premium' });
+
+        expect(res.status).toBe(503);
+        // The flag, not just the status: it is what tells the plan screen to
+        // withdraw a purchase it cannot complete, rather than reporting the
+        // failure underneath a button that repeats it.
+        expect(res.body.configurationError).toBe(true);
+      } finally {
+        env.stripe.premiumPriceId = saved;
+      }
+    });
+
     it('reports a Stripe outage as an upstream failure, not a config fault', async () => {
       const user = await createUser();
       Stripe.__mock.checkout.sessions.create.mockRejectedValueOnce(

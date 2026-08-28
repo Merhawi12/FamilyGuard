@@ -3,7 +3,11 @@ const crypto = require('crypto');
 const { User, Session } = require('../models');
 const { cancelSubscription } = require('../services/billing');
 const { eraseAccount } = require('../utils/accountErasure');
-const { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendPasswordResetCodeEmail, sendPasswordChangedEmail } = require('../utils/email');
+const { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendPasswordResetCodeEmail, sendPasswordChangedEmail, sendLoginCodeEmail } = require('../utils/email');
+const { signTrustedDeviceToken, trustsDevice, revokeTrustedDevices } = require('../utils/trustedDevice');
+// Whether a relay exists at all, which is a different question from whether one
+// send succeeded — see the sign-in code path in `login`.
+const { isEnabled: mailIsEnabled } = require('../services/mailer');
 const { auditLog } = require('../utils/auditLogger');
 const { createSession, revokeSession, revokeAllSessions, revokeOtherSessions } = require('../utils/session');
 const { notifyNewSignIn } = require('../utils/signInNotice');
@@ -14,6 +18,8 @@ const { passwordProblem, burnPasswordComparison } = require('../utils/password')
 const { OAuth2Client } = require('google-auth-library');
 const { normalizeEmail } = require('../utils/normalizeEmail');
 const { isUuid } = require('../utils/ids');
+const { isLockedOut } = require('../utils/loginAttempts');
+const { JWT_VERIFY_OPTIONS } = require('../utils/jwtOptions');
 const { getSetting } = require('../utils/settings');
 const { blocksSignIn, maintenanceModeOn, MAINTENANCE_MESSAGE } = require('../utils/maintenance');
 const { normalizePhone, maskPhone } = require('../utils/normalizePhone');
@@ -84,9 +90,51 @@ const trialEndsAtFromNow = async () => {
   return new Date(Date.now() + days * DAY_MS);
 };
 
-// Short-lived token used as the first-factor proof before MFA is verified
+// Short-lived token used as the first-factor proof before MFA is verified.
+//
+// The `mfaRequired` claim is load-bearing well beyond the name: `middleware/auth`
+// and `sockets/auth` both refuse any token carrying it, which is what stops a
+// half-finished sign-in from reaching the API or opening a socket. The emailed
+// login code reuses this exact token so it inherits both refusals rather than
+// needing a second pair of guards that could drift from these.
 const signPreAuthToken = (id) =>
   jwt.sign({ id, mfaRequired: true }, env.auth.jwtSecret, { expiresIn: '5m' });
+
+/**
+ * `samer3031@gmail.com` → `s•••••••1@gmail.com`.
+ *
+ * The code screen has to name the inbox it was sent to, or somebody with two
+ * addresses cannot tell which one to open — and it must do that without printing
+ * the address in full to whoever is holding a stolen password. The domain stays
+ * because that is the half that identifies the mailbox to its owner.
+ */
+const maskEmail = (address) => {
+  const [local = '', domain = ''] = String(address || '').split('@');
+  if (!domain) return '';
+  const head = local.slice(0, 1);
+  const tail = local.length > 1 ? local.slice(-1) : '';
+  return `${head}${'•'.repeat(Math.max(local.length - 2, 1))}${tail}@${domain}`;
+};
+
+/**
+ * Whether this password sign-in has to be finished with an emailed code.
+ *
+ * Three ways out, in the order they are cheapest to check: the deployment has
+ * switched the factor off, the account has no address to send to, or this
+ * browser was remembered within the last thirty days.
+ *
+ * The middle one is not defensive padding. `POST /auth/register` requires an
+ * address, but `admin.createUser` and the phone flow both mint accounts, and a
+ * row with `email: null` exists in production today. Challenging it would send a
+ * code to nobody and lock the account out permanently, so the absence of an
+ * address is treated as the absence of the factor rather than as a reason to
+ * refuse — the account is no less protected than it was yesterday.
+ */
+const requiresLoginCode = async (req, user) => {
+  if (!env.auth.loginCodeRequired) return false;
+  if (!user.email) return false;
+  return !trustsDevice(req.body?.trustedDeviceToken, user);
+};
 
 const register = async (req, res, next) => {
   try {
@@ -344,6 +392,129 @@ const login = async (req, res, next) => {
       return res.json({ mfaRequired: true, preAuthToken });
     }
 
+    /**
+     * The emailed second factor, for everyone who signs in with a password.
+     *
+     * Deliberately *below* `mfaEnabled`: an authenticator app is already a second
+     * factor and a stronger one, since it depends on neither an inbox nor a mail
+     * relay. Asking someone who set one up for a second second factor is friction
+     * that buys nothing.
+     *
+     * Google and phone sign-in do not come through here and are not challenged.
+     * Google has already authenticated the person, and a phone-only account can
+     * have `email: null` — there is at least one in production — so an emailed
+     * code would be a permanent lockout rather than a second factor.
+     *
+     * A `false` from `sendLoginCodeEmail` is *not* turned into a session. This is
+     * the one place in the product where a mail outage has to mean "no", because
+     * the alternative is a second factor that stops applying exactly when the
+     * mail system is unhealthy — which is indistinguishable from an attacker who
+     * has arranged for it to be. The 503 says so, and staff keep the break-glass
+     * path below.
+     */
+    if (await requiresLoginCode(req, user)) {
+      const prepared = otp.prepareCode(user, 'login');
+
+      /**
+       * Refused because one went out less than a minute ago — so challenge them
+       * anyway, with the code they are already holding.
+       *
+       * This branch is not about limits, it is about the commonest thing a
+       * person does with a code screen: close it. Tap sign-in, glance at the
+       * inbox, come back, tap sign-in again. Answering that with a 429 leaves a
+       * parent looking at a live code in their email and a screen with nowhere
+       * to type it, for a minute, every minute they retry inside it — a lockout
+       * assembled entirely out of correct behaviour.
+       *
+       * Nothing is spent and nothing is sent: the cooldown exists to keep
+       * messages out of an inbox nobody asked to fill, and this puts none there.
+       * The code from a moment ago is good for fifteen minutes, so the screen
+       * this returns is the screen that works. `codeAlreadySent` is what lets it
+       * say so rather than claiming a send of its own.
+       *
+       * The hourly quota is left as a refusal. Its window outlives a code's
+       * fifteen minutes, so there may be nothing live to type, and a code screen
+       * for a code that does not exist is worse than being told to wait.
+       */
+      if (!prepared.allowed && prepared.reason === 'cooldown') {
+        auditLog(req, {
+          userId: user.id, action: 'auth.login_code_challenge', entity: 'User', entityId: user.id,
+          metadata: { reused: true },
+        });
+        return res.json({
+          loginCodeRequired: true,
+          codeAlreadySent: true,
+          retryAfter: prepared.retryAfter,
+          preAuthToken: signPreAuthToken(user.id),
+          email: maskEmail(user.email),
+        });
+      }
+
+      if (!prepared.allowed) {
+        auditLog(req, {
+          userId: user.id, action: 'auth.login_code_throttled', entity: 'User', entityId: user.id,
+          metadata: { reason: prepared.reason },
+        });
+        return throttled(res, prepared, 'sign-in code');
+      }
+
+      // Kept so a failed send can be un-recorded — see the rollback below.
+      const otpStateBefore = user.otpState;
+      await user.update(prepared.fields);
+      const delivered = await sendLoginCodeEmail({ name: user.name, email: user.email, code: prepared.code });
+
+      /**
+       * A relay that is configured and failed is a refusal; one that was never
+       * configured is not.
+       *
+       * `send` reports both as `false`, and the difference is the whole question
+       * here. A deployment with no relay at all — local development, the browser
+       * harness, the test suite — logs the code instead of mailing it, and that
+       * is the documented way to finish a code flow without an inbox. Treating it
+       * as a delivery failure would make every password sign-in impossible on
+       * every machine that has never been given SMTP credentials.
+       *
+       * A configured relay that refuses is the case that must not become a
+       * session: otherwise the second factor stops applying exactly when the mail
+       * system is unhealthy, which is indistinguishable from an attacker who has
+       * arranged for it to be.
+       */
+      if (!delivered && mailIsEnabled()) {
+        /**
+         * A send that failed is un-recorded, not merely reported.
+         *
+         * `prepareCode` wrote a code and started the account's 60-second
+         * cooldown before the relay was asked, so leaving that in place tells
+         * every later request that a code is in flight. The next attempt inside
+         * the minute would then take the reuse branch above and answer with a
+         * code screen — for a message that was refused and never sent. The
+         * parent gets six empty boxes and "that code is invalid" instead of the
+         * sentence below, which is the one that is true and says what to do.
+         *
+         * Rolling the counters back also means the retry the message asks for
+         * genuinely re-attempts the send rather than being refused by a cooldown
+         * that only exists because the send failed. The relay is the thing
+         * bounded here, not the account: `loginLimiter` still caps this at ten
+         * attempts per IP per fifteen minutes.
+         */
+        await user.update({ loginCode: null, loginCodeExpires: null, otpState: otpStateBefore });
+
+        logger.error('Login code was not delivered — refusing the session', { email: user.email });
+        auditLog(req, { userId: user.id, action: 'auth.login_code_undelivered', entity: 'User', entityId: user.id });
+        return res.status(503).json({
+          error: 'We could not send your sign-in code. Please try again shortly, or contact support.',
+          loginCodeUndelivered: true,
+        });
+      }
+
+      auditLog(req, { userId: user.id, action: 'auth.login_code_challenge', entity: 'User', entityId: user.id });
+      return res.json({
+        loginCodeRequired: true,
+        preAuthToken: signPreAuthToken(user.id),
+        email: maskEmail(user.email),
+      });
+    }
+
     const { token, session } = await createSession(req, user.id);
     await user.update({ lastLoginAt: new Date() });
     auditLog(req, { userId: user.id, action: 'auth.login', entity: 'User', entityId: user.id });
@@ -354,6 +525,131 @@ const login = async (req, res, next) => {
     res.json({ token, user: serializeUser(user) });
   } catch (err) {
     next(err);
+  }
+};
+
+/**
+ * POST /auth/login/verify — the six digits that finish a password sign-in.
+ *
+ * Shaped like `mfa/validate` rather than like `verify-email`, because it is the
+ * same kind of step: a pre-auth token proving the first factor, a code proving
+ * the second, and a session out of the end. Everything `mfa/validate` learned the
+ * hard way applies here unchanged — the account lockout, the maintenance gate
+ * that has to be re-checked because a token minted five minutes ago outlives the
+ * switch, and the deactivation check.
+ */
+const verifyLoginCode = async (req, res, next) => {
+  try {
+    const { preAuthToken, code, rememberDevice } = req.body;
+    if (!preAuthToken || !code) return res.status(400).json({ error: 'preAuthToken and code required' });
+
+    let decoded;
+    try {
+      decoded = jwt.verify(preAuthToken, env.auth.jwtSecret, JWT_VERIFY_OPTIONS);
+    } catch {
+      return res.status(401).json({ error: 'Invalid or expired pre-auth token' });
+    }
+    if (!decoded.mfaRequired) return res.status(400).json({ error: 'Token is not a pre-auth token' });
+
+    const user = await User.findByPk(decoded.id);
+    if (!user || !user.isActive) return res.status(401).json({ error: 'Unauthorized' });
+
+    if (isLockedOut(user)) {
+      auditLog(req, { userId: user.id, action: 'auth.login_blocked_locked', entity: 'User', entityId: user.id });
+      return res.status(423).json({ error: 'Too many incorrect codes. Try again later.' });
+    }
+
+    const checked = otp.checkCode(user, 'login', code);
+
+    if (!checked.ok) {
+      // Counted against the code by `checkCode` and against the account here —
+      // the two-limiter arrangement `verifyEmail` documents, and for the sharper
+      // reason: these six digits stand between a stolen password and a session.
+      const attempts = user.failedLoginAttempts + 1;
+      const updates = { ...checked.fields, failedLoginAttempts: attempts };
+      if (attempts >= MAX_LOGIN_ATTEMPTS) {
+        updates.failedLoginAttempts = 0;
+        updates.lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MS);
+      }
+      await user.update(updates);
+      auditLog(req, {
+        userId: user.id, action: 'auth.login_code_failed', entity: 'User', entityId: user.id,
+        metadata: { reason: checked.reason },
+      });
+      return res.status(401).json({ error: 'That code is invalid or has expired.' });
+    }
+
+    await user.update({ ...checked.fields, failedLoginAttempts: 0, lockedUntil: null });
+
+    // Re-checked rather than trusted from `login`: the pre-auth token is good for
+    // five minutes, and maintenance mode can be switched on inside them.
+    if (await blocksSignIn(user)) {
+      auditLog(req, { userId: user.id, action: 'auth.login_blocked_maintenance', entity: 'User', entityId: user.id });
+      return res.status(503).json({ error: MAINTENANCE_MESSAGE, maintenance: true });
+    }
+
+    const { token, session } = await createSession(req, user.id);
+    await user.update({ lastLoginAt: new Date() });
+    auditLog(req, { userId: user.id, action: 'auth.login', entity: 'User', entityId: user.id });
+    track(notifyNewSignIn(req, user, session.id));
+
+    return res.json({
+      token,
+      user: serializeUser(user),
+      // Only when asked for. Minted here rather than in `login` because this is
+      // the first moment the second factor has actually been proved — issuing it
+      // alongside the challenge would hand out the bypass to whoever triggered it.
+      ...(rememberDevice ? { trustedDeviceToken: signTrustedDeviceToken(user.id) } : {}),
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * POST /auth/login/resend — another sign-in code, for the same challenge.
+ *
+ * Takes the pre-auth token rather than an address: the person asking has already
+ * proved the password, so there is nothing to disclose by answering honestly, and
+ * an endpoint that took an email would be one anybody could use to send mail to
+ * anybody. The account's own send ceiling still applies.
+ */
+const resendLoginCode = async (req, res, next) => {
+  try {
+    const { preAuthToken } = req.body;
+    if (!preAuthToken) return res.status(400).json({ error: 'preAuthToken required' });
+
+    let decoded;
+    try {
+      decoded = jwt.verify(preAuthToken, env.auth.jwtSecret, JWT_VERIFY_OPTIONS);
+    } catch {
+      return res.status(401).json({ error: 'Invalid or expired pre-auth token' });
+    }
+    if (!decoded.mfaRequired) return res.status(400).json({ error: 'Token is not a pre-auth token' });
+
+    const user = await User.findByPk(decoded.id);
+    if (!user || !user.isActive || !user.email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const prepared = otp.prepareCode(user, 'login');
+    if (!prepared.allowed) {
+      auditLog(req, {
+        userId: user.id, action: 'auth.login_code_throttled', entity: 'User', entityId: user.id,
+        metadata: { reason: prepared.reason },
+      });
+      return throttled(res, prepared, 'sign-in code');
+    }
+
+    await user.update(prepared.fields);
+    const delivered = await sendLoginCodeEmail({ name: user.name, email: user.email, code: prepared.code });
+    if (!delivered) logger.error('Login code was not delivered', { email: user.email });
+
+    auditLog(req, { userId: user.id, action: 'auth.login_code_resent', entity: 'User', entityId: user.id });
+    return res.json({
+      message: delivered ? 'Sign-in code resent' : 'We could not deliver the sign-in code.',
+      emailDelivered: delivered,
+    });
+  } catch (err) {
+    return next(err);
   }
 };
 
@@ -542,6 +838,17 @@ const changePassword = async (req, res, next) => {
      * signed in and no token has to be swapped client-side.
      */
     const revokedCount = await revokeOtherSessions(req.user.id, req.sessionId, req.app.get('io'));
+
+    /**
+     * And every remembered browser, on exactly the same reasoning.
+     *
+     * A trusted-device token is what lets a browser skip the emailed second
+     * factor for thirty days. Revoking the sessions but not the trust would leave
+     * whoever prompted this change holding the one thing that turns the stolen
+     * password they still have back into a session — the second factor, silently
+     * disabled for them alone.
+     */
+    await revokeTrustedDevices(req.user);
 
     /**
      * The account holder is told, because they are the one who needs to know
@@ -765,6 +1072,15 @@ const authProviders = async (req, res, next) => {
        * would not. It flips back on its own the moment a key is configured.
        */
       billing: !!env.stripe.secretKey,
+      /**
+       * Whether a password sign-in will be finished with an emailed code.
+       *
+       * Reported so the sign-in screen can say what is about to happen before it
+       * happens, and so that an operator who has switched the factor off during
+       * a mail outage can see that it is off from outside the container. It
+       * discloses nothing: the next password sign-in demonstrates it anyway.
+       */
+      loginCode: env.auth.loginCodeRequired,
     });
   } catch (err) {
     next(err);
@@ -953,8 +1269,11 @@ const resetPassword = async (req, res, next) => {
     });
 
     // A reset is the recovery path after a suspected compromise — every existing
-    // session has to go, not just the one doing the reset.
+    // session has to go, not just the one doing the reset. Every remembered
+    // browser goes with them: they bypass the emailed second factor, so leaving
+    // one alive would leave the attacker the shorter way back in.
     await revokeAllSessions(user.id, req.app.get('io'));
+    await revokeTrustedDevices(user);
 
     // Confirms the reset to the address that asked for it. A reset that somebody
     // else drove is only visible to the owner through this.
@@ -1339,8 +1658,33 @@ const revokeOneSession = async (req, res, next) => {
 const revokeOtherSessionsForUser = async (req, res, next) => {
   try {
     const revoked = await revokeOtherSessions(req.user.id, req.sessionId, req.app.get('io'));
+
+    /**
+     * And the remembered browsers, for the reason the screen itself gives.
+     *
+     * "If you do not recognise one, sign it out and change your password" is the
+     * advice above this button, which means the person pressing it may be
+     * evicting somebody who knows the password. A browser that was signed out
+     * but stayed *trusted* still holds the thing that turns that password
+     * straight back into a session with no code in between — the second factor,
+     * disabled for exactly the device the parent was trying to get rid of.
+     *
+     * Trust is account-wide and stateless, so this takes the caller's own
+     * browser with it: the next sign-in here is challenged again. That is the
+     * blunt end of the trade `utils/trustedDevice.js` documents, and the right
+     * way round — one extra code for the account holder, no silent bypass left
+     * behind for anyone else. The response says so, because a parent who is
+     * asked for a code tomorrow should already know why.
+     */
+    await revokeTrustedDevices(req.user);
+
     auditLog(req, { userId: req.user.id, action: 'auth.sessions_revoked_others', metadata: { revoked } });
-    res.json({ revoked, message: `Signed out ${revoked} other device${revoked === 1 ? '' : 's'}.` });
+    res.json({
+      revoked,
+      trustedDevicesRevoked: true,
+      message: `Signed out ${revoked} other device${revoked === 1 ? '' : 's'}. `
+        + 'Every device will be asked for a sign-in code next time, including this one.',
+    });
   } catch (err) {
     next(err);
   }
@@ -1421,7 +1765,8 @@ const deleteAccount = async (req, res, next) => {
 };
 
 module.exports = {
-  register, login, me, logout, verifyEmail, resendCode, updateProfile, changePassword,
+  register, login, verifyLoginCode, resendLoginCode, me, logout, verifyEmail, resendCode,
+  updateProfile, changePassword,
   googleAuth, authProviders, requestPhoneCode, verifyPhoneCode,
   forgotPassword, verifyResetCode, resetPassword, getNotificationPrefs, updateNotificationPrefs,
   listSessions, revokeOneSession, revokeOtherSessionsForUser, deleteAccount,

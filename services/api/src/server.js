@@ -37,10 +37,55 @@ const start = async () => {
     // missing SMTP host is invisible from the outside and password reset simply
     // never completes.
     mail: mailIsEnabled() ? `smtp ${env.email.smtp.host}` : 'DISABLED — password reset and email verification cannot complete',
+    // Said at boot for the same reason as the line above, and with more urgency:
+    // this one decides whether anybody can sign in at all.
+    loginCode: env.auth.loginCodeRequired ? 'required on every password sign-in' : 'OFF',
   });
 
   if (env.isProduction && !mailIsEnabled()) {
     logger.error('No SMTP relay configured. Set the smtp-host secret and redeploy — see docs/DEPLOYMENT.md §1.7.');
+  }
+
+  /**
+   * A Stripe credential that cannot be what it is named, said at boot.
+   *
+   * Not fatal, and not silent. It is not fatal because billing is the one
+   * subsystem this product survives without — refusing to start would turn a
+   * broken Upgrade button into a total outage, which is the worse trade. It is
+   * not silent because the value has been read as absent, so from the outside
+   * this deployment now looks like one that simply never configured Stripe:
+   * `/auth/providers` reports `billing: false` and the Upgrade buttons are gone.
+   * That is the honest state, but an operator who pasted a key ten minutes ago
+   * needs to be told it was the wrong one rather than left to conclude their
+   * change did not take.
+   *
+   * Logged in every environment, not only production. This is exactly the
+   * mistake somebody makes while setting Stripe up on their laptop.
+   */
+  for (const problem of env.stripe.problems) {
+    logger.error(`Stripe is misconfigured and has been ignored: ${problem}`);
+  }
+
+  /**
+   * The combination that locks the whole product, stated in one sentence.
+   *
+   * Each half is a supported configuration. Together they are not: every
+   * password sign-in is answered with a code that is written to this log and
+   * sent nowhere, so the code screen is real, the code exists, and the only
+   * person who can read it is whoever is tailing Cloud Run. Neither of the two
+   * warnings above says that — the mail one talks about signup and password
+   * reset, which were the whole story before the second factor existed.
+   *
+   * Fixed either way round: configure the relay, or set `LOGIN_CODE_REQUIRED=0`
+   * until it is configured. The switch exists for exactly this, and this line is
+   * what stops the choice being made after the support calls start.
+   */
+  if (env.isProduction && env.auth.loginCodeRequired && !mailIsEnabled()) {
+    logger.error(
+      'LOGIN_CODE_REQUIRED is on and there is no mail relay: every password sign-in will be '
+      + 'answered with a code nobody can receive, so nobody can sign in. Configure SMTP, or set '
+      + 'LOGIN_CODE_REQUIRED=0 until it is configured.',
+    );
   }
 
   /**

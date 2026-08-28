@@ -11,7 +11,7 @@ const request = require('supertest');
 const { app } = require('../src/app');
 const { User } = require('../src/models');
 const { setSetting } = require('../src/utils/settings');
-const { createUser, tokenFor, uniqueEmail, DEFAULT_PASSWORD } = require('./helpers');
+const { createUser, tokenFor, uniqueEmail, signIn, DEFAULT_PASSWORD } = require('./helpers');
 const { ROLES, defaultPermissionsFor } = require('../src/config/roles');
 
 // Settings persist in the shared schema, so each test states what it needs.
@@ -20,8 +20,16 @@ beforeEach(async () => {
   await setSetting('defaultTrialDays', 7);
 });
 
-const login = (email, password = DEFAULT_PASSWORD) =>
-  request(app).post('/api/auth/login').send({ email, password });
+/**
+ * A whole sign-in, not just the password step — `signIn` drives the emailed
+ * second factor too, and hands back whichever response carries the token.
+ *
+ * Maintenance mode is checked in both halves of that flow, so a helper that
+ * stopped at `POST /auth/login` would be testing the gate on the door people no
+ * longer come through: the pre-auth token outlives the switch being thrown, and
+ * it is `login/verify` that has to refuse a challenge started before it.
+ */
+const login = (email, password = DEFAULT_PASSWORD) => signIn(email, password);
 
 describe('maintenance mode — new sign-ins', () => {
   it('refuses a parent password sign-in with 503 while it is on', async () => {

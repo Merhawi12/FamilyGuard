@@ -1,7 +1,7 @@
 const request = require('supertest');
 const { app } = require('../src/app');
 const { User, Session } = require('../src/models');
-const { createUser, tokenFor, DEFAULT_PASSWORD } = require('./helpers');
+const { createUser, tokenFor, signIn, DEFAULT_PASSWORD } = require('./helpers');
 const { ROLES, defaultPermissionsFor } = require('../src/config/roles');
 
 const bearer = (user) => ({ Authorization: `Bearer ${tokenFor(user)}` });
@@ -62,8 +62,7 @@ describe('creating a staff account', () => {
     expect(res.body.generatedPassword).toEqual(expect.any(String));
 
     // The generated password actually works.
-    const login = await request(app).post('/api/auth/login')
-      .send({ email: 'fin@test.dev', password: res.body.generatedPassword });
+    const login = await signIn('fin@test.dev', res.body.generatedPassword);
     expect(login.status).toBe(200);
     expect(login.body.user.role).toBe(ROLES.FINANCE);
   });
@@ -100,7 +99,7 @@ describe('creating a staff account', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.generatedPassword).toBeNull();
-    const login = await request(app).post('/api/auth/login').send({ email: 'ops@test.dev', password: 'chosen-pass-1' });
+    const login = await signIn('ops@test.dev', 'chosen-pass-1');
     expect(login.status).toBe(200);
   });
 });
@@ -124,7 +123,7 @@ describe('editing a staff account', () => {
   it('revokes the account\'s sessions when its authority changes', async () => {
     const boss = await superAdmin();
     const staff = await staffOf(ROLES.OPERATIONS);
-    const login = await request(app).post('/api/auth/login').send({ email: staff.email, password: DEFAULT_PASSWORD });
+    const login = await signIn(staff.email);
     expect(login.status).toBe(200);
 
     await request(app).put(`/api/admin/staff/${staff.id}`).set(bearer(boss)).send({ role: ROLES.MARKETING });
@@ -171,7 +170,7 @@ describe('activating and deactivating', () => {
     expect(res.body.isActive).toBe(false);
     expect(await Session.count({ where: { userId: staff.id, revoked: false } })).toBe(0);
 
-    const login = await request(app).post('/api/auth/login').send({ email: staff.email, password: DEFAULT_PASSWORD });
+    const login = await signIn(staff.email);
     expect(login.status).toBeGreaterThanOrEqual(400);
   });
 
@@ -182,7 +181,7 @@ describe('activating and deactivating', () => {
     const res = await request(app).patch(`/api/admin/staff/${staff.id}/status`).set(bearer(boss)).send({ isActive: true });
     expect(res.status).toBe(200);
     expect(res.body.isActive).toBe(true);
-    expect((await request(app).post('/api/auth/login').send({ email: staff.email, password: DEFAULT_PASSWORD })).status).toBe(200);
+    expect((await signIn(staff.email)).status).toBe(200);
   });
 
   it('refuses to deactivate yourself or the last Super Admin', async () => {
@@ -210,7 +209,7 @@ describe('resetting a staff password', () => {
       failedLoginAttempts: 5,
       lockedUntil: new Date(Date.now() + 60 * 60 * 1000),
     });
-    const login = await request(app).post('/api/auth/login').send({ email: staff.email, password: DEFAULT_PASSWORD });
+    const login = await signIn(staff.email);
 
     const res = await request(app).post(`/api/admin/staff/${staff.id}/reset-password`).set(bearer(boss)).send({});
     expect(res.status).toBe(200);
@@ -224,8 +223,7 @@ describe('resetting a staff password', () => {
     if (login.body.token) {
       expect((await request(app).get('/api/auth/me').set('Authorization', `Bearer ${login.body.token}`)).status).toBe(401);
     }
-    expect((await request(app).post('/api/auth/login')
-      .send({ email: staff.email, password: res.body.generatedPassword })).status).toBe(200);
+    expect((await signIn(staff.email, res.body.generatedPassword)).status).toBe(200);
   });
 
   it('accepts a supplied password but holds it to the policy', async () => {
@@ -239,8 +237,7 @@ describe('resetting a staff password', () => {
       .send({ password: 'a-fine-password-1' });
     expect(ok.status).toBe(200);
     expect(ok.body.generatedPassword).toBeNull();
-    expect((await request(app).post('/api/auth/login')
-      .send({ email: staff.email, password: 'a-fine-password-1' })).status).toBe(200);
+    expect((await signIn(staff.email, 'a-fine-password-1')).status).toBe(200);
   });
 });
 

@@ -121,6 +121,18 @@ email_from = "Parentix <support@parentix.ca>"
 # over. See the variable's own description.
 admin_email = "support@parentix.ca"
 
+# Every password sign-in is finished with a code emailed to the account.
+#
+# Stated here rather than left to the default because of what it is coupled to:
+# with outbound mail down, the code is written to the Cloud Run log and reaches
+# nobody, so nobody can sign in. That has happened on this deployment — twenty
+# three days of it. This line is the switch to reach if it happens again, and
+# the reason it is worth an apply rather than a code change.
+#
+# Turn it back on the moment mail is verified. Accounts with an authenticator
+# app are challenged for that instead and are unaffected either way.
+login_code_required = true
+
 # Where monitoring alerts go. Set this before the first production apply — an
 # unmonitored production service is one where the first report of an outage
 # comes from a customer. A role mailbox beats a personal one.

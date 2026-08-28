@@ -1,7 +1,8 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const {
-  register, login, me, logout, verifyEmail, resendCode, updateProfile, changePassword,
+  register, login, verifyLoginCode, resendLoginCode, me, logout, verifyEmail, resendCode,
+  updateProfile, changePassword,
   googleAuth, authProviders, requestPhoneCode, verifyPhoneCode,
   forgotPassword, verifyResetCode, resetPassword,
   getNotificationPrefs, updateNotificationPrefs,
@@ -70,10 +71,60 @@ const codeLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+/**
+ * The sign-in code gets its own counters rather than sharing the ones above.
+ *
+ * A `rateLimit()` instance owns a store, so every route given the *same*
+ * instance shares one budget per IP. That is right for the flows that already
+ * share `codeLimiter` — confirming an address and resetting a password are both
+ * once-in-a-while events — and wrong the moment a routine sign-in is added to
+ * them: ten code checks per IP per quarter hour, spent by signups, resets and
+ * *every password sign-in on that address*, is a ceiling a single household
+ * behind one router reaches on an ordinary evening. Handed the shared limiter,
+ * this is what the browser suite found — the console's sign-in was refused 429
+ * because the sign-ins before it had spent the budget.
+ *
+ * Sized for the step rather than copied: `loginLimiter` already caps reaching
+ * this at ten challenges per IP per fifteen minutes, and each challenge allows
+ * five guesses before `utils/otp` destroys the code, so thirty leaves room for
+ * a mistyped code and a second person in the house without ever being the thing
+ * that bounds guessing. The account lockout and the per-code budget do that.
+ */
+const loginCodeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: 'Too many attempts, please request a new code' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Same reasoning, for the same reason: asking for another sign-in code must not
+// spend the budget that gets a new account its verification email. The number
+// matches `resendLimiter` — this is the same act, counted separately.
+const loginResendLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many resend attempts, please wait 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 router.post('/register', registerLimiter, register);
 router.post('/verify-email', codeLimiter, verifyEmail);
 router.post('/resend-code', resendLimiter, resendCode);
 router.post('/login', loginLimiter, login);
+
+/**
+ * The emailed second factor, in the two calls that finish it.
+ *
+ * Both carry a per-IP ceiling on top of the per-account lockout the controller
+ * applies — these are six digits standing between a correct password and a
+ * session. Both ceilings are their own, for the reason given where they are
+ * defined: sharing them with the signup and reset flows makes an ordinary
+ * evening's sign-ins look like an attack.
+ */
+router.post('/login/verify', loginCodeLimiter, verifyLoginCode);
+router.post('/login/resend', loginResendLimiter, resendLoginCode);
 
 /**
  * Phone sign-in. Requesting a code is rate limited harder than any other route

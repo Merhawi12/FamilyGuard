@@ -76,6 +76,40 @@ const configured = (value) => {
 };
 
 /**
+ * The wrong *kind* of Stripe value, treated as absent — and said out loud.
+ *
+ * `configured` above catches a placeholder. This catches the mistake that
+ * actually happens: every Stripe credential is an opaque string that starts with
+ * a prefix naming what it is, the console shows several of them a few pixels
+ * apart, and pasting the wrong one is invisible afterwards. Both have occurred
+ * on this deployment in one `.env` — the *publishable* key (`pk_live_…`) in
+ * `STRIPE_SECRET_KEY`, and the same value again in `STRIPE_PREMIUM_PRICE_ID`.
+ *
+ * Neither can ever work: a publishable key is designed to be public and is
+ * refused by every server-side call, and a price ID that is not a price ID
+ * matches no product. But both are non-empty, so `billing` advertised itself as
+ * available, the Upgrade buttons drew, and the deployment promised a checkout it
+ * could not open. Reading them as absent puts it in the state it is actually in
+ * — the one the Settings screen already words as "online payment is not
+ * available on this deployment yet" — instead of a broken version of the state
+ * it is not in.
+ *
+ * Only the prefix is ever echoed back (`pk_live`), never the value: that is the
+ * whole of what is wrong with it, and it is the half that is not secret.
+ */
+const stripeProblems = [];
+
+const stripeValue = (name, raw, prefixes, kind) => {
+  const value = configured(raw);
+  if (!value || prefixes.some((prefix) => value.startsWith(prefix))) return value;
+  const shape = value.split('_').slice(0, 2).join('_');
+  stripeProblems.push(
+    `${name} is not ${kind} — it starts "${shape}_", and ${kind} starts "${prefixes[0]}"`
+  );
+  return '';
+};
+
+/**
  * A credential that has not been supplied yet, read as the empty string.
  *
  * `|| ''` is not enough, because the unsupplied value is not empty. Terraform
@@ -212,6 +246,21 @@ const env = Object.freeze({
     fieldEncryptionKey: process.env.FIELD_ENCRYPTION_KEY || '',
     // Minimum password length accepted at registration and password change.
     minPasswordLength: int(process.env.MIN_PASSWORD_LENGTH, 10),
+    /**
+     * The emailed second factor on password sign-in. On by default.
+     *
+     * A switch rather than a constant because this couples *all* access to the
+     * mail relay, and this deployment has already lost that relay for 23 days
+     * once. During an outage of that kind the choice is between nobody signing in
+     * and everybody signing in with a password alone, and that is an operator's
+     * decision to make deliberately — at 3am, from an environment variable,
+     * without a release. Turning it off is visible: `/auth/providers` reports it,
+     * and the boot log says so.
+     *
+     * It is not a per-account setting. A second factor everyone can opt out of is
+     * one nobody has.
+     */
+    loginCodeRequired: bool(process.env.LOGIN_CODE_REQUIRED, true),
   },
 
   corsOrigins,
@@ -432,13 +481,24 @@ const env = Object.freeze({
   },
 
   stripe: {
-    secretKey: configured(process.env.STRIPE_SECRET_KEY),
-    webhookSecret: configured(process.env.STRIPE_WEBHOOK_SECRET),
-    premiumPriceId: configured(process.env.STRIPE_PREMIUM_PRICE_ID),
+    // `rk_` as well as `sk_`: a restricted key is a legitimate — and better —
+    // way to run this, since the API only needs checkout, customers and
+    // subscriptions.
+    secretKey: stripeValue('STRIPE_SECRET_KEY', process.env.STRIPE_SECRET_KEY, ['sk_', 'rk_'], 'a secret key'),
+    // Blanking this fails closed: `constructEvent` with no secret throws, so
+    // every webhook is rejected 400 rather than accepted unverified.
+    webhookSecret: stripeValue('STRIPE_WEBHOOK_SECRET', process.env.STRIPE_WEBHOOK_SECRET, ['whsec_'], 'a webhook signing secret'),
+    premiumPriceId: stripeValue('STRIPE_PREMIUM_PRICE_ID', process.env.STRIPE_PREMIUM_PRICE_ID, ['price_'], 'a price ID'),
     // Family Plus is no longer sold. Customers who bought it keep their $14.99
     // subscription, so the webhook still has to recognise this price and map it
     // to Premium. Safe to unset once no live subscription uses it.
-    legacyFamilyPriceId: configured(process.env.STRIPE_FAMILY_PRICE_ID),
+    legacyFamilyPriceId: stripeValue('STRIPE_FAMILY_PRICE_ID', process.env.STRIPE_FAMILY_PRICE_ID, ['price_'], 'a price ID'),
+    /**
+     * What was set to something that cannot be what it names, for the boot log.
+     * Empty on a correct configuration and on one that sets nothing at all —
+     * unset is a choice, mis-set is a mistake, and only the second is reported.
+     */
+    problems: Object.freeze([...stripeProblems]),
   },
 });
 

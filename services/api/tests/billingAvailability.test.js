@@ -76,3 +76,97 @@ describe('Billing availability', () => {
     }
   });
 });
+
+/**
+ * The other half of "is billing configured": a value that is present and is the
+ * wrong kind of thing.
+ *
+ * Every Stripe credential is an opaque string prefixed with what it is, and the
+ * console shows several of them together. This deployment's `.env` had the
+ * *publishable* key in `STRIPE_SECRET_KEY` and the same value again in
+ * `STRIPE_PREMIUM_PRICE_ID`. Neither can ever work, both are non-empty, and the
+ * effect was a deployment advertising `billing: true` and an Upgrade button that
+ * could only ever fail — the exact state the tests above exist to prevent,
+ * arrived at from the other direction.
+ */
+describe('a Stripe credential of the wrong kind', () => {
+  /** Reads `env` fresh under the given variables, then restores the process. */
+  const loadEnv = (vars) => {
+    const saved = {};
+    for (const [key, value] of Object.entries(vars)) {
+      saved[key] = process.env[key];
+      process.env[key] = value;
+    }
+    let loaded;
+    jest.isolateModules(() => { loaded = require('../src/config/env').env; });
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    return loaded;
+  };
+
+  const PUBLISHABLE = 'pk_live_51QxAmPleBUTnOTaREALkeyJUSTtheSHAPEofONE';
+
+  it('reads a publishable key in the secret slot as no key at all', () => {
+    const loaded = loadEnv({ STRIPE_SECRET_KEY: PUBLISHABLE });
+
+    // Absent, not present-and-broken: `billing` is derived from this, and a
+    // deployment that cannot open a checkout must not offer one.
+    expect(loaded.stripe.secretKey).toBe('');
+    expect(loaded.stripe.problems.join(' ')).toContain('STRIPE_SECRET_KEY');
+  });
+
+  it('reads a key pasted into the price slot as no price at all', () => {
+    const loaded = loadEnv({ STRIPE_PREMIUM_PRICE_ID: PUBLISHABLE });
+
+    expect(loaded.stripe.premiumPriceId).toBe('');
+    expect(loaded.stripe.problems.join(' ')).toContain('STRIPE_PREMIUM_PRICE_ID');
+  });
+
+  it('says what was wrong without printing the value', () => {
+    const loaded = loadEnv({ STRIPE_SECRET_KEY: PUBLISHABLE });
+    const said = loaded.stripe.problems.join(' ');
+
+    // The prefix is the whole of what is wrong with it, and is the half that is
+    // not secret. This line goes to the boot log, which is read by more people
+    // and kept longer than a `.env`.
+    expect(said).toContain('pk_live');
+    expect(said).not.toContain(PUBLISHABLE);
+  });
+
+  it('accepts every shape that really is one, and reports nothing', () => {
+    const loaded = loadEnv({
+      STRIPE_SECRET_KEY: 'sk_live_realish',
+      STRIPE_WEBHOOK_SECRET: 'whsec_realish',
+      STRIPE_PREMIUM_PRICE_ID: 'price_realish',
+      STRIPE_FAMILY_PRICE_ID: 'price_legacy',
+    });
+
+    expect(loaded.stripe.secretKey).toBe('sk_live_realish');
+    expect(loaded.stripe.premiumPriceId).toBe('price_realish');
+    expect(loaded.stripe.problems).toEqual([]);
+  });
+
+  it('accepts a restricted key, which is the better way to run this', () => {
+    // The API only needs checkout, customers and subscriptions — an `rk_` key
+    // scoped to those is a smaller blast radius than a full secret key, and
+    // must not be rejected as a typo.
+    const loaded = loadEnv({ STRIPE_SECRET_KEY: 'rk_live_restricted' });
+
+    expect(loaded.stripe.secretKey).toBe('rk_live_restricted');
+    expect(loaded.stripe.problems).toEqual([]);
+  });
+
+  it('leaves an unset value alone — unset is a choice, mis-set is a mistake', () => {
+    const loaded = loadEnv({
+      STRIPE_SECRET_KEY: '',
+      STRIPE_WEBHOOK_SECRET: '',
+      STRIPE_PREMIUM_PRICE_ID: '',
+      STRIPE_FAMILY_PRICE_ID: '',
+    });
+
+    expect(loaded.stripe.secretKey).toBe('');
+    expect(loaded.stripe.problems).toEqual([]);
+  });
+});

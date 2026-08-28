@@ -128,6 +128,52 @@ const codeFromLog = async (email, kind = 'Verification code') => {
   throw new Error(`No ${kind.toLowerCase()} was logged for ${email}`);
 };
 
+/**
+ * Finish a password sign-in that was answered with an emailed code.
+ *
+ * Every password sign-in is now challenged — `LOGIN_CODE_REQUIRED` is on by
+ * default and this harness runs the defaults deliberately, because a suite that
+ * switched the second factor off would be certifying a sign-in nobody performs.
+ * So the fill-two-fields-and-click that every journey below starts with is no
+ * longer the whole of signing in, and this is the rest of it.
+ *
+ * Returns false when no code was asked for, which is not a failure: an account
+ * with an authenticator is challenged for *that* instead, a browser holding a
+ * trusted-device token is not challenged at all, and a wrong password never gets
+ * this far. Callers that need the distinction check the URL afterwards, the same
+ * way they did before.
+ *
+ * @param {import('playwright').Page} page  a page sitting on the code screen
+ * @param {string} email  whose inbox the digits went to — matched in the log
+ */
+const completeLoginCode = async (page, email) => {
+  /*
+   * Two screens, because the two apps ask differently: the Family App draws six
+   * boxes under a "Confirm it's you" heading, the console asks for the whole
+   * code in one field. Waiting on the console's field *or* the family heading
+   * keeps this one helper honest about which screen it is on — matching `#code-0`
+   * alone would also match the verify-email, reset and SMS screens, and a helper
+   * that silently typed a sign-in code into a password-reset form would fail
+   * somewhere else entirely.
+   */
+  const found = await page
+    .waitForSelector('#login-code, :text("Confirm it\'s you")', { timeout: 8000 })
+    .then(() => true).catch(() => false);
+  if (!found) return false;
+
+  const code = await codeFromLog(email, 'Login code');
+
+  if (await page.locator('#login-code').count()) {
+    await page.fill('#login-code', code);
+  } else {
+    // One box per digit, each of which moves focus on input — filled by id
+    // rather than by typing so the run does not depend on that focus hop.
+    for (let i = 0; i < 6; i += 1) await page.fill(`#code-${i}`, code[i]);
+  }
+  await page.click('button[type="submit"]');
+  return true;
+};
+
 const waitForPort = async (port, label) => {
   for (let i = 0; i < 200; i += 1) {
     const ok = await new Promise((resolve) => {
@@ -311,6 +357,22 @@ const api = async (method, p, { token, body } = {}) => {
   const text = await res.text();
   let data; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
   return { status: res.status, data };
+};
+
+/**
+ * A whole password sign-in over the API, second factor included.
+ *
+ * The browser equivalent of `completeLoginCode`, for the fixtures that need a
+ * session without driving a page to get one. Returns the response that carries
+ * the token, which is the second one whenever a code was asked for and the
+ * first one otherwise — so a caller reads `.data.token` either way.
+ */
+const apiSignIn = async (email, password) => {
+  const first = await api('POST', '/auth/login', { body: { email, password } });
+  if (!first.data?.loginCodeRequired) return first;
+  return api('POST', '/auth/login/verify', {
+    body: { preAuthToken: first.data.preAuthToken, code: await codeFromLog(email, 'Login code') },
+  });
 };
 
 /**
@@ -613,6 +675,20 @@ try {
     await familyPage.fill('input[type="email"]', PARENT_EMAIL);
     await familyPage.fill('input[type="password"]', PARENT_PASSWORD);
     await familyPage.click('button[type="submit"]');
+
+    /*
+     * A correct password is no longer a session. The API answers it with a code
+     * emailed to the address on the account, and the only place that contract
+     * can actually be checked is here: the API tests prove the endpoint issues a
+     * challenge, and this proves the sign-in page knows what to do when it gets
+     * one. Between the two versions of this file, it did not — `settle()` fell
+     * through to "signed in", navigated to /dashboard with no token, and was
+     * bounced straight back to /login. A password that is right and a password
+     * that is wrong looked identical.
+     */
+    const challenged = await completeLoginCode(familyPage, PARENT_EMAIL);
+    check('a password sign-in is challenged for an emailed code', challenged);
+
     await familyPage.waitForURL('**/dashboard**', { timeout: 15000 }).catch(() => {});
 
     check('login with mixed-case email reaches the dashboard',
@@ -743,6 +819,7 @@ try {
     await page.fill('input[type="email"]', email);
     await page.fill('input[type="password"]', newPassword);
     await page.click('button[type="submit"]');
+    await completeLoginCode(page, email);
     await page.waitForURL('**/dashboard**', { timeout: 15000 }).catch(() => {});
     check('the new password signs in', page.url().includes('/dashboard'), page.url());
 
@@ -1701,9 +1778,7 @@ try {
   step('Family app — signed-in devices can be seen and signed out');
   {
     // A second session for this account, so there is something to evict.
-    const other = await api('POST', '/auth/login', {
-      body: { email: PARENT_EMAIL, password: PARENT_PASSWORD },
-    });
+    const other = await apiSignIn(PARENT_EMAIL, PARENT_PASSWORD);
     check('a second session exists to sign out', !!other.data.token);
 
     const page = await browser.newPage();
@@ -2103,6 +2178,10 @@ try {
     await adminPage.fill('input[type="email"]', PARENT_EMAIL);
     await adminPage.fill('input[type="password"]', PARENT_PASSWORD);
     await adminPage.click('button[type="submit"]');
+    // Staff are challenged for the emailed code exactly as parents are — the
+    // API applies it to every password sign-in, and a console that could not
+    // finish one would be a console nobody could open.
+    await completeLoginCode(adminPage, PARENT_EMAIL);
     await adminPage.waitForTimeout(2500);
     check('a Super Admin reaches the console', !adminPage.url().includes('/login'), adminPage.url());
     check('the console sign-in is clean', w.problems.length === 0, w.problems.join(' | '));
@@ -2123,10 +2202,72 @@ try {
       await page.fill('input[type="email"]', staffEmail); // exactly as it was typed
       await page.fill('input[type="password"]', created.data.generatedPassword);
       await page.click('button[type="submit"]');
+      await completeLoginCode(page, staffEmail);
       await page.waitForTimeout(2500);
       check('that account signs in with the address as typed', !page.url().includes('/login'), page.url());
       await page.close();
     }
+  }
+
+  /*
+   * A Stripe setup that is present but broken must withdraw the offer to pay,
+   * not report itself under a button that repeats the failure.
+   *
+   * `/auth/providers` can only see whether a key exists. A key that is revoked,
+   * belongs to another account, or names an archived price passes that check and
+   * fails at checkout — and the plan screen then read "payments are not set up
+   * correctly on this deployment" directly above "Upgrade to Premium Plan".
+   *
+   * Both halves are faked at the network rather than in the configuration,
+   * because the real thing needs a Stripe account in a known-broken state and a
+   * round trip to api.stripe.com. What is under test is the page's reaction to
+   * an answer, so the answer is what is supplied. No `watch()` here: the 503 is
+   * deliberate and would be recorded as a page problem.
+   */
+  step('Family app — a Stripe fault withdraws the offer to pay');
+  {
+    const page = await browser.newPage();
+
+    await page.route('**/api/auth/providers', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        password: true, google: false, phone: false, maintenance: false,
+        billing: true, loginCode: true,
+      }),
+    }));
+    await page.route('**/api/payments/create-checkout-session', (route) => route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: 'Payments are not set up correctly on this deployment. Please contact support.',
+        configurationError: true,
+      }),
+    }));
+
+    await page.goto(`${FAMILY}/login`);
+    await page.evaluate((t) => localStorage.setItem('fg_token', t), parentToken);
+    await page.goto(`${FAMILY}/dashboard/settings?section=plan`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(700);
+
+    const upgrade = page.locator('button:has-text("Upgrade to Premium")');
+    check('the plan screen offers a purchase while billing reports available',
+      (await upgrade.count()) === 1, String(await upgrade.count()));
+
+    await upgrade.first().click();
+    await page.waitForTimeout(700);
+
+    const body = await page.locator('body').innerText();
+    check('a configuration fault takes the purchase button away',
+      (await upgrade.count()) === 0, String(await upgrade.count()));
+    check('and says why, once', body.includes('Online payment is not available on this deployment'),
+      body.slice(0, 200).replace(/\n/g, ' '));
+    // The standing notice and the failed click said the same thing in two
+    // places; the second one is what used to sit above the button.
+    check('without also repeating it as an error',
+      !body.includes('Payments are not set up correctly'));
+
+    await page.close();
   }
 
   step('Family app — two-factor authentication can be switched on');

@@ -1,4 +1,6 @@
 const jwt = require('jsonwebtoken');
+const request = require('supertest');
+const { app } = require('../src/app');
 const { User, Child, Device } = require('../src/models');
 const { RESEND_COOLDOWN_MS } = require('../src/utils/otp');
 
@@ -70,6 +72,59 @@ async function seedResetCode(user, code = '135790') {
   return code;
 }
 
+const LOGIN_CODE = '246810';
+
+/**
+ * A whole password sign-in, second factor and all.
+ *
+ * `POST /auth/login` no longer answers with a session: every password sign-in is
+ * finished with a code emailed to the address, so a suite that only wants *a
+ * signed-in parent* would otherwise have to drive two endpoints and mint a code
+ * to get one. This drives both and hands back the second response, which carries
+ * the same `{ token, user }` the first one used to.
+ *
+ * The code is written through the model rather than read out of a mailer, the
+ * same trade `seedResetCode` makes and for the same reason: it is stored hashed,
+ * so the digits exist only in the message, and mocking a mailer to recover them
+ * would be a lot of machinery for a step that is not what these suites are about.
+ * The real thing — generated, emailed, checked, expired, attempt-limited — is
+ * covered end to end in `loginCode.test.js`.
+ *
+ * Returns the login response untouched when no code was asked for, so it is also
+ * correct for the cases that never reach the second step: a wrong password, a
+ * locked account, MFA, and a deployment with the factor switched off.
+ */
+async function signIn(email, password = DEFAULT_PASSWORD, options = {}) {
+  const { userAgent = 'Chrome/Test', rememberDevice, trustedDeviceToken } = options;
+
+  const first = await request(app)
+    .post('/api/auth/login')
+    .set('User-Agent', userAgent)
+    .send({ email, password, ...(trustedDeviceToken ? { trustedDeviceToken } : {}) });
+
+  if (!first.body?.loginCodeRequired) return first;
+
+  const user = await User.findByEmail(email);
+  await user.update({
+    loginCode: LOGIN_CODE,
+    loginCodeExpires: new Date(Date.now() + 10 * 60 * 1000),
+  });
+
+  return request(app)
+    .post('/api/auth/login/verify')
+    .set('User-Agent', userAgent)
+    .send({ preAuthToken: first.body.preAuthToken, code: LOGIN_CODE, rememberDevice });
+}
+
+/** Puts a known sign-in code on an account, for suites driving the step by hand. */
+async function seedLoginCode(user, code = LOGIN_CODE) {
+  await user.update({
+    loginCode: code,
+    loginCodeExpires: new Date(Date.now() + 10 * 60 * 1000),
+  });
+  return code;
+}
+
 // Device token shaped exactly like the one deviceController issues on link.
 function deviceToken(device) {
   return jwt.sign(
@@ -89,4 +144,7 @@ module.exports = {
   deviceToken,
   rewindOtpCooldown,
   seedResetCode,
+  signIn,
+  seedLoginCode,
+  LOGIN_CODE,
 };

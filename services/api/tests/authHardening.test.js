@@ -11,7 +11,7 @@ const { env } = require('../src/config/env');
 const { User, Session, Device } = require('../src/models');
 const {
   createUser, createChild, createDevice, deviceToken, tokenFor, uniqueEmail, DEFAULT_PASSWORD,
-  rewindOtpCooldown,
+  rewindOtpCooldown, signIn,
 } = require('./helpers');
 
 describe('The MFA pre-auth token is not a credential', () => {
@@ -184,8 +184,11 @@ describe('Changing the password evicts every other session', () => {
   beforeEach(async () => {
     email = uniqueEmail('pwchange');
     user = await createUser({ email });
-    mine = (await request(app).post('/api/auth/login').send({ email, password: DEFAULT_PASSWORD })).body.token;
-    theirs = (await request(app).post('/api/auth/login').send({ email, password: DEFAULT_PASSWORD })).body.token;
+    // Two whole sign-ins, second factor included — `signIn` drives both steps.
+    // A helper that stopped at the password would leave both of these undefined
+    // and every assertion below would pass for the wrong reason.
+    mine = (await signIn(email)).body.token;
+    theirs = (await signIn(email)).body.token;
 
     await request(app).put('/api/auth/password')
       .set('Authorization', `Bearer ${mine}`)
@@ -207,7 +210,7 @@ describe('Changing the password evicts every other session', () => {
   });
 
   it('reports how many were signed out', async () => {
-    const second = (await request(app).post('/api/auth/login').send({ email, password: 'An0therStr0ng!pw' })).body.token;
+    const second = (await signIn(email, 'An0therStr0ng!pw')).body.token;
     const res = await request(app).put('/api/auth/password')
       .set('Authorization', `Bearer ${second}`)
       .send({ currentPassword: 'An0therStr0ng!pw', newPassword: 'Y3tAn0ther!pass' });
@@ -398,10 +401,8 @@ describe('Only the signing algorithm this service uses is accepted', () => {
 
   it('still accepts the HS256 tokens the service issues', async () => {
     const user = await createUser();
-    const login = await request(app)
-      .post('/api/auth/login')
-      .send({ email: user.email, password: DEFAULT_PASSWORD })
-      .expect(200);
+    const login = await signIn(user.email);
+    expect(login.status).toBe(200);
 
     await request(app)
       .get('/api/auth/me')

@@ -18,6 +18,7 @@
  * from production builds, where it is hardest to notice.
  */
 export { default as api, setTokenKey, setLoginPath, getToken, setToken, clearToken, errorMessage } from './api/client.js';
+export { getTrustedDeviceToken, clearTrustedDeviceToken } from './api/client.js';
 export * from './api/endpoints.js';
 export { uploadChildAvatar } from './api/upload.js';
 export { default as Avatar } from './components/Avatar.jsx';
