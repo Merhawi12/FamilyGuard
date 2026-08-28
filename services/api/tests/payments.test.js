@@ -165,6 +165,53 @@ describe('Payments', () => {
       }
     });
 
+    it('reports a restricted key missing a scope as a configuration fault', async () => {
+      /*
+       * What a restricted key answers when it may not do this — and a restricted
+       * key is the recommended way to run this service, so this was the
+       * recommended setup's failure mode being reported as "the payment provider
+       * could not be reached", under a button offering to try again. Stripe was
+       * reached. It answered. No number of retries changes the key's scopes.
+       */
+      const user = await createUser();
+      Stripe.__mock.checkout.sessions.create.mockRejectedValueOnce(
+        Object.assign(
+          new Error('The provided key does not have the required permissions.'),
+          { type: 'StripePermissionError' },
+        )
+      );
+
+      const res = await request(app)
+        .post('/api/payments/create-checkout-session')
+        .set('Authorization', `Bearer ${tokenFor(user)}`)
+        .send({ plan: 'premium' });
+
+      expect(res.status).toBe(503);
+      expect(res.body.configurationError).toBe(true);
+    });
+
+    it('does not need to read the message to know a bad parameter is ours', async () => {
+      // Every parameter these endpoints send is chosen by this service, so an
+      // invalid one is a configuration fault whatever Stripe calls it. The old
+      // classifier matched three message texts and let the rest through as
+      // "try again".
+      const user = await createUser();
+      Stripe.__mock.checkout.sessions.create.mockRejectedValueOnce(
+        Object.assign(
+          new Error('The `line_items` parameter is not allowed in `setup` mode.'),
+          { type: 'StripeInvalidRequestError' },
+        )
+      );
+
+      const res = await request(app)
+        .post('/api/payments/create-checkout-session')
+        .set('Authorization', `Bearer ${tokenFor(user)}`)
+        .send({ plan: 'premium' });
+
+      expect(res.status).toBe(503);
+      expect(res.body.configurationError).toBe(true);
+    });
+
     it('reports a Stripe outage as an upstream failure, not a config fault', async () => {
       const user = await createUser();
       Stripe.__mock.checkout.sessions.create.mockRejectedValueOnce(
@@ -178,7 +225,11 @@ describe('Payments', () => {
 
       expect(res.status).toBe(502);
       expect(res.body.configurationError).toBeUndefined();
-      expect(res.body.detail).toBeUndefined();
+      // Outside production the reason is shown here too. "Could not be reached"
+      // with nothing after it is not something anybody can act on, and this is
+      // the branch an operator most often meets while setting Stripe up.
+      expect(res.body.detail).toBe('Network error');
+      expect(res.body.type).toBe('StripeConnectionError');
     });
   });
 });

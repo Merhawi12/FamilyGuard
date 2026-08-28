@@ -70,24 +70,59 @@ const planForPrice = (priceId) => {
  * are about this deployment's setup and carry no customer data. Everything else
  * gets a generic message and a full log line.
  */
+/**
+ * The split is "will retrying help", not "which error is it".
+ *
+ * Stripe names four failures that mean the request itself was wrong, and every
+ * one of them will be wrong again in ten seconds: the key is not a key
+ * (`Authentication`), the key is not allowed to do this (`Permission`), the
+ * parameters name something that does not exist (`InvalidRequest`), or the same
+ * idempotency key was reused for a different body. All four are a deployment's
+ * configuration, and none of them is worth a "please try again".
+ *
+ * `Permission` is the one this was written for. It is what a *restricted* key
+ * returns when it is missing a scope — and a restricted key is the recommended
+ * way to run this service, so the recommended setup had a failure mode reported
+ * as "the payment provider could not be reached", under a button offering to try
+ * it again. That sentence is wrong twice: Stripe was reached, and it answered.
+ *
+ * `InvalidRequest` used to be matched by message text — "No such price", "No
+ * such plan", "not recurring" — which caught the three examples somebody had in
+ * front of them and let every other one through. Every parameter these two
+ * endpoints send is chosen by this service, not by the customer, so an invalid
+ * one is ours by construction and the text does not need reading.
+ */
+const RETRY_WILL_NOT_HELP = new Set([
+  'StripeAuthenticationError',
+  'StripePermissionError',
+  'StripeInvalidRequestError',
+  'StripeIdempotencyError',
+]);
+
 const sendStripeFailure = (res, err, context) => {
-  const configFault = err?.type === 'StripeAuthenticationError'
-    || (err?.type === 'StripeInvalidRequestError' && /No such price|No such plan|not.*recurring/i.test(err.message || ''));
+  const configFault = RETRY_WILL_NOT_HELP.has(err?.type);
 
   logger.error('Stripe request failed', { ...context, type: err?.type, code: err?.code, error: err?.message });
+
+  // Stripe's wording names the exact key, price or scope at fault, which is what
+  // makes it fixable — but it describes our infrastructure, so a customer in
+  // production never sees it. Locally it is the whole point, and that is as true
+  // of a connection failure as of a configuration one: "could not be reached"
+  // with nothing after it is not a thing anybody can act on.
+  const detail = env.isProduction ? {} : { detail: err.message, type: err?.type };
 
   if (configFault) {
     return res.status(503).json({
       error: 'Payments are not set up correctly on this deployment. Please contact support.',
       configurationError: true,
-      // Stripe's wording names the exact key or price at fault, which is what
-      // makes it fixable — but it describes our infrastructure, so a customer
-      // in production never sees it. Locally it is the whole point.
-      ...(env.isProduction ? {} : { detail: err.message }),
+      ...detail,
     });
   }
 
-  return res.status(502).json({ error: 'The payment provider could not be reached. Please try again.' });
+  return res.status(502).json({
+    error: 'The payment provider could not be reached. Please try again.',
+    ...detail,
+  });
 };
 
 // POST /api/payments/create-checkout-session

@@ -210,6 +210,23 @@ export default function Settings() {
     return true;
   };
 
+  /**
+   * The reason, when there is one and it is safe to show.
+   *
+   * The API attaches Stripe's own wording as `detail` **only outside
+   * production**, so this cannot leak infrastructure to a customer — the field
+   * is simply absent there. What it buys is the loop an operator is in while
+   * setting Stripe up: "The payment provider could not be reached" describes
+   * three completely different faults (no outbound network, a key whose scopes
+   * are wrong, a parameter Stripe rejected), and picking between them meant
+   * leaving the browser for the server log on every attempt.
+   */
+  const withReason = (err, fallback) => {
+    const message = errorMessage(err, fallback);
+    const { detail, type } = err.response?.data || {};
+    return detail ? `${message} (${type || 'Stripe'}: ${detail})` : message;
+  };
+
   const handleUpgrade = async (plan) => {
     setLoadingPlan(plan);
     setPlanError('');
@@ -218,7 +235,7 @@ export default function Settings() {
       window.location.href = res.data.url;
     } catch (err) {
       if (!withdrawIfMisconfigured(err)) {
-        setPlanError(errorMessage(err, 'Could not start checkout.'));
+        setPlanError(withReason(err, 'Could not start checkout.'));
       }
       setLoadingPlan(null);
     }
@@ -232,7 +249,7 @@ export default function Settings() {
       window.location.href = res.data.url;
     } catch (err) {
       if (!withdrawIfMisconfigured(err)) {
-        setPlanError(errorMessage(err, 'Could not open the billing portal.'));
+        setPlanError(withReason(err, 'Could not open the billing portal.'));
       }
       setPortalLoading(false);
     }
