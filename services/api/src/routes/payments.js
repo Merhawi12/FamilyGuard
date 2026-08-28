@@ -167,13 +167,63 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
     }
 
     const session = await stripe.checkout.sessions.create({
+      /**
+       * Ours, and not negotiable.
+       *
+       * `customer` ties the subscription to the Stripe customer this service
+       * stores, and `metadata.userId` is how `checkout.session.completed`
+       * attributes a payment to an account. Drop either and a customer whose
+       * card was charged stays on the free plan — see the attribution block in
+       * the webhook handler, which exists because that has happened.
+       */
       customer: customerId,
-      payment_method_types: ['card'],
-      line_items: [{ price: priceIdFor(plan), quantity: 1 }],
+      metadata: { userId: user.id, plan },
       mode: 'subscription',
+      line_items: [{ price: priceIdFor(plan), quantity: 1 }],
       success_url: `${env.clientUrl}/dashboard/settings?payment=success`,
       cancel_url:  `${env.clientUrl}/dashboard/settings?payment=cancelled`,
-      metadata: { userId: user.id, plan },
+
+      /**
+       * Configured in Stripe's Checkout Studio; changed there, not here.
+       *
+       * `payment_method_collection` is subscription-only and this session is
+       * always a subscription — Premium is the one tier sold.
+       *
+       * `payment_method_types: ['card']` was removed rather than kept: pinning
+       * it here overrides the payment methods enabled on the Stripe account, so
+       * turning one on in the dashboard would have done nothing. Unset is what
+       * lets the dashboard decide, which is where the rest of this block is
+       * decided too.
+       *
+       * ## Four of the Studio's parameters are deliberately absent
+       *
+       * `ui_mode: 'hosted_page'`, `submit_type`, `integration_identifier` and
+       * `origin_context` were applied and then removed, because checkout began
+       * answering "Payments are not set up correctly on this deployment" the
+       * moment they arrived.
+       *
+       * They are the four that depend on how new the *account's* default API
+       * version is — this client pins no version, deliberately — and Stripe
+       * refuses a parameter it does not recognise outright rather than ignoring
+       * it. `submit_type` carries a second constraint: it has historically been
+       * accepted only with `mode: 'payment'`, and every session here is a
+       * subscription. Losing them costs nothing visible: `hosted` is what
+       * `ui_mode` defaults to, `submit_type: 'auto'` is the default wording, and
+       * the other two are labels Stripe attributes the integration by.
+       *
+       * `origin_context: 'mobile_app'` was also simply untrue. This session is
+       * created for a parent on the web dashboard; the Android build is the same
+       * page in a WebView, and neither is a native mobile checkout.
+       *
+       * To put them back: pin an API version on the client that accepts them
+       * (`Stripe(key, { apiVersion: '…' })` in services/billing) and re-add them
+       * one at a time. `payments.test.js` pins what is sent either way.
+       */
+      billing_address_collection: 'auto',
+      phone_number_collection: { enabled: false },
+      automatic_tax: { enabled: false },
+      allow_promotion_codes: false,
+      payment_method_collection: 'always',
     });
 
     res.json({ url: session.url });

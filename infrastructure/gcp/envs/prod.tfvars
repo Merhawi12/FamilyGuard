@@ -123,15 +123,22 @@ admin_email = "support@parentix.ca"
 
 # Every password sign-in is finished with a code emailed to the account.
 #
-# Stated here rather than left to the default because of what it is coupled to:
-# with outbound mail down, the code is written to the Cloud Run log and reaches
-# nobody, so nobody can sign in. That has happened on this deployment — twenty
-# three days of it. This line is the switch to reach if it happens again, and
-# the reason it is worth an apply rather than a code change.
+# **Off, because outbound mail does not work.** The credential in the API's .env
+# is refused by Gmail with `535-5.7.8 Username and Password not accepted`, and a
+# code nobody can receive is not a second factor — it is a lockout of every
+# account on the platform, including the staff console used to fix it.
 #
-# Turn it back on the moment mail is verified. Accounts with an authenticator
-# app are challenged for that instead and are unaffected either way.
-login_code_required = true
+# This is the same sign-in behaviour production has today, so turning it off
+# gives up nothing that currently exists. It is a switch rather than a code
+# change precisely so this decision can be made in the minute it is needed.
+#
+# **Turn it back on the moment mail is verified**, which is one line here and an
+# apply. Prove the credential first — `scripts/setup-google-mail.sh <address>
+# --to <you>` authenticates against Gmail before storing anything, because every
+# mail outage on this platform has been a credential stored without being
+# tested. Accounts with an authenticator app are challenged for that instead and
+# are unaffected either way.
+login_code_required = false
 
 # Where monitoring alerts go. Set this before the first production apply — an
 # unmonitored production service is one where the first report of an outage

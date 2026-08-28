@@ -96,6 +96,70 @@ describe('Payments', () => {
       expect(args.metadata.plan).toBe('premium');
     });
 
+    it('sends the attribution the webhook needs to credit the payment', async () => {
+      /*
+       * The two parameters a Checkout Studio configuration does not know about
+       * and would happily strip. `checkout.session.completed` finds the account
+       * by `metadata.userId`, falling back to the Stripe customer — so without
+       * both of these a customer whose card was charged stays on the free plan,
+       * and the only trace is a log line asking an operator to reconcile it.
+       */
+      const user = await createUser();
+
+      await request(app)
+        .post('/api/payments/create-checkout-session')
+        .set('Authorization', `Bearer ${tokenFor(user)}`)
+        .send({ plan: 'premium' });
+
+      const args = Stripe.__mock.checkout.sessions.create.mock.calls.at(-1)[0];
+      expect(args.metadata.userId).toBe(user.id);
+      expect(args.customer).toEqual(expect.any(String));
+    });
+
+    it('sends the Checkout Studio configuration', async () => {
+      // Pinned so a later edit to this call cannot quietly drop what was
+      // configured in the dashboard — the failure would be a payment page that
+      // looks subtly wrong, which nothing else here would catch.
+      const user = await createUser();
+
+      await request(app)
+        .post('/api/payments/create-checkout-session')
+        .set('Authorization', `Bearer ${tokenFor(user)}`)
+        .send({ plan: 'premium' });
+
+      const args = Stripe.__mock.checkout.sessions.create.mock.calls.at(-1)[0];
+      expect(args).toMatchObject({
+        billing_address_collection: 'auto',
+        phone_number_collection: { enabled: false },
+        automatic_tax: { enabled: false },
+        allow_promotion_codes: false,
+        payment_method_collection: 'always',
+      });
+      // Deliberately absent: pinning it here would override the payment methods
+      // enabled on the Stripe account.
+      expect(args.payment_method_types).toBeUndefined();
+    });
+
+    it('sends none of the parameters the account may be too old to accept', () => {
+      /*
+       * These four came from Checkout Studio and were removed again: checkout
+       * started answering "Payments are not set up correctly on this deployment"
+       * the moment they arrived. Stripe refuses a parameter its API version does
+       * not recognise rather than ignoring it, this client pins no version, and
+       * `submit_type` additionally wants `mode: 'payment'` where every session
+       * here is a subscription.
+       *
+       * Asserted rather than left to a comment, because the obvious repair for
+       * "the Studio config is missing" is to paste them back in, and the symptom
+       * that follows names the *deployment* rather than the change.
+       */
+      const args = Stripe.__mock.checkout.sessions.create.mock.calls.at(-1)[0];
+      expect(args.ui_mode).toBeUndefined();
+      expect(args.submit_type).toBeUndefined();
+      expect(args.integration_identifier).toBeUndefined();
+      expect(args.origin_context).toBeUndefined();
+    });
+
     /* Every Stripe failure used to answer "Failed to create checkout session",
        so a placeholder API key looked exactly like a Stripe outage and the one
        line that told them apart lived only in the server log. */
