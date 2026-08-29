@@ -47,13 +47,15 @@ SERVICE="parentix-${ENV_NAME}-api"
 CLEAN=0
 ROLL=0
 LIST=0
+SET_PRICE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --clean) CLEAN=1; shift ;;
     --roll)  ROLL=1;  shift ;;
     --list-prices) LIST=1; shift ;;
-    -h|--help) sed -n '3,9p' "$0"; exit 0 ;;
-    *) die "Unknown argument '$1'. Use --clean, --roll and/or --list-prices." ;;
+    --set-price) SET_PRICE=1; shift ;;
+    -h|--help) sed -n '3,10p' "$0"; exit 0 ;;
+    *) die "Unknown argument '$1'. Use --clean, --roll, --list-prices and/or --set-price." ;;
   esac
 done
 
@@ -67,6 +69,67 @@ done
 #
 # Only prices are printed. A price ID is not a credential — it appears in
 # client-side Stripe integrations by design — and the key is unset immediately.
+if [ "$SET_PRICE" = 1 ]; then
+  # The transcription step, deleted.
+  #
+  # Copying an API ID by hand has now put a publishable key and two example
+  # values into this secret. Every one of them was a person moving a string from
+  # a screen into a command, and none of the offline checks could see the
+  # difference. Here the ID never becomes text anybody handles: it is read from
+  # the account and written to Secret Manager in the same breath.
+  #
+  # Only recurring prices are candidates, because checkout sells a subscription.
+  # If exactly one exists it is used; if several do, PRICE_ID names which, and
+  # the list is printed rather than a guess being made.
+  require_tool node
+  KEY="$(gcloud secrets versions access latest --secret="parentix-${ENV_NAME}-stripe-secret-key")"
+  body="$(curl -sS -u "${KEY}:" 'https://api.stripe.com/v1/prices?active=true&limit=100&expand[]=data.product')"
+  unset KEY
+
+  mapfile -t candidates < <(printf '%s' "$body" | node -e '
+    let raw = "";
+    process.stdin.on("data", (d) => { raw += d; });
+    process.stdin.on("end", () => {
+      const parsed = JSON.parse(raw);
+      if (parsed.error) { console.error("stripe: " + parsed.error.message); process.exit(1); }
+      for (const p of (parsed.data || []).filter((x) => x.recurring)) {
+        const amount = p.unit_amount == null ? "metered" : (p.unit_amount / 100).toFixed(2) + " " + p.currency.toUpperCase();
+        const name = (p.product && p.product.name) || p.nickname || "";
+        // id first so the shell can cut it out without parsing the rest.
+        console.log([p.id, amount, p.recurring.interval, p.livemode ? "live" : "TEST", name].join("\t"));
+      }
+    });
+  ') || die "Could not read prices from Stripe."
+
+  [ "${#candidates[@]}" -gt 0 ] || die "No active recurring price exists on this account.
+       Checkout sells a subscription, so a one-off price cannot be used.
+       Create a monthly price on the Premium product in the Stripe dashboard."
+
+  chosen=""
+  if [ -n "${PRICE_ID:-}" ]; then
+    for row in "${candidates[@]}"; do
+      [ "${row%%$'\t'*}" = "$PRICE_ID" ] && chosen="$PRICE_ID"
+    done
+    [ -n "$chosen" ] || die "PRICE_ID=${PRICE_ID} is not an active recurring price on this account."
+  elif [ "${#candidates[@]}" -eq 1 ]; then
+    chosen="${candidates[0]%%$'\t'*}"
+  else
+    log "Several recurring prices exist — name one with PRICE_ID:"
+    for row in "${candidates[@]}"; do printf '    %s\n' "$row" >&2; done
+    die "Re-run as: PRICE_ID=<id from above> $0 --set-price"
+  fi
+
+  for row in "${candidates[@]}"; do
+    [ "${row%%$'\t'*}" = "$chosen" ] && log "Storing: ${row}"
+  done
+
+  printf '%s' "$chosen" | gcloud secrets versions add \
+    "parentix-${ENV_NAME}-stripe-premium-price-id" --data-file=- --quiet >/dev/null \
+    || die "Could not write the secret version."
+  log "Stored. Re-run with --clean --roll to tidy old versions and pick it up."
+  exit 0
+fi
+
 if [ "$LIST" = 1 ]; then
   require_tool node
   KEY="$(gcloud secrets versions access latest --secret="parentix-${ENV_NAME}-stripe-secret-key")"
@@ -172,19 +235,28 @@ classify() {
   local trailing=""
   case "$payload" in *$'\n') trailing=" — HAS A TRAILING NEWLINE (stored with echo instead of printf)" ;; esac
 
-  # An example value, stored because it was in a command somebody could paste.
+  # An example value, stored because it sat in a command somebody could paste.
   #
-  # This is not hypothetical caution: `price_1ABCdef...` reached production that
-  # way, out of a line in this conversation's own instructions. It has the right
-  # prefix and a plausible length, so every check above passes it, and the first
-  # thing to notice was Stripe — one round trip and a customer-visible outage
-  # later. An ellipsis or an angle bracket never appears in a real Stripe
-  # identifier, so a value carrying one is an example by construction.
+  # Twice now. `price_1ABCdef...` reached production out of a line in this
+  # project's own instructions, and after that was caught by a blocklist of
+  # placeholder spellings, `price_1Qx…` reached it the same way — the same fault
+  # wearing a Unicode ellipsis instead of three dots, which the blocklist did not
+  # contain. Blocklisting the shapes of wrongness is a game you lose one
+  # character at a time.
+  #
+  # So this allowlists the alphabet instead. Every Stripe key and identifier is
+  # ASCII letters, digits and underscores; an ellipsis, an angle bracket, a
+  # space, a smart quote and a newline are all outside it by construction, and
+  # no future placeholder can be inside it while still looking like a
+  # placeholder.
+  # Only when the newline check has not already explained it — a newline is
+  # outside this alphabet too, and printing both reads as two separate faults.
   local placeholder=""
-  case "$payload" in
-    *...*|*REPLACE*|*replace_with*|*ABCdef*|*abcdef123*|*YOUR_*|*xxxx*|*'<'*|*'>'*)
-      placeholder=" — LOOKS LIKE A PLACEHOLDER, not a real value" ;;
-  esac
+  if [ -z "$trailing" ]; then
+    case "$payload" in
+      *[!A-Za-z0-9_]*) placeholder=" — CONTAINS CHARACTERS A STRIPE ID CANNOT HAVE (an example value, or a mangled paste)" ;;
+    esac
+  fi
 
   if [ "$matched" = 1 ] && [ "$length" -ge "$minlen" ] && [ -z "$trailing" ] && [ -z "$placeholder" ]; then
     printf '    version %-4s %-6s len=%-4s ✓\n' "$version" "${head}…" "$length" >&2
