@@ -19,6 +19,33 @@ require_gcloud_auth
 require_project
 select_workspace
 
+# Firebase keeps its own credentials, entirely separate from gcloud's.
+#
+# `require_tool firebase` only proves the binary is on PATH, and a stale login
+# looks identical to a good one until something asks Hosting to do work — which
+# is after two full Vite builds and a Terraform read. The failure then arrives as
+#
+#   Authentication Error: Your credentials are no longer valid.
+#
+# with a couple of minutes already spent and nothing published. `projects:list`
+# is a real API call, so it catches an expired token rather than merely a
+# missing one, which `login:list` would not: that reads the cached credential
+# file and reports an account that Google has since stopped honouring.
+require_firebase_auth() {
+  firebase projects:list --project "$PROJECT_ID" >/dev/null 2>&1 && return 0
+  die "firebase is not authenticated (or the token has expired).
+
+       In Cloud Shell there is no localhost callback, so:
+         firebase login --reauth --no-localhost
+
+       Elsewhere:
+         firebase login --reauth
+
+       Hosting credentials are separate from gcloud's — being logged into
+       gcloud, even as the project owner, does not authenticate this."
+}
+require_firebase_auth
+
 TARGET="${1:-all}"
 CHANNEL="${CHANNEL:-}"
 
