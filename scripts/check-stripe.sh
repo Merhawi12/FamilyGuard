@@ -46,14 +46,67 @@ SERVICE="parentix-${ENV_NAME}-api"
 
 CLEAN=0
 ROLL=0
+LIST=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --clean) CLEAN=1; shift ;;
     --roll)  ROLL=1;  shift ;;
-    -h|--help) sed -n '3,8p' "$0"; exit 0 ;;
-    *) die "Unknown argument '$1'. Use --clean and/or --roll." ;;
+    --list-prices) LIST=1; shift ;;
+    -h|--help) sed -n '3,9p' "$0"; exit 0 ;;
+    *) die "Unknown argument '$1'. Use --clean, --roll and/or --list-prices." ;;
   esac
 done
+
+# ── What is actually sellable on this account ────────────────────────────────
+#
+# "Copy the API ID from the dashboard" is the step that keeps going wrong — it
+# has produced a publishable key, and an example value out of a chat message,
+# both of which look close enough to survive every offline check. The account
+# already knows the answer and the key to ask with is already in Secret Manager,
+# so the value can be read rather than transcribed.
+#
+# Only prices are printed. A price ID is not a credential — it appears in
+# client-side Stripe integrations by design — and the key is unset immediately.
+if [ "$LIST" = 1 ]; then
+  require_tool node
+  KEY="$(gcloud secrets versions access latest --secret="parentix-${ENV_NAME}-stripe-secret-key")"
+  body="$(curl -sS -u "${KEY}:" 'https://api.stripe.com/v1/prices?active=true&limit=100&expand[]=data.product')"
+  unset KEY
+
+  log "Active prices on this Stripe account:"
+  printf '%s' "$body" | node -e '
+    let raw = "";
+    process.stdin.on("data", (d) => { raw += d; });
+    process.stdin.on("end", () => {
+      const parsed = JSON.parse(raw);
+      if (parsed.error) {
+        console.error("  Stripe refused: " + parsed.error.message);
+        process.exit(1);
+      }
+      // Checkout here sells a subscription, so a one-off price cannot be used
+      // even though the dashboard lists it alongside the others.
+      const rows = (parsed.data || []).filter((p) => p.recurring);
+      if (!rows.length) {
+        console.log("  No recurring prices exist. Create a monthly price on the Premium product.");
+        return;
+      }
+      for (const p of rows) {
+        const amount = p.unit_amount == null
+          ? "metered"
+          : (p.unit_amount / 100).toFixed(2) + " " + p.currency.toUpperCase();
+        const name = (p.product && p.product.name) || p.nickname || "";
+        console.log(
+          "  " + p.id.padEnd(34) + amount.padEnd(12) + "/" + p.recurring.interval
+          + "  " + (p.livemode ? "live" : "TEST") + "  " + name
+        );
+      }
+      console.log("\n  Store the one Premium sells at:");
+      console.log("    printf %s <the id above> | gcloud secrets versions add "
+        + "parentix-'"${ENV_NAME}"'-stripe-premium-price-id --data-file=-");
+    });
+  ' || die "Could not list prices."
+  exit 0
+fi
 
 log "Environment : ${ENV_NAME} (${PROJECT_ID}, ${REGION})"
 log "Service     : ${SERVICE}"
@@ -119,11 +172,25 @@ classify() {
   local trailing=""
   case "$payload" in *$'\n') trailing=" — HAS A TRAILING NEWLINE (stored with echo instead of printf)" ;; esac
 
-  if [ "$matched" = 1 ] && [ "$length" -ge "$minlen" ] && [ -z "$trailing" ]; then
+  # An example value, stored because it was in a command somebody could paste.
+  #
+  # This is not hypothetical caution: `price_1ABCdef...` reached production that
+  # way, out of a line in this conversation's own instructions. It has the right
+  # prefix and a plausible length, so every check above passes it, and the first
+  # thing to notice was Stripe — one round trip and a customer-visible outage
+  # later. An ellipsis or an angle bracket never appears in a real Stripe
+  # identifier, so a value carrying one is an example by construction.
+  local placeholder=""
+  case "$payload" in
+    *...*|*REPLACE*|*replace_with*|*ABCdef*|*abcdef123*|*YOUR_*|*xxxx*|*'<'*|*'>'*)
+      placeholder=" — LOOKS LIKE A PLACEHOLDER, not a real value" ;;
+  esac
+
+  if [ "$matched" = 1 ] && [ "$length" -ge "$minlen" ] && [ -z "$trailing" ] && [ -z "$placeholder" ]; then
     printf '    version %-4s %-6s len=%-4s ✓\n' "$version" "${head}…" "$length" >&2
     echo ok
   else
-    printf '    version %-4s %-6s len=%-4s ✗%s\n' "$version" "${head}…" "$length" "$trailing" >&2
+    printf '    version %-4s %-6s len=%-4s ✗%s%s\n' "$version" "${head}…" "$length" "$trailing" "$placeholder" >&2
     echo junk
   fi
 }
