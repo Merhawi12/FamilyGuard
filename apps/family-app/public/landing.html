@@ -9,6 +9,21 @@
      scans — so on Android the address bar stayed business blue above a page
      that is entirely teal. -->
 <meta name="theme-color" content="#0C6478" />
+<!--
+  Where this page's API lives. Empty means same-origin, which is what the Vite
+  dev proxy and scripts/browser-e2e.mjs serve; scripts/deploy-web.sh replaces the
+  content with the real API origin on the way out and refuses to publish if the
+  substitution did not take.
+
+  It has to be stated rather than assumed, and that is the whole point of this
+  tag. These pages live in `public/`, so Vite copies them verbatim and
+  `VITE_API_URL` never reaches them — a relative `/api/contact` worked in dev and
+  under the harness, and in production Firebase Hosting's `**` rewrite answered
+  it with app.html and HTTP 200. The form read that as success: the response was
+  not JSON, the parse failure was swallowed to `{}`, `res.ok` was true, and every
+  visitor was thanked for a message that never left their browser.
+-->
+<meta name="parentix-api" content="" />
 <link rel="icon" href="/logo.png" />
 <link rel="apple-touch-icon" href="/logo.png" />
 <link rel="manifest" href="/manifest.json" />
@@ -1097,6 +1112,19 @@ if ('IntersectionObserver' in window) {
 
 // ---- Contact form ----
 const contactForm = document.getElementById('contactForm');
+/**
+ * The API origin for this page, from the `parentix-api` meta tag.
+ *
+ * Empty is same-origin and is correct for the dev proxy and the browser
+ * harness; deploy-web.sh writes the real origin in for a published build. The
+ * trailing slash is trimmed so `origin + '/api/contact'` cannot become a double
+ * slash, which some proxies treat as a different path.
+ */
+function apiOrigin() {
+  const meta = document.querySelector('meta[name="parentix-api"]');
+  return (meta && meta.content ? meta.content : '').replace(/\/$/, '');
+}
+
 if (contactForm) {
   const cfStatus = document.getElementById('cfStatus');
   const submitBtn = contactForm.querySelector('.contact-submit');
@@ -1109,7 +1137,7 @@ if (contactForm) {
     cfStatus.textContent = '';
     cfStatus.className = 'contact-status';
     try {
-      const res = await fetch('/api/contact', {
+      const res = await fetch(apiOrigin() + '/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

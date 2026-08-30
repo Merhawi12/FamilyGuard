@@ -162,11 +162,39 @@ assert_family_layout() {
     || die "${dist}/landing.html is missing — / would fall through to the SPA shell."
 }
 
+# The marketing pages are static, so `VITE_API_URL` never reaches them.
+#
+# landing.html and contact.html live in `public/`, which vite copies verbatim.
+# They used to call a relative `/api/contact`, which is correct in dev (the vite
+# proxy) and under the browser harness (which serves /api itself) and silently
+# wrong in production: firebase.json has no /api rewrite, so Hosting's `**`
+# caught it and answered with app.html and HTTP 200. The form's `res.json()`
+# failed on HTML, the failure was swallowed to `{}`, `res.ok` was true, and every
+# visitor was thanked for a message that was never sent anywhere.
+#
+# The stamping itself is a vite plugin (apps/family-app/vite.config.js), not a
+# step here, because there are two deploy paths — this script and
+# .github/workflows/deploy-web.yml, which builds and publishes on its own. A fix
+# in either one would leave the other shipping the broken page.
+#
+# What is left here is the check, which still belongs at the edge: not
+# publishing at all beats publishing a page whose contact form goes nowhere.
+assert_api_origin_stamped() {
+  local dist="$1" page
+  for page in landing.html contact.html; do
+    [ -f "${dist}/${page}" ] || die "${dist}/${page} is missing."
+    grep -q "name=\"parentix-api\" content=\"${API_URL}\"" "${dist}/${page}" \
+      || die "${page} is not stamped with ${API_URL} — its contact form would post to the Hosting rewrite and be silently discarded. See the stamp-api-origin plugin in apps/family-app/vite.config.js."
+  done
+  log "Contact form origin: ${API_URL}"
+}
+
 TARGETS=()
 
 if [ "$TARGET" = "all" ] || [ "$TARGET" = "family" ]; then
   build family family-app "Family App"
   assert_family_layout "$DIST"
+  assert_api_origin_stamped "$DIST"
   TARGETS+=(family)
 fi
 

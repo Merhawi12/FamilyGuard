@@ -100,11 +100,25 @@ jobs:
       # which a mistake is live.
       - name: Family App output is laid out for Firebase Hosting
         if: steps.gate.outputs.ready == 'true'
+        env:
+          VITE_API_URL: ${{ vars.API_URL }}
         run: |
           dist=apps/family-app/dist
           test -f "$dist/app.html"     || { echo "::error::$dist/app.html missing"; exit 1; }
           test ! -f "$dist/index.html" || { echo "::error::$dist/index.html would win over the / rewrite"; exit 1; }
           test -f "$dist/landing.html" || { echo "::error::$dist/landing.html missing"; exit 1; }
+
+          # The marketing pages are static, so VITE_API_URL reaches them only via
+          # the stamp-api-origin plugin in apps/family-app/vite.config.js. An
+          # unstamped page posts its contact form to a relative /api, which
+          # Hosting answers with app.html and HTTP 200 — the form reports success
+          # and the message is discarded in the browser. Checked here as well as
+          # in scripts/deploy-web.sh because this job builds and publishes on its
+          # own and never runs that script.
+          for page in landing.html contact.html; do
+            grep -q "name=\"parentix-api\" content=\"${VITE_API_URL}\"" "$dist/$page" \
+              || { echo "::error::$page is not stamped with $VITE_API_URL — its contact form would be silently discarded"; exit 1; }
+          done
 
       - name: Authenticate
         if: steps.gate.outputs.ready == 'true'

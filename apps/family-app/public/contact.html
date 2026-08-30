@@ -6,6 +6,9 @@
 <title>Contact Us — Parentix</title>
 <!-- Matches --current below; see landing.html. -->
 <meta name="theme-color" content="#0C6478" />
+<!-- Where this page's API lives; see the longer note in landing.html. Empty is
+     same-origin (dev proxy, browser harness); deploy-web.sh fills it. -->
+<meta name="parentix-api" content="" />
 <link rel="icon" href="/logo.png" />
 <link rel="apple-touch-icon" href="/logo.png" />
 <link rel="manifest" href="/manifest.json" />
@@ -360,6 +363,12 @@ if (!reduceMotion && 'IntersectionObserver' in window) {
 
 // ---- Contact form ----
 const contactForm = document.getElementById('contactForm');
+/** The API origin for this page; see landing.html. Empty means same-origin. */
+function apiOrigin() {
+  const meta = document.querySelector('meta[name="parentix-api"]');
+  return (meta && meta.content ? meta.content : '').replace(/\/$/, '');
+}
+
 if (contactForm) {
   const cfStatus = document.getElementById('cfStatus');
   const submitBtn = contactForm.querySelector('.contact-submit');
@@ -372,7 +381,7 @@ if (contactForm) {
     cfStatus.textContent = '';
     cfStatus.className = 'contact-status';
     try {
-      const res = await fetch('/api/contact', {
+      const res = await fetch(apiOrigin() + '/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

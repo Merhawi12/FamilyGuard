@@ -51,6 +51,57 @@ const shellAsAppHtml = {
 };
 
 /**
+ * Writes `VITE_API_URL` into the marketing pages' `parentix-api` meta tag.
+ *
+ * `landing.html` and `contact.html` live in `public/`, so vite copies them
+ * verbatim and no `import.meta.env` substitution reaches them. They used to post
+ * their contact form to a relative `/api/contact`, which is correct under the
+ * dev proxy and under scripts/browser-e2e.mjs — and in production Firebase
+ * Hosting has no `/api` rewrite, so its `**` rule answered the POST with
+ * `app.html` and HTTP 200. The form read that as success, and every visitor was
+ * thanked for a message that never left their browser.
+ *
+ * This lives in the build rather than in a deploy script because there are two
+ * deploy paths and only one of them is a script: `scripts/deploy-web.sh`, and
+ * `.github/workflows/deploy-web.yml`, which runs `npm run build` and publishes
+ * the output itself. Stamping in either one would leave the other shipping the
+ * broken page. Stamping here is reached by both, and by anything added later.
+ *
+ * An empty `VITE_API_URL` leaves the tag empty, which is same-origin and exactly
+ * right for the dev server and the harness. Both deploy paths assert the tag is
+ * non-empty before publishing, because in *those* contexts empty is the bug.
+ */
+const stampApiOrigin = {
+  name: 'stamp-api-origin',
+  apply: 'build',
+  closeBundle() {
+    const origin = (process.env.VITE_API_URL || '').replace(/\/$/, '');
+    if (!origin) return;
+
+    for (const page of ['landing.html', 'contact.html']) {
+      const file = path.join(here, 'dist', page);
+      if (!fs.existsSync(file)) continue;
+
+      const before = fs.readFileSync(file, 'utf8');
+      const after = before.replace(
+        /<meta name="parentix-api" content="" *\/>/,
+        `<meta name="parentix-api" content="${origin}" />`
+      );
+      // Loud rather than silent: a reformatted tag would leave the page posting
+      // to the Hosting rewrite again, which is the failure this plugin exists
+      // to end and the one that looks like success from the outside.
+      if (after === before) {
+        throw new Error(
+          `${page}: could not stamp the API origin — the parentix-api meta tag is missing or reshaped. `
+          + 'See services/api/tests/contactFormOrigin.test.js.'
+        );
+      }
+      fs.writeFileSync(file, after);
+    }
+  },
+};
+
+/**
  * The Android build, via Capacitor.
  *
  * Two things differ from the hosted build, and both come from the same fact:
@@ -69,7 +120,7 @@ const shellAsAppHtml = {
 const NATIVE = process.env.VITE_BUILD_TARGET === 'capacitor';
 
 export default defineConfig({
-  plugins: NATIVE ? [react()] : [react(), landingAtRoot, shellAsAppHtml],
+  plugins: NATIVE ? [react()] : [react(), landingAtRoot, shellAsAppHtml, stampApiOrigin],
   define: {
     // Settings → About reports which build a parent is looking at, which is the
     // first thing a support conversation needs and nothing else can supply.
