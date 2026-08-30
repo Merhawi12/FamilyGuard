@@ -2329,6 +2329,7 @@ try {
     const routes = [['', 'Overview'], ['users', 'User Management'], ['devices', 'Device Control'],
       ['content-filtering', 'Content Filtering'],
       ['sessions', 'Sessions'], ['billing', 'Billing & Subscriptions'],
+      ['contact-messages', 'Contact Messages'],
       ['notifications', 'Notifications'], ['settings', 'Settings'], ['audit-logs', 'System Logs'],
       ['staff', 'Staff'], ['profile', 'Profile']];
     for (const [route, label] of routes) {
@@ -3170,6 +3171,7 @@ try {
       ['', 'Overview'], ['users', 'User Management'], ['devices', 'Device Control'],
       ['content-filtering', 'Content Filtering'],
       ['sessions', 'Sessions'], ['billing', 'Billing & Subscriptions'],
+      ['contact-messages', 'Contact Messages'],
       ['notifications', 'Notifications'], ['settings', 'Settings'], ['audit-logs', 'System Logs'],
       ['staff', 'Staff Accounts'], ['profile', 'My Profile'],
     ];

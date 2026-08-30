@@ -48,6 +48,17 @@ const PERMISSIONS = {
    * It does not make the trail erasable without trace — see `clearLogs`.
    */
   MANAGE_AUDIT_LOGS: 'manage_audit_logs',
+  /**
+   * The public contact form's inbox.
+   *
+   * Its own key rather than part of `manage_users`, because the people in it are
+   * mostly *not* users: anyone can write to the form without an account, and
+   * their name, address and message are stored whatever becomes of the
+   * notification. Reading a prospective customer's enquiry is support work;
+   * opening the customer directory is not the same job and should not be the
+   * same grant.
+   */
+  VIEW_CONTACT_MESSAGES: 'view_contact_messages',
 };
 
 const PERMISSION_KEYS = Object.values(PERMISSIONS);
@@ -65,12 +76,15 @@ const ROLE_PERMISSIONS = {
     PERMISSIONS.MANAGE_SETTINGS,
     PERMISSIONS.VIEW_AUDIT_LOGS,
     PERMISSIONS.RESET_PASSWORDS,
+    PERMISSIONS.VIEW_CONTACT_MESSAGES,
   ],
-  // Resetting a locked-out customer's password is core support work.
+  // Resetting a locked-out customer's password is core support work, and so is
+  // reading what someone wrote on the contact form before they had an account.
   [ROLES.SUPPORT]: [
     PERMISSIONS.MANAGE_USERS,
     PERMISSIONS.MANAGE_SESSIONS,
     PERMISSIONS.RESET_PASSWORDS,
+    PERMISSIONS.VIEW_CONTACT_MESSAGES,
   ],
   [ROLES.FINANCE]: [PERMISSIONS.MANAGE_BILLING],
   [ROLES.MARKETING]: [PERMISSIONS.SEND_NOTIFICATIONS],

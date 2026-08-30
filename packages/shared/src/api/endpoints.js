@@ -301,6 +301,22 @@ export const admin = {
   updateSettings: (data) => api.put('/admin/settings', data),
 
   /**
+   * The public contact form's inbox: `{ q, status, from, to, limit, offset }`,
+   * answering `{ rows, count, summary }` — `summary` counts the whole inbox and
+   * ignores the filters, as the other directories do.
+   *
+   * `setContactMessageStatus` takes `new` (this was not spam after all) or
+   * `archived` (dealt with). It cannot set `notified` or `failed`: those record
+   * what the mailer did, and are written by the delivery path alone.
+   *
+   * `resendContactNotification` retries the *operator's* copy only — the sender
+   * is not acknowledged twice for one message.
+   */
+  listContactMessages: (params) => api.get('/admin/contact-messages', { params }),
+  setContactMessageStatus: (id, status) => api.patch(`/admin/contact-messages/${id}`, { status }),
+  resendContactNotification: (id) => api.post(`/admin/contact-messages/${id}/resend`),
+
+  /**
    * The platform-wide filtering policy, its catalogue and what the fleet did
    * with it. The update takes the whole policy — `{ categories, domainRules }` —
    * because a patch of one switch would need the client to hold the rest.

@@ -42,6 +42,7 @@ export const PERMISSIONS = {
   VIEW_AUDIT_LOGS: 'view_audit_logs',
   RESET_PASSWORDS: 'reset_passwords',
   MANAGE_AUDIT_LOGS: 'manage_audit_logs',
+  VIEW_CONTACT_MESSAGES: 'view_contact_messages',
 };
 
 export const PERMISSION_LABELS = {
@@ -53,6 +54,7 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.VIEW_AUDIT_LOGS]: 'View audit logs',
   [PERMISSIONS.RESET_PASSWORDS]: 'Reset passwords',
   [PERMISSIONS.MANAGE_AUDIT_LOGS]: 'Delete audit logs',
+  [PERMISSIONS.VIEW_CONTACT_MESSAGES]: 'Read contact messages',
 };
 
 export const PERMISSION_DESCRIPTIONS = {
@@ -64,6 +66,7 @@ export const PERMISSION_DESCRIPTIONS = {
   [PERMISSIONS.VIEW_AUDIT_LOGS]: 'Read the audit trail of staff actions.',
   [PERMISSIONS.RESET_PASSWORDS]: "Set a customer's password, taking over their account.",
   [PERMISSIONS.MANAGE_AUDIT_LOGS]: 'Remove entries from the log stream. Every deletion is itself recorded.',
+  [PERMISSIONS.VIEW_CONTACT_MESSAGES]: 'Read the public contact form’s inbox and retry failed notifications.',
 };
 
 export const PERMISSION_KEYS = Object.values(PERMISSIONS);
@@ -77,11 +80,13 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.MANAGE_SETTINGS,
     PERMISSIONS.VIEW_AUDIT_LOGS,
     PERMISSIONS.RESET_PASSWORDS,
+    PERMISSIONS.VIEW_CONTACT_MESSAGES,
   ],
   [ROLES.SUPPORT]: [
     PERMISSIONS.MANAGE_USERS,
     PERMISSIONS.MANAGE_SESSIONS,
     PERMISSIONS.RESET_PASSWORDS,
+    PERMISSIONS.VIEW_CONTACT_MESSAGES,
   ],
   [ROLES.FINANCE]: [PERMISSIONS.MANAGE_BILLING],
   [ROLES.MARKETING]: [PERMISSIONS.SEND_NOTIFICATIONS],

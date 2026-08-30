@@ -14,6 +14,7 @@ const Devices = lazy(() => import('./pages/Devices.jsx'));
 const ContentFiltering = lazy(() => import('./pages/ContentFiltering.jsx'));
 const Sessions = lazy(() => import('./pages/Sessions.jsx'));
 const Billing = lazy(() => import('./pages/Billing.jsx'));
+const ContactMessages = lazy(() => import('./pages/ContactMessages.jsx'));
 const Notifications = lazy(() => import('./pages/Notifications.jsx'));
 const Settings = lazy(() => import('./pages/Settings.jsx'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs.jsx'));
@@ -72,6 +73,9 @@ export default function App() {
                 } />
                 <Route path="billing" element={
                   <RequirePermission permission={PERMISSIONS.MANAGE_BILLING}><Billing /></RequirePermission>
+                } />
+                <Route path="contact-messages" element={
+                  <RequirePermission permission={PERMISSIONS.VIEW_CONTACT_MESSAGES}><ContactMessages /></RequirePermission>
                 } />
                 <Route path="notifications" element={
                   <RequirePermission permission={PERMISSIONS.SEND_NOTIFICATIONS}><Notifications /></RequirePermission>

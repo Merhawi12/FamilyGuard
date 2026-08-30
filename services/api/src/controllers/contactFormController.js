@@ -132,15 +132,22 @@ const submitContactForm = async (req, res) => {
  * the sender's own address, which is common) must not stop the operator being
  * told, and an unconfigured admin mailbox must not deny the sender their
  * receipt. `allSettled`, so neither can reject the other.
+ *
+ * `includeReceipt` is false when the console retries a failed notification. The
+ * sender has already been acknowledged — or has already failed to be, which is
+ * recorded — and the thing being retried is the operator's copy. Re-sending the
+ * acknowledgement would mail a stranger a second "thanks for your message" for a
+ * message they sent once, possibly weeks earlier, which reads as a system out of
+ * control rather than one recovering.
  */
-const deliver = async (row) => {
+const deliver = async (row, { includeReceipt = true } = {}) => {
   const payload = {
     name: row.name, email: row.email, message: row.message, reference: row.id,
   };
 
   const [notified, receipt] = await Promise.allSettled([
     email.sendContactFormEmail(payload),
-    email.sendContactFormReceiptEmail(payload),
+    includeReceipt ? email.sendContactFormReceiptEmail(payload) : Promise.resolve(row.receiptSent),
   ]);
 
   const delivered = notified.status === 'fulfilled' && notified.value === true;

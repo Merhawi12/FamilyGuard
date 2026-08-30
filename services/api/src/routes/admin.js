@@ -15,6 +15,9 @@ const { listTransactions, listUserTransactions } = require('../controllers/admin
 const { listDevices } = require('../controllers/adminDeviceController');
 const { getSettings, updateSettings } = require('../controllers/settingsController');
 const { getContentFiltering, updateContentFiltering } = require('../controllers/adminContentController');
+const {
+  listMessages, updateMessage, resendNotification,
+} = require('../controllers/contactMessageController');
 const { getAnalytics } = require('../controllers/adminAnalyticsController');
 const {
   getPlatformHealth, acknowledgeCritical, updateAlertDelivery,
@@ -81,6 +84,12 @@ router.put('/settings', requirePermission('manage_settings'), updateSettings);
 // than by the directory one that opens a customer's own rules.
 router.get('/content-filtering', requirePermission('manage_settings'), getContentFiltering);
 router.put('/content-filtering', requirePermission('manage_settings'), updateContentFiltering);
+
+// The public contact form's inbox. Its own permission rather than `manage_users`
+// — most of the people in it have no account — see config/roles.js.
+router.get('/contact-messages', requirePermission('view_contact_messages'), listMessages);
+router.patch('/contact-messages/:id', requirePermission('view_contact_messages'), updateMessage);
+router.post('/contact-messages/:id/resend', requirePermission('view_contact_messages'), resendNotification);
 
 // Analytics
 router.get('/analytics', getAnalytics);

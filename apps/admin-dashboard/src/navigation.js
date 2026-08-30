@@ -36,6 +36,9 @@ export const NAV_SECTIONS = [
     label: 'Operations',
     items: [
       { to: '/billing', label: 'Billing & Subscriptions', icon: 'card', permission: PERMISSIONS.MANAGE_BILLING },
+      // The public contact form's inbox. Its own permission, not the directory's:
+      // most of the people in it have never had an account — see config/roles.js.
+      { to: '/contact-messages', label: 'Contact Messages', icon: 'mail', permission: PERMISSIONS.VIEW_CONTACT_MESSAGES },
       { to: '/notifications', label: 'Notifications', icon: 'bell', permission: PERMISSIONS.SEND_NOTIFICATIONS },
       // The route stays `/audit-logs` — the entries are the audit trail, and a
       // renamed path would break every link anyone has bookmarked to it.
