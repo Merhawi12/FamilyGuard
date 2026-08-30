@@ -126,4 +126,39 @@ describe('Safe zones (feature-gated) & ownership', () => {
       .send({ name: 'Hacked' });
     expect(bad.status).toBe(404);
   });
+
+  /**
+   * The list a child's screen shows has to be the list that fires for them.
+   *
+   * `childId` is nullable — an unscoped zone applies to the whole family, and
+   * `checkGeofences` matches `[{ childId }, { childId: null }]` accordingly.
+   * Filtering the list on the column alone hid every such zone from every
+   * child's Location screen, so its alerts arrived from a geofence with no row,
+   * no toggle and no circle on the map.
+   */
+  it('lists a family-wide zone under each child, and another child’s zone under neither', async () => {
+    const premium = await createUser({ plan: 'premium' });
+    const ada = await createChild(premium.id, { name: 'Ada' });
+    const ben = await createChild(premium.id, { name: 'Ben' });
+
+    const familyWide = await SafeZone.create({ parentId: premium.id, name: 'Home', latitude: 1, longitude: 2 });
+    const adaOnly = await SafeZone.create({ parentId: premium.id, childId: ada.id, name: 'School', latitude: 3, longitude: 4 });
+
+    const forChild = async (childId) => {
+      const res = await request(app)
+        .get(`/api/safe-zones?childId=${childId}`)
+        .set('Authorization', `Bearer ${tokenFor(premium)}`);
+      expect(res.status).toBe(200);
+      return res.body.map((z) => z.id).sort();
+    };
+
+    expect(await forChild(ada.id)).toEqual([familyWide.id, adaOnly.id].sort());
+    expect(await forChild(ben.id)).toEqual([familyWide.id]);
+
+    // Unfiltered still means everything this parent owns.
+    const all = await request(app)
+      .get('/api/safe-zones')
+      .set('Authorization', `Bearer ${tokenFor(premium)}`);
+    expect(all.body.map((z) => z.id).sort()).toEqual([familyWide.id, adaOnly.id].sort());
+  });
 });

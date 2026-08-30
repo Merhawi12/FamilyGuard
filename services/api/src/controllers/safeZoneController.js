@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const { SafeZone, Child } = require('../models');
 const { auditLog } = require('../utils/auditLogger');
 const { isUuid } = require('../utils/ids');
@@ -14,7 +15,22 @@ const listZones = async (req, res, next) => {
       // An id that cannot match anything is answered with the empty list a
       // filter is entitled to, rather than a database error.
       if (!isUuid(req.query.childId)) return res.json([]);
-      where.childId = req.query.childId;
+
+      /**
+       * A family-wide zone belongs to every child's list, because it fires for
+       * every child.
+       *
+       * `childId` is nullable on purpose — the model has said so since it was
+       * written — and `checkGeofences` reads exactly this `[{ childId }, { childId: null }]`
+       * pair, so an unscoped zone raises enter and leave alerts for all of them.
+       * This filter matched the column exactly, so those zones appeared on no
+       * child's Location screen at all: alerts arriving from a geofence the
+       * parent could not see, could not switch off from the toggle beside it,
+       * and had no circle for on the map. The screen and the engine have to
+       * answer the same question the same way, and the engine is the one that
+       * decides what actually happens.
+       */
+      where[Op.or] = [{ childId: req.query.childId }, { childId: null }];
     }
     const zones = await SafeZone.findAll({ where, order: [['createdAt', 'ASC']] });
     res.json(zones);

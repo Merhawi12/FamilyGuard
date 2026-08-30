@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   notifications as notificationsApi,
   alertLabel,
+  errorMessage,
   timeAgo,
   useDismissable,
   useSocket,
@@ -38,6 +39,9 @@ const sent = (value) => timeAgo(value, { compact: true });
 export default function NotificationsBell() {
   const { socket, alerts, alertsError, markAlertRead, markAllAlertsRead } = useSocket();
   const [updates, setUpdates] = useState([]);
+  // The same distinction the Alerts tab draws, for the tab beside it — see the
+  // load below.
+  const [updatesError, setUpdatesError] = useState('');
   const [tab, setTab] = useState('alerts');
   const { open, setOpen, toggle, ref } = useDismissable();
   const navigate = useNavigate();
@@ -57,7 +61,24 @@ export default function NotificationsBell() {
    * used to wait up to a minute for the next tick.
    */
   useEffect(() => {
-    const load = () => notificationsApi.list().then((r) => setUpdates(r.data)).catch(() => {});
+    /**
+     * A failed load is not an empty inbox.
+     *
+     * This swallowed the failure, so an unreachable API rendered as "No updates
+     * — news and account notices from Parentix appear here": the panel actively
+     * reassured a parent that there was nothing waiting, at the one moment it
+     * could not know. The Alerts tab immediately beside it already draws that
+     * distinction, and the two halves of one panel disagreed about what a dead
+     * request means.
+     *
+     * The list is left alone rather than cleared on a failure, so a poll that
+     * fails behind an open panel does not empty a list that was already
+     * correct — the error only replaces the empty state, which is the only case
+     * where the two are confusable.
+     */
+    const load = () => notificationsApi.list()
+      .then((r) => { setUpdates(r.data); setUpdatesError(''); })
+      .catch((err) => setUpdatesError(errorMessage(err, 'Could not load your updates.')));
     load();
 
     const interval = setInterval(() => {
@@ -181,6 +202,13 @@ export default function NotificationsBell() {
                   </button>
                 ))
               )
+            ) : updatesError && updates.length === 0 ? (
+              <EmptyState
+                compact
+                icon="warning"
+                title="Could not load updates"
+                description={updatesError}
+              />
             ) : updates.length === 0 ? (
               <EmptyState compact icon="inbox" title="No updates" description="News and account notices from Parentix appear here." />
             ) : (

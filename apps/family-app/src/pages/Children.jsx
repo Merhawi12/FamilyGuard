@@ -125,6 +125,36 @@ export default function Children() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket]);
 
+  /**
+   * A device was paused or resumed somewhere else.
+   *
+   * `setDeviceBlocked` has emitted `device_updated` to `parent:<id>` since
+   * per-device control shipped, with a comment saying it is "the parent's other
+   * open tabs, so a block applied on a phone shows on the laptop without a
+   * reload" — and nothing anywhere listened for it. The server half of the
+   * behaviour was real; the half that makes it visible did not exist, so the
+   * laptop went on showing Active until it was reloaded, beside a Pause button
+   * that would have answered 200 for a device already paused.
+   *
+   * The row is patched in place rather than calling `load()`: this also fires
+   * in the tab that made the change, which is already refetching, and a second
+   * list request racing the first would be two answers for one tap. Writing the
+   * one field the event carries is idempotent, so whichever order they land in
+   * the row ends up right.
+   */
+  useEffect(() => {
+    if (!socket) return undefined;
+    const onDeviceUpdated = ({ deviceId, blockedAt }) => {
+      setChildList((prev) => prev.map((child) => (
+        child.devices?.some((d) => d.id === deviceId)
+          ? { ...child, devices: child.devices.map((d) => (d.id === deviceId ? { ...d, blockedAt } : d)) }
+          : child
+      )));
+    };
+    socket.on('device_updated', onDeviceUpdated);
+    return () => socket.off('device_updated', onDeviceUpdated);
+  }, [socket]);
+
   const addChild = async (e) => {
     e.preventDefault();
     setError('');
