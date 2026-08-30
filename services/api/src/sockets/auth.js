@@ -77,6 +77,14 @@ const attachSocketAuth = (io) => {
         // A pre-auth token (first MFA factor only) must not open a socket.
         if (decoded.mfaRequired) return next(new Error('MFA not completed'));
 
+        // Nor may a purpose-scoped one. `signTrustedDeviceToken` mints a 30-day
+        // `{ id, purpose }` with no `sid` and no `mfaRequired`, which reached
+        // this branch and joined `parent:<id>` — a live feed of the family's
+        // alerts, locations and chat for a token that never completed a sign-in.
+        // Refused on the claim's presence rather than its value, for the reason
+        // middleware/auth.js gives at the matching guard.
+        if (decoded.purpose) return next(new Error('Invalid token'));
+
         // Signing out, an admin force-logout, a password reset and a role change
         // all work by revoking the Session row. The REST middleware honours that;
         // without the same check here a revoked token kept a live socket — so a

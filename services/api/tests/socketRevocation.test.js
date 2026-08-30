@@ -12,6 +12,7 @@ const { app, httpServer, io } = require('../src/app');
 const jwt = require('jsonwebtoken');
 const { createUser, createChild, createDevice, deviceToken } = require('./helpers');
 const { createSession, revokeAllSessions } = require('../src/utils/session');
+const { signTrustedDeviceToken } = require('../src/utils/trustedDevice');
 
 let port;
 
@@ -78,6 +79,21 @@ describe('socket handshake honours session revocation', () => {
     await user.update({ isActive: false });
 
     const result = await connect(token);
+    expect(result.ok).toBe(false);
+  });
+
+  /**
+   * A trusted-device token names no session, and the checks above run only when
+   * one is named — so it did not fail them, it skipped them. It opened a parent
+   * socket and joined `parent:<id>`: thirty days of the family's alerts,
+   * locations and chat for a token that never completed a sign-in, could not be
+   * signed out, and survived *sign out other devices*. The REST half of the same
+   * hole is pinned in authHardening.test.js.
+   */
+  it('refuses a trusted-device token', async () => {
+    const user = await createUser();
+
+    const result = await connect(signTrustedDeviceToken(user.id));
     expect(result.ok).toBe(false);
   });
 });

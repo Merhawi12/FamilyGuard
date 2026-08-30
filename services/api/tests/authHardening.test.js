@@ -13,6 +13,7 @@ const {
   createUser, createChild, createDevice, deviceToken, tokenFor, uniqueEmail, DEFAULT_PASSWORD,
   rewindOtpCooldown, signIn,
 } = require('./helpers');
+const { signTrustedDeviceToken } = require('../src/utils/trustedDevice');
 
 describe('The MFA pre-auth token is not a credential', () => {
   /*
@@ -52,6 +53,84 @@ describe('The MFA pre-auth token is not a credential', () => {
       const res = await request(app).get(path).set('Authorization', `Bearer ${preAuthToken}`);
       expect([path, res.status]).toEqual([path, 401]);
     }
+  });
+});
+
+describe('The trusted-device token is not a credential either', () => {
+  /*
+   * The pre-auth hole above, reopened by a second purpose-scoped token.
+   *
+   * "Remember this device" mints `{ id, purpose: 'trusted-device' }` for thirty
+   * days. It carries no `mfaRequired`, so the guard above let it past, and no
+   * `sid`, so the session lookup — which runs only when a `sid` is present —
+   * was skipped rather than failed. It authenticated the entire REST surface.
+   *
+   * It is the worst token in the service to have had that property: the one
+   * credential deliberately persisted in the browser, handed to anyone who
+   * ticks a box, and untouched by signing out, *sign out other devices* or
+   * `trustedDevicesRevokedAt`, because only `trustsDevice` consults those.
+   */
+  let trusted;
+  let user;
+
+  beforeEach(async () => {
+    user = await createUser();
+    trusted = signTrustedDeviceToken(user.id);
+  });
+
+  it('is what "remember this device" hands the browser', () => {
+    expect(jwt.decode(trusted)).toMatchObject({ id: user.id, purpose: 'trusted-device' });
+    // No session named, and no second factor outstanding: the two claims the
+    // middleware's other guards key off are both absent by design.
+    expect(jwt.decode(trusted).sid).toBeUndefined();
+    expect(jwt.decode(trusted).mfaRequired).toBeUndefined();
+  });
+
+  it('cannot read the account it remembers', async () => {
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${trusted}`);
+    expect(res.status).toBe(401);
+  });
+
+  it('cannot reach the family data', async () => {
+    for (const path of ['/api/children', '/api/alerts', '/api/notifications', '/api/devices']) {
+      const res = await request(app).get(path).set('Authorization', `Bearer ${trusted}`);
+      expect([path, res.status]).toEqual([path, 401]);
+    }
+  });
+
+  it('cannot write either', async () => {
+    const res = await request(app)
+      .post('/api/children')
+      .set('Authorization', `Bearer ${trusted}`)
+      .send({ name: 'Kid', age: 9 });
+    expect(res.status).toBe(401);
+  });
+
+  // The guard is on the presence of `purpose`, not on its one current value, so
+  // the next narrow-purpose token is refused before anybody writes it.
+  it('refuses any purpose-scoped token, not just this one', async () => {
+    const invented = jwt.sign(
+      { id: user.id, purpose: 'password-reset' },
+      env.auth.jwtSecret,
+      { expiresIn: '1h' }
+    );
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${invented}`);
+    expect(res.status).toBe(401);
+  });
+
+  // …while still doing the job it exists for: skipping the emailed code.
+  it('still lets the browser it was issued to skip the login code', async () => {
+    const email = uniqueEmail('trusted');
+    const account = await createUser({ email });
+    const token = signTrustedDeviceToken(account.id);
+
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email, password: DEFAULT_PASSWORD, trustedDeviceToken: token });
+
+    expect(res.status).toBe(200);
+    expect(res.body.loginCodeRequired).toBeFalsy();
+    expect(res.body.token).toEqual(expect.any(String));
   });
 });
 

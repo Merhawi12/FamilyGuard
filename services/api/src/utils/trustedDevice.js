@@ -28,8 +28,19 @@ const { JWT_VERIFY_OPTIONS } = require('./jwtOptions');
  * whenever the password changes, which is the moment the account holder is
  * telling us they think it is compromised.
  *
- * It carries no `sid` and no `mfaRequired`, so it authenticates nothing: the
- * middleware needs a session for anything real, and this token names none.
+ * ## It is not a session token, and that has to be enforced rather than assumed
+ *
+ * This comment used to read "it carries no `sid` and no `mfaRequired`, so it
+ * authenticates nothing: the middleware needs a session for anything real, and
+ * this token names none." Every clause of that was true except the conclusion.
+ * `middleware/auth.js` consults the Session table only *when a `sid` is
+ * present*, so naming no session was not a refusal — it was a way to skip the
+ * check. The token authenticated the whole REST surface and opened a parent
+ * socket, for thirty days, past both second factors.
+ *
+ * What makes the claim true now is the `purpose` guard in `middleware/auth.js`
+ * and `sockets/auth.js`. `authHardening.test.js` pins both, because the
+ * property this file depends on lives in two other files.
  */
 
 const TRUSTED_DEVICE_DAYS = 30;

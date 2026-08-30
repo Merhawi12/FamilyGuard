@@ -28,6 +28,30 @@ const authenticate = async (req, res, next) => {
       return res.status(401).json({ error: 'Two-factor authentication is not complete' });
     }
 
+    /**
+     * Neither is a token minted for one narrow purpose.
+     *
+     * The same hole as the pre-auth token above, reopened by a different token.
+     * `signTrustedDeviceToken` mints `{ id, purpose: 'trusted-device' }` — no
+     * `sid`, because it names no session, and no `mfaRequired` — so it walked
+     * past the guard above, skipped the session lookup below for want of a
+     * `sid`, and authenticated every route on this middleware for a **thirty
+     * day** expiry. That is the worst token in the service to hand out: it is
+     * the one credential deliberately persisted in the browser, it is issued to
+     * anybody who ticks "remember this device", and `logout`, *sign out other
+     * devices* and `trustedDevicesRevokedAt` all leave it working, because only
+     * `trustsDevice` consults any of them and nothing on this path calls it.
+     * It bypassed both second factors outright — a trusted-device token never
+     * goes through a sign-in at all.
+     *
+     * Refused on `purpose` rather than on the one value, so the next
+     * purpose-scoped token is closed before it is written. A session token
+     * carries no `purpose` claim; see utils/session.js.
+     */
+    if (decoded.purpose) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
     if (decoded.sid) {
       const session = await Session.findByPk(decoded.sid);
       if (!session || session.revoked) return res.status(401).json({ error: 'Session expired' });
