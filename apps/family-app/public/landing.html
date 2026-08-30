@@ -931,7 +931,16 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
           <li><svg class="use-icon"><use href="#ic-check"/></svg>Instant emergency notifications</li>
           <li><svg class="use-icon"><use href="#ic-check"/></svg>Priority support</li>
         </ul>
-        <a href="/login" class="btn btn-primary">Get Premium</a>
+        <!--
+          `?redirect=premium` is what makes this button mean what it says.
+          Login.jsx reads it and opens Stripe Checkout the moment the account
+          exists, so choosing Premium here is one continuous journey instead of
+          a sign-up that lands on Free and leaves the customer to find
+          Settings → Plan & billing on their own. The value is checked against
+          the plan catalogue, so a retired tier lands on the dashboard rather
+          than a checkout the API would refuse.
+        -->
+        <a href="/login?redirect=premium&amp;tab=register" class="btn btn-primary">Get Premium</a>
       </div>
     </div>
   </div>

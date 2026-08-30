@@ -135,12 +135,28 @@ export default function Settings() {
   // the outcome rather than at the top of a page that says nothing about it.
   useEffect(() => {
     const payment = params.get('payment');
-    if (!payment) return;
     if (payment === 'success') setPlanMessage('Payment successful — your plan has been upgraded.');
     if (payment === 'cancelled') setPlanError('Payment was cancelled. Nothing has been charged.');
+
+    /**
+     * They picked a paid plan on the way in and checkout could not be opened.
+     *
+     * Login.jsx sends them here rather than failing the sign-in, so the account
+     * exists and works — say that first, because the alarming reading of a
+     * payment error during signup is "my account was not created". Nothing was
+     * charged either, and that is worth stating outright rather than leaving to
+     * be inferred.
+     */
+    if (params.get('checkout') === 'unavailable') {
+      setPlanError(
+        'Your account is ready, but we could not open the payment page just now. '
+        + 'Nothing has been charged. You can start your subscription here whenever you like.'
+      );
+    }
   }, [params]);
 
-  const paymentOutcome = params.get('payment');
+  // Both outcomes belong on the plan screen, whatever section the URL asked for.
+  const paymentOutcome = params.get('payment') || params.get('checkout');
   const activeSection = paymentOutcome ? 'plan' : section;
 
   const selectSection = (key) => {

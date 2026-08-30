@@ -26,7 +26,23 @@ import { DEFAULT_COUNTRY } from '../countries';
  * browser and back was never going to.
  */
 export default function Login() {
-  const [tab, setTab] = useState('login');
+  const location = useLocation();
+  const query = new URLSearchParams(location.search);
+
+  /**
+   * Which entry screen to open on.
+   *
+   * Only the two entry screens may be named in a URL. The other steps — 'mfa',
+   * 'verify', 'login-code', the reset trio — are reached by completing the one
+   * before them and carry state a query string cannot supply, so honouring
+   * `?tab=verify` would render a code box for a code nobody sent.
+   *
+   * `?tab=register` exists for the landing page's "Get Premium", which pairs it
+   * with `?redirect=premium`: somebody buying a subscription is almost always
+   * new, and putting them on Sign In first is a step backwards on the one
+   * journey the product most wants to be smooth.
+   */
+  const [tab, setTab] = useState(query.get('tab') === 'register' ? 'register' : 'login');
   /**
    * Which entry screen the current step came from.
    *
@@ -152,19 +168,50 @@ export default function Login() {
     register, verifyEmail, requestPhoneCode, loginWithPhone,
   } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
-  const redirectPlan = new URLSearchParams(location.search).get('redirect');
+  const redirectPlan = query.get('redirect');
 
   const isRegister = tab === 'register';
 
-  /** Shared tail of a successful sign-in, whatever proved it. */
+  /**
+   * Shared tail of a successful sign-in, whatever proved it.
+   *
+   * ## A failed checkout must not cost someone their session
+   *
+   * This used to `await createCheckoutSession()` bare. The sign-in had already
+   * succeeded and the token was already stored — but the rejection propagated
+   * out of here, through `settle`, into the submit handler's `catch`, and became
+   * an error message *on the login form*. So someone who chose Premium signed up
+   * correctly, was told "Payments are not configured", and was never navigated
+   * anywhere: authenticated, and still looking at the sign-in screen.
+   *
+   * That is not a hypothetical. `/auth/providers` reports `billing:false`
+   * whenever `STRIPE_SECRET_KEY` is unset or unreadable — which production has
+   * been for stretches — and every one of those minutes turned "Get Premium"
+   * into a door that locked behind you.
+   *
+   * Checkout is the *bonus* half of this function. Signing in is the part that
+   * has already worked, so the failure path keeps it and explains itself on the
+   * plan screen instead.
+   */
   const finishSignIn = async () => {
     // Checked against the catalogue rather than a hard-coded pair, so a
     // `?redirect=` for a retired tier lands on the dashboard instead of a
     // checkout the API refuses.
     if (PAID_PLAN_KEYS.includes(redirectPlan)) {
-      const res = await payments.createCheckoutSession(redirectPlan);
-      window.location.href = res.data.url;
+      try {
+        const res = await payments.createCheckoutSession(redirectPlan);
+        // A 200 with no URL is as unusable as a 503, and silently doing nothing
+        // here would leave the browser sitting on the sign-in form.
+        if (res?.data?.url) {
+          window.location.href = res.data.url;
+          return;
+        }
+      } catch {
+        // Deliberately swallowed: the reason belongs on the plan screen, where
+        // there is a button to try again, not on a form the account no longer
+        // needs. `checkout=unavailable` is what puts it there.
+      }
+      navigate(`/dashboard/settings?section=plan&checkout=unavailable&plan=${redirectPlan}`);
       return;
     }
     navigate('/dashboard');

@@ -827,6 +827,87 @@ try {
     await page.close();
   }
 
+  step('Family app — choosing Premium survives a checkout that cannot open');
+  {
+    /*
+     * The landing page's "Get Premium" carries `?redirect=premium`, and
+     * Login.jsx opens Stripe Checkout with it the moment the session exists.
+     *
+     * This harness runs with `STRIPE_SECRET_KEY: ''`, so that call answers 503 —
+     * which is precisely the condition this exists to cover. `finishSignIn` used
+     * to await it bare, so the rejection travelled out through `settle` into the
+     * submit handler's catch and became an error message *on the sign-in form*.
+     * The account existed, the token was stored, and the customer was left
+     * looking at "Payments are not configured" with no way forward: the one
+     * journey the product most wants to be smooth was the only one that could
+     * lock the door behind you.
+     *
+     * The invariant is that signing in wins. Checkout is the bonus half, and a
+     * deployment with no payment provider is a normal state — the free tier and
+     * the trial both work without one.
+     */
+    const page = await browser.newPage();
+    const w = watch(page, 'premium intent');
+
+    /*
+     * The existing parent, deliberately — not a fresh account.
+     *
+     * Signup is rate limited per IP and every account costs a verification code
+     * out of the same budget the later steps spend. The first draft of this step
+     * registered its own parent and pushed "a second account registers" over the
+     * limit two hundred checks later, which is a miserable thing to debug: the
+     * failure lands nowhere near the step that caused it.
+     */
+    await page.goto(`${FAMILY}/login?redirect=premium&tab=register`, { waitUntil: 'networkidle' });
+    // `?tab=register` is honoured, because somebody buying a subscription is
+    // almost always new and putting them on Sign In first is a step backwards.
+    check('the Premium link opens the register tab',
+      await page.locator('input[autocomplete="name"]').isVisible().catch(() => false));
+
+    await page.goto(`${FAMILY}/login?redirect=premium`, { waitUntil: 'networkidle' });
+    check('and the plain Premium link opens sign-in',
+      !(await page.locator('input[autocomplete="name"]').isVisible().catch(() => false)));
+
+    await page.fill('input[type="email"]', PARENT_EMAIL);
+    await page.fill('input[type="password"]', PARENT_PASSWORD);
+    await page.click('button[type="submit"]');
+    // Every password sign-in is finished with an emailed code in this harness.
+    await completeLoginCode(page, PARENT_EMAIL);
+
+    const landed = await page.waitForURL(/\/dashboard/, { timeout: 20000 }).then(() => true).catch(() => false);
+    check('a failed checkout still lands the customer in their account', landed, page.url());
+    check('and not stranded on the sign-in form', !/\/login/.test(page.url()), page.url());
+
+    if (landed) {
+      // Waited for rather than read: `waitForURL` resolves on the address bar,
+      // and React has not necessarily painted the new route yet. Sampling
+      // `innerText` at that instant returned the *code screen* it had just left.
+      const explained = await page.getByText(/account is ready/i)
+        .waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+      // Said in this order deliberately: the alarming reading of a payment error
+      // during signup is "my account was not created".
+      check('the plan screen explains why checkout did not open', explained,
+        oneLine(await page.locator('body').innerText()).slice(0, 160));
+
+      if (explained) {
+        check('and says nothing was charged',
+          /nothing has been charged/i.test(await page.locator('body').innerText()));
+      }
+    }
+
+    /*
+     * The 503 from `create-checkout-session` is the condition under test, not a
+     * defect — this harness runs with no Stripe key on purpose. Everything else
+     * on the journey still has to be clean, so it is filtered by URL rather than
+     * by status: a 503 from anywhere else is still a failure worth seeing.
+     */
+    const unexpected = w.problems.filter((p) => !p.includes('/api/payments/create-checkout-session')
+      && !/Failed to load resource.*503/.test(p));
+    check('the premium-intent journey is otherwise clean', unexpected.length === 0,
+      unexpected.slice(0, 2).join(' | '));
+    await page.close();
+  }
+
   step('Family app — signing in unverified sends a code rather than only claiming to');
   {
     /*
