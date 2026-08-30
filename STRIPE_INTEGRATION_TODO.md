@@ -162,10 +162,42 @@ cards on the first completed session.
 `stripe listen --forward-to localhost:5000/api/payments/webhook` replays events
 at a local API and prints a `whsec_…` for that session.
 
+## Proven end to end in test mode — 2026-08-30
+
+The whole loop has now been driven with a real card, so the half that fails
+silently is no longer unverified **locally**. What was exercised: the real
+`POST /create-checkout-session`, Stripe's hosted page paid with
+`4242 4242 4242 4242` in a real browser, the completed session read back from
+Stripe, and that object posted to the real webhook route under a genuine
+signature from `stripe.webhooks.generateTestHeaderString`. 14 checks, including
+a wrongly-signed event rejected 400, the account flipping to Premium, and a
+redelivered event being safe to replay.
+
+Two things worth keeping from it:
+
+- **The Stripe *test* account was empty** — no product, no price. There was
+  nothing to put in `STRIPE_PREMIUM_PRICE_ID`; the Premium product exists in live
+  mode only. `price_1UABKc51GqmqoE3ox21NlqAv` (Premium Plan, CAD 9.99/month) was
+  created to match `config/plans.js` (`amount: 999`) in the account's default
+  currency.
+- **Checkout renders a payment-method accordion, not an inline card form**,
+  because more than one method is enabled on the account and this route
+  deliberately does not pin `payment_method_types`. Card fields do not exist
+  until the Card tab is clicked. That is correct behaviour — but any browser
+  automation against this page has to click the tab first, or it submits into
+  "PAYMENT METHOD REQUIRED".
+
+No Stripe CLI is needed for any of this; `generateTestHeaderString` signs a real
+envelope, which is what `stripe listen` would otherwise be for.
+
 ## Next steps
 
-- Confirm the plan actually flips to Premium after a test purchase — that is the
-  webhook, and it is the half that fails silently.
+- **Production is a different Stripe account from the local test key.** That
+  account held no price at all until the one above was created, so no session
+  for this product could ever have been created against it — do **not** copy
+  `price_1UABKc51GqmqoE3ox21NlqAv` into Secret Manager. Audit what production
+  really holds with `ENV_NAME=prod ./scripts/check-stripe.sh` (needs an
+  interactive `gcloud auth login` first), and repeat the purchase test there.
 - Retire the exposed webhook secret's Secret Manager version after rolling it:
   `gcloud secrets versions destroy <N> --secret=parentix-prod-stripe-webhook-secret`.
 
