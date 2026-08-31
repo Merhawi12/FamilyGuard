@@ -30,9 +30,20 @@ export default function Reports() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  /**
+   * A failed child list must not read as "you have no children".
+   *
+   * There was no `.catch` here, so a request that failed left `childList` empty
+   * and the screen drew "No child profiles yet — add a child under Children" to
+   * a parent who has several. That is the same mistake the reports load below
+   * takes care to avoid, one screen up: an empty result and a failed request are
+   * different answers and must not look alike. It also left an unhandled
+   * rejection behind it.
+   */
   useEffect(() => {
     childrenApi.list()
       .then((r) => { setChildList(r.data); if (r.data[0]) setSelected(r.data[0]); })
+      .catch((err) => setError(errorMessage(err, 'Could not load your children.')))
       .finally(() => setLoading(false));
   }, []);
 
@@ -102,6 +113,14 @@ export default function Reports() {
 
       {loading ? (
         <p className="text-sm text-gray-400 py-8">Loading reports…</p>
+      ) : error ? (
+        /* Ahead of the empty case on purpose. A failed child list leaves
+           `childList` empty as well as setting this, and "no child profiles yet"
+           is a claim about the family rather than about the request — the more
+           wrong of the two answers, and the one a parent would act on. */
+        <div className="card">
+          <EmptyState icon="warning" title="Could not load reports" description={error} />
+        </div>
       ) : childList.length === 0 ? (
         <div className="card">
           <EmptyState
@@ -109,10 +128,6 @@ export default function Reports() {
             title="No child profiles yet"
             description="Add a child under Children to start building reports."
           />
-        </div>
-      ) : error ? (
-        <div className="card">
-          <EmptyState icon="warning" title="Could not load reports" description={error} />
         </div>
       ) : !weekly ? (
         <div className="card">

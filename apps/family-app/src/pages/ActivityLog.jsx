@@ -30,9 +30,22 @@ export default function ActivityLog() {
   // Bumped to re-run the load effect after a delete, without duplicating it.
   const [reloads, setReloads] = useState(0);
 
+  /**
+   * A failed child list must not read as "you have no children".
+   *
+   * There was no `.catch` here, so a request that failed left `childList` empty
+   * and the screen drew "No child profiles yet — add a child under Children" to
+   * a parent who has several. The activity load below already tells an empty
+   * result apart from a failed one; this is the same rule applied to the list it
+   * depends on. It also left an unhandled rejection behind it.
+   *
+   * `error` is already rendered ahead of the empty case here, so setting it is
+   * enough to put the right screen up.
+   */
   useEffect(() => {
     childrenApi.list()
       .then((r) => { setChildList(r.data); if (r.data[0]) setSelected(r.data[0]); })
+      .catch((err) => setError(errorMessage(err, 'Could not load your children.')))
       .finally(() => setLoading(false));
   }, []);
 
