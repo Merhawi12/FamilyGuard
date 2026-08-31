@@ -1,10 +1,27 @@
 name: CI
 
+# `restructure/three-apps-aws` is named alongside main deliberately, and it is
+# not a convenience.
+#
+# `main` is the pre-restructure tree from June: one app, no GCP, and the
+# plaintext-password era. Everything since — the three-app split, the cloud
+# migration, every security fix, and what production actually runs — lives on
+# that branch, 73 commits ahead and never merged. With triggers on `main` alone,
+# none of the six jobs below had ever run against a single line of it: the whole
+# shipped product was gated by nothing but somebody remembering to run the suites
+# on their laptop.
+#
+# `pull_request: [main]` does cover a PR opened from it, but that is the wrong
+# moment. The work is deployed from this branch continuously and merged rarely,
+# so the check has to happen on the push that ships, not on a merge that may be
+# months away.
+#
+# Remove the branch from these lists once it has been merged and retired.
 on:
   push:
-    branches: [main]
+    branches: [main, restructure/three-apps-aws]
   pull_request:
-    branches: [main]
+    branches: [main, restructure/three-apps-aws]
 
 concurrency:
   group: ci-${{ github.ref }}
