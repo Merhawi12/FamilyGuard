@@ -126,7 +126,7 @@ export default function Children() {
   }, [socket]);
 
   /**
-   * A device was paused or resumed somewhere else.
+   * A device changed somewhere else — paused, resumed, or connected and gone.
    *
    * `setDeviceBlocked` has emitted `device_updated` to `parent:<id>` since
    * per-device control shipped, with a comment saying it is "the parent's other
@@ -136,18 +136,33 @@ export default function Children() {
    * laptop went on showing Active until it was reloaded, beside a Pause button
    * that would have answered 200 for a device already paused.
    *
-   * The row is patched in place rather than calling `load()`: this also fires
-   * in the tab that made the change, which is already refetching, and a second
-   * list request racing the first would be two answers for one tap. Writing the
-   * one field the event carries is idempotent, so whichever order they land in
-   * the row ends up right.
+   * The same event now also carries presence, sent when a device's socket
+   * connects or drops (sockets/deviceEvents.js). That is what makes the status
+   * dot follow a phone being switched off and coming back, rather than showing
+   * whatever was true when the page happened to be loaded.
+   *
+   * The row is patched in place rather than calling `load()`: a block also fires
+   * this in the tab that made the change, which is already refetching, and a
+   * second list request racing the first would be two answers for one tap.
+   *
+   * **Only the fields the event actually carries are written.** Spreading a
+   * fixed set of names would have a presence update — which says nothing about
+   * pausing — set `blockedAt: undefined` and quietly un-pause a paused device on
+   * screen. Each event describes one thing; patching exactly that keeps them
+   * commutative, so whichever order two land in, the row ends up right.
    */
   useEffect(() => {
     if (!socket) return undefined;
-    const onDeviceUpdated = ({ deviceId, blockedAt }) => {
+    const onDeviceUpdated = ({ deviceId, ...changes }) => {
+      if (!deviceId) return;
+      const patch = Object.fromEntries(
+        Object.entries(changes).filter(([, value]) => value !== undefined)
+      );
+      if (Object.keys(patch).length === 0) return;
+
       setChildList((prev) => prev.map((child) => (
         child.devices?.some((d) => d.id === deviceId)
-          ? { ...child, devices: child.devices.map((d) => (d.id === deviceId ? { ...d, blockedAt } : d)) }
+          ? { ...child, devices: child.devices.map((d) => (d.id === deviceId ? { ...d, ...patch } : d)) }
           : child
       )));
     };

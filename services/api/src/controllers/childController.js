@@ -1,6 +1,7 @@
 const { Child, Device, ScreenTimeRule } = require('../models');
 const storage = require('../services/storage');
 const { revokeDeviceAccess } = require('../utils/session');
+const { withPresence } = require('../utils/devicePresence');
 const { isUuid } = require('../utils/ids');
 
 // A malformed id is "not found", not a database error — see utils/ids.js for why
@@ -24,7 +25,28 @@ const getChildren = async (req, res, next) => {
         { association: 'screenTimeRule' },
       ],
     });
-    res.json(children);
+
+    /**
+     * Devices arrive with `online` already decided, the same as `GET /devices`.
+     *
+     * This is the list the Children screen and its device cards are built from,
+     * so it is the one that most needs it — and it is the reason presence is
+     * resolved for the whole family in a single lookup here rather than per
+     * child, which would have been one socket round trip per row.
+     */
+    const io = req.app.get('io');
+    const devices = children.flatMap((child) => child.devices || []);
+    const presence = new Map(
+      (await withPresence(io, devices)).map((device) => [device.id, device.online])
+    );
+
+    res.json(children.map((child) => ({
+      ...child.toJSON(),
+      devices: (child.devices || []).map((device) => ({
+        ...device.toJSON(),
+        online: presence.get(device.id) ?? false,
+      })),
+    })));
   } catch (err) {
     next(err);
   }

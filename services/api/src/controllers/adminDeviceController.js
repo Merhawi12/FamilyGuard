@@ -19,17 +19,34 @@ const { countGrouped } = require('../utils/aggregate');
 const PLATFORMS = ['android', 'ios', 'windows', 'mac'];
 
 /**
- * How long after its last heartbeat a device still counts as online.
+ * How long after its last check-in a device with no live socket still counts as
+ * online.
  *
- * The child app checks in every five minutes, so this is three missed
- * heartbeats — long enough that a phone in a lift or a slow sync is not
- * reported as offline, short enough that a phone switched off this morning is.
+ * Shared with the parent-facing screens rather than defined here, which is the
+ * point: this file said fifteen minutes and the family app's device card said
+ * five, so the same phone was online to support and offline to its parent at the
+ * same instant. See utils/devicePresence.js — it also explains why the comment
+ * that used to sit here ("the child app checks in every five minutes") was not
+ * true of the phone, only of the desktop agent.
  */
-const ONLINE_WINDOW_MS = 15 * 60 * 1000;
+const { ONLINE_WINDOW_MS } = require('../utils/devicePresence');
 
 /** A device that has reported inside this window is considered up to date. */
 const SYNCED_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Deliberately still a timestamp comparison, unlike the parent-facing screens,
+ * which also consult the live socket.
+ *
+ * The status shown in a row and the `?status=` filter beside it have to be the
+ * same question, and the filter is a SQL clause over `last_seen`. Answering the
+ * display from sockets and the filter from the column would let a row read
+ * "online" and vanish when an operator filtered for online devices.
+ *
+ * It needs no refinement to be accurate now: a device stamps `last_seen` when
+ * its socket connects and again when it drops (see sockets/deviceEvents.js), so
+ * the column tracks the connection this window is trying to infer.
+ */
 const statusOf = (device, onlineSince) => {
   if (!device.isLinked) return 'pending';
   if (device.lastSeen && new Date(device.lastSeen) >= onlineSince) return 'online';

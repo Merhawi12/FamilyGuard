@@ -17,6 +17,7 @@ const { grantsForDevice } = require('./screenTimeController');
 const { reportRiskyBrowsing } = require('../utils/riskyBrowsing');
 const { track } = require('../utils/background');
 const { isUuid } = require('../utils/ids');
+const { withPresence } = require('../utils/devicePresence');
 const { env } = require('../config/env');
 
 const getDevices = async (req, res, next) => {
@@ -27,7 +28,7 @@ const getDevices = async (req, res, next) => {
     const children = await Child.findAll({ where: { parentId: req.user.id, isActive: true }, attributes: ['id'] });
     const childIds = children.map((c) => c.id);
     const devices = await Device.findAll({ where: { childId: childIds, isActive: true }, include: ['child'] });
-    res.json(devices);
+    res.json(await withPresence(req.app.get('io'), devices));
   } catch (err) {
     next(err);
   }

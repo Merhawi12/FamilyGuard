@@ -2,10 +2,20 @@ import { Icon } from '@parentix/shared';
 
 const DEVICE_ICON = { android: 'phone', ios: 'phone', windows: 'laptop', mac: 'laptop' };
 
+/**
+ * How long ago, for a device that is not currently connected.
+ *
+ * "Online now" is deliberately not decided here any more. This function used to
+ * claim it below five minutes, `isOnline` below re-derived the same thing from
+ * the same field with its own copy of the window, and the API disagreed with
+ * both — so a phone could be dotted green and labelled "Last seen 7m ago" at
+ * once. The server owns that judgement now (`device.online`, see
+ * utils/devicePresence.js) and this only ever describes an absence.
+ */
 const lastSeenLabel = (lastSeen) => {
   if (!lastSeen) return 'Never connected';
   const minutes = Math.round((Date.now() - new Date(lastSeen)) / 60000);
-  if (minutes < 5) return 'Online now';
+  if (minutes < 1) return 'Last seen just now';
   if (minutes < 60) return `Last seen ${minutes}m ago`;
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `Last seen ${hours}h ago`;
@@ -33,7 +43,22 @@ const lastSeenLabel = (lastSeen) => {
  * reserved for the destructive one.
  */
 export default function DeviceCard({ device, onRemove, onConnect, onEdit, onToggleBlock, busy }) {
-  const isOnline = device.lastSeen && Date.now() - new Date(device.lastSeen) < 5 * 60 * 1000;
+  /**
+   * Decided by the API, which is the only party that can see the connection.
+   *
+   * This used to be `lastSeen` within five minutes, computed here. The agents do
+   * not check in nearly that often — the phone's background task is registered
+   * for "no more often than every fifteen minutes" — so a phone that was
+   * switched on, connected and working correctly showed as offline for most of
+   * every cycle, on the one screen a parent opens to be reassured it is with
+   * their child. utils/devicePresence.js has the full account.
+   *
+   * The fallback is only for a response predating the field; an older client
+   * against a newer API is the case that matters and it gets the real answer.
+   */
+  const isOnline = device.online ?? Boolean(
+    device.lastSeen && Date.now() - new Date(device.lastSeen) < 15 * 60 * 1000
+  );
   const isPending = !device.isLinked;
   const isBlocked = Boolean(device.blockedAt);
 
@@ -49,7 +74,9 @@ export default function DeviceCard({ device, onRemove, onConnect, onEdit, onTogg
     ? { dot: 'bg-warning', text: `Paused${device.blockedAt ? ` · ${lastSeenLabel(device.lastSeen).toLowerCase()}` : ''}` }
     : {
       dot: isOnline ? 'bg-success' : isPending ? 'bg-warning' : 'bg-gray-300',
-      text: isPending ? 'Waiting to be connected' : lastSeenLabel(device.lastSeen),
+      text: isPending
+        ? 'Waiting to be connected'
+        : isOnline ? 'Online now' : lastSeenLabel(device.lastSeen),
     };
 
   return (

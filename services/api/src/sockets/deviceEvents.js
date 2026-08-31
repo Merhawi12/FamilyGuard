@@ -4,6 +4,7 @@ const { detectCyberbullying } = require('../utils/cyberbullyingDetector');
 const { parseFix } = require('../utils/geo');
 const { notifyParentOfChildMessage } = require('../utils/childMessageNotice');
 const { track } = require('../utils/background');
+const { connectedDevices } = require('../utils/devicePresence');
 const logger = require('../utils/logger');
 
 // NOTE: socket.data is populated by the io.use() handshake-auth middleware in app.js.
@@ -34,12 +35,66 @@ const initSocketHandlers = (io) => {
     socket.on('join:parent', () => { if (role === 'parent' && parentId) socket.join(`parent:${parentId}`); });
     socket.on('join:child', () => { if (role === 'child' && childId) socket.join(`child:${childId}`); });
 
-    // ── Device heartbeat (child only) ────────────────────────────────────────
-    socket.on('device:heartbeat', async () => {
-      if (role !== 'child' || !deviceId) return;
-      await Device.update({ lastSeen: new Date() }, { where: { id: deviceId } });
-      socket.broadcast.to(`device:${deviceId}`).emit('device:online', { deviceId });
-    });
+    /**
+     * ── Device presence ───────────────────────────────────────────────────────
+     *
+     * Connecting and disconnecting *is* the heartbeat, and telling the parent is
+     * the half that was missing.
+     *
+     * What stood here was a `device:heartbeat` handler that no client has ever
+     * emitted — both agents check in over `POST /devices/me/heartbeat` — which
+     * answered by broadcasting `device:online` to `device:<its own id>`. That
+     * room contains only the device's own sockets, and `broadcast` excludes the
+     * sender, so the news went to nobody; nothing listened for it either. Three
+     * dead links in one four-line handler, and between them the reason a parent
+     * watching the dashboard never saw a phone come back.
+     *
+     * The socket carries the answer for free — see utils/devicePresence.js — so
+     * presence is reported from the connection itself:
+     *
+     *   - `lastSeen` is stamped on connect, and again on disconnect, so the
+     *     "Last seen …" line is anchored to the moment the agent was really
+     *     there rather than to whenever its next background task happens to run.
+     *   - `device_updated` goes to `parent:<id>`, which the Children screen has
+     *     listened for since per-device controls shipped. The parent's open tab
+     *     now follows a phone going offline and coming back, instead of showing
+     *     whatever was true when the page was loaded.
+     *
+     * Failures are logged, never thrown: a presence update that cannot be
+     * written must not take down the connection that carries rules, chat and
+     * blocking.
+     */
+    const publishPresence = async (online) => {
+      try {
+        const lastSeen = new Date();
+        await Device.update({ lastSeen }, { where: { id: deviceId } });
+        if (parentId) {
+          io.to(`parent:${parentId}`).emit('device_updated', {
+            deviceId, online, lastSeen: lastSeen.toISOString(),
+          });
+        }
+      } catch (err) {
+        logger.error('Failed to publish device presence', { deviceId, online, error: err.message });
+      }
+    };
+
+    if (role === 'child' && deviceId) {
+      track(publishPresence(true));
+
+      socket.on('disconnect', async () => {
+        /**
+         * One agent can hold more than one socket — a reconnect that overlaps
+         * the connection it replaces, or the desktop app with a window reopened.
+         * Rooms are already cleared by the time `disconnect` fires, so asking
+         * who is left in this device's room answers "was that the last one".
+         * Without the check, a routine reconnect would announce the phone as
+         * offline a moment after it came back.
+         */
+        const stillConnected = await connectedDevices(io, [deviceId]);
+        if (stillConnected?.has(String(deviceId))) return;
+        await publishPresence(false);
+      });
+    }
 
     // ── Alert types (emitted by the child device) ────────────────────────────
     socket.on('alert:blocked_app', async ({ appName }) => {

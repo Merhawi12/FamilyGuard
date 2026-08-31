@@ -646,13 +646,47 @@ A parent token joins `parent:<id>`; a device token joins `child:<id>` and
 `device:<id>`. Membership comes from the token alone — ids sent by the client are
 ignored, and a pre-auth (MFA-incomplete) token is refused.
 
-**Device → server:** `device:heartbeat`, `activity:update`, `location:update`,
-`chat:send`, and the alert events `alert:blocked_app`,
-`alert:screen_time_exceeded`, `alert:app_installed`, `alert:dangerous_content`,
-`alert:unknown_contact`.
+**Device → server:** `location:update`, `chat:send`, `activity:update`, and the
+alert events `alert:blocked_app`, `alert:screen_time_exceeded`,
+`alert:app_installed`.
+
+Three names that used to be listed here are gone, and it is worth saying which
+rather than leaving them to be re-added:
+
+- `device:heartbeat` — no agent has ever emitted it. Both check in over
+  `POST /devices/me/heartbeat`, and presence is now taken from the connection
+  itself (see below).
+- `alert:dangerous_content` — raised by the server now, from the domains a
+  device reports; see `utils/riskyBrowsing.js`. There is nothing for a device to
+  send.
+- `alert:unknown_contact` — deliberately absent. Matching a caller needs
+  `READ_CALL_LOG`, a Play-restricted permission this product does not ask
+  families for. The approved-contact list is a parent's record, not an enforced
+  filter.
+
+`activity:update` is kept and relayed, but no shipped agent emits it — the same
+data arrives over `POST /devices/me/activity`.
 
 **Parent → server:** `chat:reply` (the target child is verified against the
 authenticated parent).
 
-**Server → client:** `alert:new`, `chat:message`, `chat:delivered`,
-`activity:update`, `location:update`, `device:online`.
+**Server → parent (`parent:<id>`):** `alert:new`, `notification:new`,
+`chat:message`, `chat:delivered`, `location:update`, `activity:update`,
+`device:linked`, `device_updated`, `screen_time_grant_added`.
+
+`device_updated` carries whatever changed and nothing else — `{ deviceId,
+blockedAt }` when a device is paused or resumed, `{ deviceId, online, lastSeen }`
+when its socket connects or drops. A listener must patch only the keys present:
+spreading a fixed set would let a presence update clear a pause.
+
+**Server → device (`child:<id>` / `device:<id>`):** `rules_updated`,
+`screen_time_updated`, `screen_time_granted`, `contacts_updated`,
+`chat:message`, `chat:delivered`, `device_blocked`, `device_unblocked`,
+`device:unlinked`.
+
+**Presence.** A device is online if it holds a socket *or* checked in within
+`ONLINE_WINDOW_MS` (15 minutes) — one definition, in `utils/devicePresence.js`,
+serving both the parent's device cards and the console's fleet view. `lastSeen`
+is stamped when a device's socket connects and again when it drops, so the column
+tracks the connection rather than only the background task. Clients read `online`
+off the device row; they must not re-derive it from `lastSeen`.
