@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The ground behind the adaptive launcher icon.
+
+  Scaffolded as #FFFFFF, which was invisible while the foreground was Capacitor's
+  placeholder on white and wrong the moment the foreground became the real icon:
+  the launcher shows the middle 72dp of a 108dp canvas and slides the two layers
+  against each other, so this colour is what appears along the leading edge of
+  the tile during the wobble. White there reads as a frame around the icon.
+
+  primary-600, matching `colors.xml` and the artwork's own ground.
+-->
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <color name="ic_launcher_background">#0E7C86</color>
 </resources>

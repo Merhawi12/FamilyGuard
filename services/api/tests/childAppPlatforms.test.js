@@ -200,13 +200,40 @@ describe('child app — icons and launch screens', () => {
     }
   });
 
-  test('every Android density has all three launcher icons', () => {
+  test('every Android density has all four launcher icons', () => {
     for (const density of DENSITIES) {
-      for (const name of ['ic_launcher', 'ic_launcher_round', 'ic_launcher_foreground']) {
+      for (const name of ['ic_launcher', 'ic_launcher_round', 'ic_launcher_foreground', 'ic_launcher_monochrome']) {
         const file = `${CHILD_RES}/mipmap-${density}/${name}.png`;
         expect(fs.existsSync(path.join(REPO, file))).toBe(true);
       }
       expect(png(`${CHILD_RES}/mipmap-${density}/ic_launcher_foreground.png`).colourType).toBe(HAS_ALPHA);
+    }
+  });
+
+  /**
+   * The themed-icon layer has to be a different image from the foreground, and
+   * the reason is invisible from the XML: Android keeps only the alpha channel
+   * of a `<monochrome>` drawable and fills it with one colour from the
+   * wallpaper. Both tags pointed at `ic_launcher_foreground` while that file was
+   * a white shield on transparent, which was right — a silhouette is what the
+   * layer wants. The foreground is now the full-colour app icon, whose alpha is
+   * a solid rounded square, so the same reference would tint a blank tile and
+   * nothing but a phone with themed icons enabled would show it.
+   */
+  test('the themed-icon layer is a silhouette, not the colour artwork', () => {
+    for (const name of ['ic_launcher', 'ic_launcher_round']) {
+      const xml = read(`${CHILD_RES}/mipmap-anydpi-v26/${name}.xml`);
+      expect(xml).toMatch(/<monochrome android:drawable="@mipmap\/ic_launcher_monochrome"\s*\/>/);
+    }
+
+    for (const density of DENSITIES) {
+      const dir = `${CHILD_RES}/mipmap-${density}`;
+      expect(png(`${dir}/ic_launcher_monochrome.png`).colourType).toBe(HAS_ALPHA);
+      // Same size, different picture — a copy of the foreground would pass every
+      // other assertion here.
+      const monochrome = fs.readFileSync(path.join(REPO, `${dir}/ic_launcher_monochrome.png`));
+      const foreground = fs.readFileSync(path.join(REPO, `${dir}/ic_launcher_foreground.png`));
+      expect({ density, same: monochrome.equals(foreground) }).toEqual({ density, same: false });
     }
   });
 

@@ -8,11 +8,20 @@
   per-density `ic_launcher_foreground.png` files existed all along and nothing
   referenced them — this is the reference.
 
-  Background is a flat colour rather than a bitmap because the mark is a
-  silhouette on teal; there is nothing in the ground for a bitmap to add.
+  Background is a flat colour rather than a bitmap because the foreground is the
+  whole icon: `ic_launcher_foreground.png` is the drawn tile, sized to exactly
+  the 72dp the launcher shows, so the only thing behind it is the sliver the
+  parallax wobble uncovers. Teal is what should be found there.
+
+  `monochrome` is a *different* file from the foreground, which is the one thing
+  here that is easy to get wrong. It was the same file back when the foreground
+  was a white shield on nothing — a silhouette is exactly what a themed icon
+  wants. The foreground is now full-colour artwork, and a themed icon keeps only
+  the alpha channel, so pointing this at it would tint a solid rounded square and
+  put a blank tile on the home screen of every phone with themed icons on.
 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/iconBackground"/>
     <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-    <monochrome android:drawable="@mipmap/ic_launcher_foreground"/>
+    <monochrome android:drawable="@mipmap/ic_launcher_monochrome"/>
 </adaptive-icon>

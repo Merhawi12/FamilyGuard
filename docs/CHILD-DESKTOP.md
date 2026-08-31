@@ -292,8 +292,13 @@ npm run desktop:mac     # .pkg + .dmg       → apps/child-desktop/macos/dist   
 ```
 
 Icons come from `scripts/build-brand-assets.mjs` (`npm run assets`), which writes
-`build/icon.png` and `build/tray.png` into both projects from the one source
-mark. `icon.png` is a **source**: electron-builder converts it to `.ico` and
+`build/icon.png` and `build/tray.png` into both projects from the lockup,
+`apps/family-app/public/logo.png` — deliberately *not* from
+`brand/child-app-icon.png`, which is the phone app's drawn artwork. The desktop
+agent is installed by a parent on a shared laptop and lives in the tray, so it
+carries the same shield the family app and the installer do rather than the
+child-facing illustration. Change that here if the two should match.
+`icon.png` is a **source**: electron-builder converts it to `.ico` and
 `.icns` at package time, which is why neither format is committed. `tray.png` is
 drawn on the brand teal rather than transparent — a white silhouette on nothing
 is right for Android's status bar, where the system tints it, and wrong for a

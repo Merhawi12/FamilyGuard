@@ -234,19 +234,20 @@ receipts for FCM *topic* messaging, and this app subscribes to no topics.
 
 **Launch art and icons** come from `scripts/build-brand-assets.mjs` (`npm run
 assets`, or `npm run assets:check` to verify without writing), which draws every
-launch screen, launcher icon and notification icon in the repo from one source
-mark. Icons crop to the shield alone: the full lockup's wordmark is unreadable at
-60pt, and Apple's guidance is against text in icons. Chromium writes an opaque
-PNG with no alpha channel, which is what App Store Connect requires — a
-transparent ground would fail the upload. See [CHILD-APP-PLATFORMS.md](CHILD-APP-PLATFORMS.md)
-for how the same script feeds two apps that consume assets differently.
+launch screen, launcher icon and notification icon in the repo. Launch screens
+come from the lockup, `apps/family-app/public/logo.png`; each app's icon is its
+own drawn artwork, `brand/family-app-icon.png` and `brand/child-app-icon.png`.
+The App Store icon is written full-bleed with its corners filled from ground
+colour sampled out of the artwork, so Chromium writes an opaque PNG with no alpha
+channel — what App Store Connect requires, and a transparent corner is enough to
+fail the upload. See [CHILD-APP-PLATFORMS.md](CHILD-APP-PLATFORMS.md) for how the
+same script feeds apps that consume assets differently.
 
-**Known gap — the Family App's Android launcher icon is still Capacitor's blue
-"X".** The splash was rebranded; `mipmap-*/ic_launcher.png` was not, so the
-shipped Android Family App has Capacitor's logo on the home screen. The Child App
-had the same class of bug and is now fixed; the Family App's needs the
-adaptive-icon pair adding to a Capacitor project rather than an Expo one, so it
-is called out here rather than half-done.
+**Worth a better source before submission.** Both icon sources are 500×500 with a
+tile of roughly 340–380 px inside, so the 1024 App Store icon is close to a 3×
+upscale — legible, and softer than a drawn-at-size file would be. The crop is
+measured rather than hardcoded, so a re-export of either artwork at 1024 needs
+only to replace the PNG in `brand/` and a `npm run assets`.
 
 ---
 

@@ -107,29 +107,56 @@ changes, or the Expo SDK moves.
 
 ## 2. Icons and launch screens
 
-All of it is generated from one source mark, `apps/family-app/public/logo.png`:
+All of it is generated from three committed sources:
+
+| Source | Feeds |
+| --- | --- |
+| `apps/family-app/public/logo.png` | launch screens, notification icons, themed-icon silhouettes, the web logo — everything drawn as one colour |
+| `brand/family-app-icon.png` | the family app's launcher icon |
+| `brand/child-app-icon.png` | the child app's launcher icon |
 
 ```bash
 npm run assets          # write them
 npm run assets:check    # verify they are current, write nothing
 ```
 
-[`scripts/build-brand-assets.mjs`](../scripts/build-brand-assets.mjs) draws 47
-files across both apps — the child app's `assets/` is written into each platform
-project, because Expo resolves those paths from the project root. Three rules it encodes, each of which was a live bug:
+[`scripts/build-brand-assets.mjs`](../scripts/build-brand-assets.mjs) draws 78
+files across all four apps — the child app's `assets/` is written into each
+platform project, because Expo resolves those paths from the project root. Four
+rules it encodes, each of which was a live bug:
 
-- **Icons crop to the shield, dropping the wordmark.** At 48dp/60pt "Parentix"
-  is a grey smear and squeezes the shield to half the tile. The child app shipped
-  the full lockup — in the *pre-rebrand navy*, on white — until this.
+- **The two apps have different launcher icons, and neither is the lockup.** A
+  parent's dashboard and a child's own app are two products to the person holding
+  the phone, and one white shield for both made them indistinguishable in the one
+  place they are always seen together. The artwork is a composed tile — its own
+  ground, its own colours, its own rounded corners — so nothing filters it and
+  nothing crops a wordmark off it. The crop is *measured* at build time rather
+  than written down, which is what makes replacing either PNG a file swap.
+- **A pre-composed tile has to be fitted to three different ideas of an icon.**
+  Full bleed for iOS and the Android adaptive foreground, where the OS applies its
+  own mask and a transparent corner becomes a notch cut out of the artwork;
+  the artwork's own rounded corners for the legacy `ic_launcher.png`, which
+  nothing masks; an actual circle for `ic_launcher_round.png`, whose name is a
+  promise that the file already is one. The corners of the first are filled with
+  ground colour sampled from the artwork, per corner.
 - **Alpha is required in some files and fatal in others.** App Store Connect
   rejects an app icon with an alpha channel. Android notification icons are the
   opposite: the system discards the colour and tints the silhouette, so only
   alpha carries the shape. The generator paints an opaque ground where alpha must
   be absent and uses `omitBackground` where it must be present.
-- **The adaptive foreground needs a ground it can be seen against.** It is a
+- **The adaptive foreground needs a ground it can be seen against.** It was a
   white shield on transparent; `iconBackground` was `#FFFFFF`. Nobody noticed
   because there was no `mipmap-anydpi-v26/ic_launcher.xml`, so the foreground was
-  never drawn at all and Android fell back to the legacy square.
+  never drawn at all and Android fell back to the legacy square. The foreground is
+  now the artwork itself, sized to exactly the 72dp of the 108dp canvas that the
+  launcher shows, so the colour behind it is only what the parallax uncovers.
+- **`<monochrome>` must not point at the foreground.** Both XMLs did, correctly,
+  while the foreground was a silhouette — a themed icon keeps only the alpha
+  channel and fills it with one colour from the wallpaper. Now that the foreground
+  is full-colour artwork, its alpha is a solid rounded square, and the same
+  reference would put a blank tile on every home screen with themed icons turned
+  on. There is a separate `ic_launcher_monochrome.png`, still drawn from the
+  lockup's shield.
 
 ---
 

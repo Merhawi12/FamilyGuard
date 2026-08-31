@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 /**
  * Every launch screen, launcher icon and notification icon in the repo, drawn
- * from one source mark.
+ * from three committed sources.
  *
  *   node scripts/build-brand-assets.mjs          # writes them
  *   node scripts/build-brand-assets.mjs --check  # verifies they are current
+ *
+ *   apps/family-app/public/logo.png   the lockup. Launch screens, notification
+ *                                     icons, themed-icon silhouettes, the web
+ *                                     logo — everything drawn as one colour.
+ *   brand/family-app-icon.png         the family app's launcher icon.
+ *   brand/child-app-icon.png          the child app's launcher icon.
  *
  * This started as the family app's Android splash and grew, because the same
  * fault kept turning up in a different directory. Capacitor and Expo both
@@ -17,8 +23,14 @@
  *     all, on white — off-brand since the teal reskin and unreadable at 48dp
  *   - the child app's launch screen: flat teal, no mark at all
  *
+ * Two of those three were fixed when this was written. The family app's launcher
+ * icon was not: it was named above and no target was ever added for it, so the
+ * blue "X" went to the Play Store on every release afterwards, with this comment
+ * saying otherwise. It is drawn now. A list of faults in a header is not a test,
+ * and `npm run assets:check` only checks the files this file already knows about.
+ *
  * Keeping the generator in the repo rather than hand-making eighty PNGs once is
- * what makes a change to `logo.png` or to the brand teal a re-run instead of an
+ * what makes a change to a source or to the brand teal a re-run instead of an
  * afternoon.
  *
  * Rendered through Playwright — already a dev dependency for the browser E2E —
@@ -68,6 +80,7 @@ const DESKTOP_MACOS = path.join(REPO, 'apps/child-desktop/macos/build');
 const LOGO = path.join(REPO, 'apps/family-app/public/logo.png');
 const FAMILY_PUBLIC = path.join(REPO, 'apps/family-app/public');
 const ADMIN_PUBLIC = path.join(REPO, 'apps/admin-dashboard/public');
+const BRAND = path.join(REPO, 'brand');
 
 /** `primary-600`, the brand teal. Mirrors res/values/colors.xml and
  *  tailwind.config.js; familyBrandColors.test.js holds those two together. */
@@ -153,7 +166,87 @@ const IOS_ICON_PX = 1024;
  */
 const EXPO_SPLASH = [1242, 2688];
 
+/* ── The app icons, which are not the source mark ────────────────────────────
+ *
+ * Everything above treats `logo.png` as the one source and paints it as a white
+ * silhouette. Launcher icons no longer come from it.
+ *
+ * The two apps are two products to the person holding the phone — a parent's
+ * dashboard and a child's own app — and shipping both under the same white
+ * shield made the pair indistinguishable in a launcher, which is the one place
+ * they are always seen side by side. So each has its own drawn artwork:
+ *
+ *   brand/family-app-icon.png   the shield, lock and family, on the brand teal
+ *   brand/child-app-icon.png    a child with a tablet, on the same teal
+ *
+ * These are *composed tiles*, not marks: each already contains its own ground,
+ * its own colours and its own rounded corners. Nothing here filters them, and
+ * nothing crops a wordmark off — the cropping constants above apply to the
+ * lockup only. What this file still has to do is fit a tile to each platform's
+ * idea of an icon, which differ enough that a single PNG cannot serve them:
+ *
+ *   full bleed   iOS, and Android's adaptive foreground. The OS applies its own
+ *                mask — a superellipse, a circle, a squircle — so the artwork
+ *                must reach every corner or the mask cuts a transparent notch
+ *                out of it. `CORNER_BLEED` fills the corners the artwork itself
+ *                rounds off.
+ *   rounded      Android's legacy `ic_launcher.png`, drawn as-is on API 25 and
+ *                below (minSdk here is 22 and 23, so this is a real device, not
+ *                a formality). Nothing masks it, so the artwork's own rounded
+ *                corners are what should survive.
+ *   circle       Android's legacy `ic_launcher_round.png`. Same era, and the
+ *                launchers that ask for it do not mask it either — the file is
+ *                expected to arrive round.
+ *
+ * Splash screens, notification icons and the web logo still come from the
+ * lockup. A status-bar icon keeps only its alpha channel, so a colour tile
+ * flattens to a solid blob there; and the monochrome themed-icon layer wants a
+ * silhouette by definition.
+ */
+const APP_ICON_SOURCES = {
+  family: path.join(BRAND, 'family-app-icon.png'),
+  child: path.join(BRAND, 'child-app-icon.png'),
+};
+
+/**
+ * Where the ground colour behind each corner is read from.
+ *
+ * The artwork rounds its own corners over a transparent ground, so a tile drawn
+ * edge to edge still leaves four transparent notches — fatal for the iOS icon,
+ * which is rejected outright for having an alpha channel, and merely ugly
+ * everywhere else. Something has to be painted behind them.
+ *
+ * The first attempt was the artwork itself, drawn once underneath at 1.35× so
+ * the corners filled with its own gradient. It works on the family tile and is
+ * badly wrong on the child's: that artwork's motif runs much closer to its
+ * edges, so the enlarged copy put a magnified band of the boy's hair and hoodie
+ * outside the tile, dark navy against teal, and the join was the first thing the
+ * eye found. What the corners need is the *colour* there, not the picture.
+ *
+ * So each corner is sampled instead, at this fraction along the diagonal — far
+ * enough in to be inside the rounded corner on both sources, near enough out to
+ * still be ground rather than shield or child. The four samples are painted as
+ * quadrants, which is exact where it matters: the only part of them that is ever
+ * seen is the notch in its own corner.
+ */
+const CORNER_SAMPLE = 0.12;
+
+/**
+ * The tile's share of an Android adaptive layer.
+ *
+ * An adaptive icon is a 108dp canvas of which the launcher shows the middle
+ * 72dp and animates the rest during a parallax wobble. 72/108 is exactly that
+ * viewport, so the artwork fills what is drawn and the layer beneath it shows
+ * only while the icon is moving. Anything larger is cropped; anything smaller
+ * floats the tile on the background colour with a visible second rounding.
+ */
+const ADAPTIVE_TILE_SHARE = 72 / 108;
+
 const dataUri = `data:image/png;base64,${readFileSync(LOGO).toString('base64')}`;
+const appIconUris = Object.fromEntries(
+  Object.entries(APP_ICON_SOURCES)
+    .map(([app, file]) => [app, `data:image/png;base64,${readFileSync(file).toString('base64')}`]),
+);
 
 /**
  * `brightness(0)` flattens every colour in the mark to black and `invert(1)`
@@ -212,6 +305,143 @@ const iconPage = (size, share, transparent) => {
 <div class="window"><img src="${dataUri}" alt=""></div>`;
 };
 
+/**
+ * Where the composed tile sits inside its source PNG.
+ *
+ * Both sources arrive as artwork centred on a transparent canvas with a margin
+ * around it, and the margin is not the same on the two files — nor, on the
+ * child's, the same on all four sides: its tile measures 348×337 and sits ten
+ * pixels above centre. Measuring at render time rather than writing the numbers
+ * down keeps that from being something to notice. Replacing either PNG is then
+ * genuinely a file swap: the crop follows the new artwork.
+ *
+ * The result is squared to the *shorter* side. The child's tile is 348×337, and
+ * squaring up would leave a transparent band along the top and bottom edges —
+ * where no mask ever reaches, so it would survive into the shipped icon as a
+ * stripe of whatever was painted behind it. Squaring down instead trims five
+ * pixels off either side of a 348-pixel tile, and those five pixels are ground.
+ */
+const measureTile = async (browser, uri) => {
+  const tab = await browser.newPage();
+  await tab.setContent('<!doctype html><meta charset="utf-8"><body></body>');
+  const tile = await tab.evaluate(async ({ uri, sample }) => {
+    const img = new Image();
+    img.src = uri;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const { data } = ctx.getImageData(0, 0, img.width, img.height);
+    const at = (x, y) => (y * img.width + x) * 4;
+
+    // Anything the artwork actually painted. The threshold is low rather than
+    // zero so the anti-aliased skirt of the drop shadow counts as edge.
+    let minX = img.width, minY = img.height, maxX = -1, maxY = -1;
+    for (let y = 0; y < img.height; y++) {
+      for (let x = 0; x < img.width; x++) {
+        if (data[at(x, y) + 3] < 16) continue;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+    if (maxX < 0) throw new Error('the icon source is entirely transparent');
+
+    const side = Math.min(maxX - minX + 1, maxY - minY + 1);
+    const x = Math.round((minX + maxX + 1 - side) / 2);
+    const y = Math.round((minY + maxY + 1 - side) / 2);
+
+    /**
+     * The ground colour at one corner. The sample point can land on a pixel the
+     * artwork left soft — the corner's own anti-aliasing, or the shadow outside
+     * it — so it walks along the diagonal towards the centre until it reaches
+     * one the artwork painted solid, and reads that.
+     */
+    const corner = (fx, fy) => {
+      for (let step = 0; step < side / 2; step++) {
+        const px = Math.round(x + (fx * side) + (fx < 0.5 ? step : -step));
+        const py = Math.round(y + (fy * side) + (fy < 0.5 ? step : -step));
+        const i = at(px, py);
+        if (data[i + 3] >= 250) return `rgb(${data[i]}, ${data[i + 1]}, ${data[i + 2]})`;
+      }
+      throw new Error('no opaque pixel on the diagonal from an icon corner');
+    };
+
+    return {
+      imageW: img.width,
+      imageH: img.height,
+      x,
+      y,
+      side,
+      corners: [
+        corner(sample, sample),
+        corner(1 - sample, sample),
+        corner(sample, 1 - sample),
+        corner(1 - sample, 1 - sample),
+      ],
+    };
+  }, { uri, sample: CORNER_SAMPLE });
+  await tab.close();
+  return tile;
+};
+
+/** Filled once the browser is up; `appIconPage` reads it. */
+const tiles = {};
+
+/**
+ * A launcher icon: one app's composed artwork, in colour, fitted to a canvas.
+ *
+ * `share` is the tile's fraction of that canvas — 1 for a plain icon, the
+ * adaptive viewport for a foreground layer. `mask` is what the platform will
+ * *not* do for itself, per the three cases at the top of this file.
+ *
+ * The fill copy is drawn first and clipped by the same window, so it exists
+ * only where the artwork's own rounded corners leave a hole. `mask: 'rounded'`
+ * skips it: that is the one target where those corners are the point.
+ */
+const appIconPage = (app, size, share, mask) => {
+  const { imageW, imageH, x, y, side, corners } = tiles[app];
+  const box = Math.round(size * share);
+  const scale = box / side;
+
+  // The tile, drawn at `box` px: scale the whole source by that factor and slide
+  // the crop's top-left corner up to the window's origin.
+  const art = `width: ${Math.round(imageW * scale)}px; height: ${Math.round(imageH * scale)}px;`
+    + ` left: ${Math.round(-x * scale)}px; top: ${Math.round(-y * scale)}px;`;
+
+  // Four quadrants of sampled ground, meeting in the middle so there is no seam
+  // to find along an edge. The artwork covers all of it but the corner notches.
+  const fill = corners
+    .map((colour, i) => `<div style="`
+      + `position:absolute; width:50%; height:50%;`
+      + `${i % 2 ? 'right' : 'left'}:0; ${i < 2 ? 'top' : 'bottom'}:0;`
+      + `background:${colour}"></div>`)
+    .join('');
+
+  const radius = mask === 'circle' ? '50%' : '0';
+  return `<!doctype html><meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; }
+  body {
+    width: ${size}px; height: ${size}px;
+    background: transparent;
+    display: grid; place-items: center;
+  }
+  .window {
+    width: ${box}px; height: ${box}px;
+    overflow: hidden; position: relative; border-radius: ${radius};
+  }
+  .art { position: absolute; ${art} }
+</style>
+<div class="window">
+  ${mask === 'rounded' ? '' : fill}
+  <img class="art" src="${appIconUris[app]}" alt="">
+</div>`;
+};
+
 /* ── Density buckets ──────────────────────────────────────────────────────────
  *
  * Transcribed from what each tool scaffolded, and kept exactly. Android picks a
@@ -235,6 +465,17 @@ const FAMILY_SPLASH_BUCKETS = {
 
 /** Child app launcher icons — Expo's sizes, which are the 108dp adaptive canvas. */
 const CHILD_MIPMAP = { mdpi: 108, hdpi: 162, xhdpi: 216, xxhdpi: 324, xxxhdpi: 432 };
+
+/**
+ * Family app launcher icons, which are scaffolded at two sizes rather than one.
+ *
+ * Capacitor writes the legacy bitmaps at the 48dp launcher size and the adaptive
+ * layers at the 108dp canvas, so unlike Expo's set above these are not
+ * interchangeable: a 48dp file in a 108dp slot is a quarter-size mark, and the
+ * reverse overflows the mask. Both tables are the sizes already on disk.
+ */
+const FAMILY_LEGACY_MIPMAP = { mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 };
+const FAMILY_ADAPTIVE_MIPMAP = { mdpi: 108, hdpi: 162, xhdpi: 216, xxhdpi: 324, xxxhdpi: 432 };
 
 /** Child app status-bar icons — the standard 24dp notification sizes. */
 const CHILD_NOTIFY = { mdpi: 24, hdpi: 36, xhdpi: 48, xxhdpi: 72, xxxhdpi: 96 };
@@ -303,20 +544,69 @@ const TARGETS = [
   {
     label: 'family ios AppIcon-512@2x.png',
     file: path.join(XCASSETS, 'AppIcon.appiconset', 'AppIcon-512@2x.png'),
-    w: IOS_ICON_PX, h: IOS_ICON_PX, share: ICON_SHARE, kind: 'icon',
+    w: IOS_ICON_PX, h: IOS_ICON_PX, share: 1, kind: 'appIcon', app: 'family', mask: 'none',
     missing: `AppIcon.appiconset does not exist — ${missingFamilyIos}`,
   },
+
+  // ── Family app · Android launcher icons ────────────────────────────────────
+  /**
+   * These are new here, and the reason is worth writing down: they were the one
+   * set of icons this script did not draw, and nothing else drew them either.
+   * The family app shipped Capacitor's scaffolded placeholder — a pale blue "X"
+   * on white graph paper — to the Play Store, for every release. The header of
+   * this file has claimed since it was written that the fault was fixed; only
+   * the child app's copy of it ever was, and a comment is not a target.
+   *
+   * `ic_launcher_background.xml` is teal rather than the scaffolded #FFFFFF for
+   * the same reason the child app's is: it is what shows in the sliver the
+   * parallax reveals, and white there frames the tile.
+   */
+  ...Object.entries(FAMILY_LEGACY_MIPMAP).flatMap(([density, px]) => [
+    {
+      label: `family android mipmap-${density}/ic_launcher.png`,
+      file: path.join(FAMILY_RES, `mipmap-${density}`, 'ic_launcher.png'),
+      w: px, h: px, share: 1, kind: 'appIcon', app: 'family', mask: 'rounded', transparent: true,
+      missing: `mipmap-${density} does not exist — ${missingFamilyAndroid}`,
+    },
+    {
+      label: `family android mipmap-${density}/ic_launcher_round.png`,
+      file: path.join(FAMILY_RES, `mipmap-${density}`, 'ic_launcher_round.png'),
+      w: px, h: px, share: 1, kind: 'appIcon', app: 'family', mask: 'circle', transparent: true,
+      missing: `mipmap-${density} does not exist — ${missingFamilyAndroid}`,
+    },
+  ]),
+
+  ...Object.entries(FAMILY_ADAPTIVE_MIPMAP).flatMap(([density, px]) => [
+    {
+      label: `family android mipmap-${density}/ic_launcher_foreground.png`,
+      file: path.join(FAMILY_RES, `mipmap-${density}`, 'ic_launcher_foreground.png'),
+      w: px, h: px, share: ADAPTIVE_TILE_SHARE, kind: 'appIcon', app: 'family', mask: 'none',
+      transparent: true,
+      missing: `mipmap-${density} does not exist — ${missingFamilyAndroid}`,
+    },
+    {
+      label: `family android mipmap-${density}/ic_launcher_monochrome.png`,
+      file: path.join(FAMILY_RES, `mipmap-${density}`, 'ic_launcher_monochrome.png'),
+      w: px, h: px, share: ADAPTIVE_SHARE, kind: 'icon', transparent: true,
+      missing: `mipmap-${density} does not exist — ${missingFamilyAndroid}`,
+    },
+  ]),
 
   // ── Child app · Expo assets, which drive the iOS prebuild ──────────────────
   /**
    * The App Store icon, and the one asset here with a hard rejection attached:
    * App Store Connect refuses an icon with an alpha channel, naming the file
-   * rather than the reason. Nothing strips it because nothing has to — the page
-   * paints an opaque teal ground and Chromium writes colour type 2, no alpha
-   * channel at all, whenever a capture is fully opaque. `transparent: true`
-   * below is what produces type 6, and it is used only where alpha is required.
+   * rather than the reason. Nothing strips it because nothing has to — the tile
+   * is drawn edge to edge over sampled ground, so the capture is fully opaque
+   * and Chromium writes colour type 2, no alpha channel at all. That is what
+   * `mask: 'none'` at `share: 1` buys, and why the corner fill is not optional
+   * here: a transparent notch in one corner would flip the whole file to type 6.
    *
-   * 1024 also replaces a 500×500 source that iOS would have upscaled.
+   * Known soft spot, and the one thing worth fixing with a better file rather
+   * than better code: `brand/child-app-icon.png` is 500×500 with a 337-pixel
+   * tile inside it, so this 1024 is a 3× upscale. It is legible, and it is the
+   * largest anything draws the icon. A re-export of the artwork at 1024 drops
+   * straight in — the crop is measured, not written down.
    */
   /**
    * Written once per platform project, because Expo resolves these paths from
@@ -331,7 +621,7 @@ const TARGETS = [
     {
       label: `child ${platform} assets/icon.png`,
       file: path.join(dir, 'icon.png'),
-      w: IOS_ICON_PX, h: IOS_ICON_PX, share: ICON_SHARE, kind: 'icon',
+      w: IOS_ICON_PX, h: IOS_ICON_PX, share: 1, kind: 'appIcon', app: 'child', mask: 'none',
     },
     {
       label: `child ${platform} assets/splash.png`,
@@ -352,7 +642,8 @@ const TARGETS = [
     ...(platform === 'android' ? [{
       label: `child ${platform} assets/adaptive-icon.png`,
       file: path.join(dir, 'adaptive-icon.png'),
-      w: IOS_ICON_PX, h: IOS_ICON_PX, share: ADAPTIVE_SHARE, kind: 'icon', transparent: true,
+      w: IOS_ICON_PX, h: IOS_ICON_PX, share: ADAPTIVE_TILE_SHARE, kind: 'appIcon', app: 'child',
+      mask: 'none', transparent: true,
     }] : []),
   ]),
 
@@ -361,24 +652,42 @@ const TARGETS = [
     {
       label: `child android mipmap-${density}/ic_launcher.png`,
       file: path.join(CHILD_RES, `mipmap-${density}`, 'ic_launcher.png'),
-      w: px, h: px, share: ICON_SHARE, kind: 'icon',
+      w: px, h: px, share: 1, kind: 'appIcon', app: 'child', mask: 'rounded', transparent: true,
       missing: `mipmap-${density} does not exist — ${missingChild}`,
     },
     /**
      * The round variant is a separate file rather than a copy of the square one
-     * because launchers that ask for `ic_launcher_round` are the ones that will
-     * clip it to a circle, and the mark has to sit inside that circle. Drawn at
-     * the adaptive share for exactly that reason.
+     * because a launcher that asks for `ic_launcher_round` draws it as it finds
+     * it — the name is a promise that the file is already round, not a request
+     * for something to be masked. It was previously the square tile with the
+     * mark shrunk enough to survive being clipped, which is the same idea
+     * arrived at without a circle; now the tile is genuinely cut to one.
      */
     {
       label: `child android mipmap-${density}/ic_launcher_round.png`,
       file: path.join(CHILD_RES, `mipmap-${density}`, 'ic_launcher_round.png'),
-      w: px, h: px, share: ADAPTIVE_SHARE, kind: 'icon',
+      w: px, h: px, share: 1, kind: 'appIcon', app: 'child', mask: 'circle', transparent: true,
       missing: `mipmap-${density} does not exist — ${missingChild}`,
     },
     {
       label: `child android mipmap-${density}/ic_launcher_foreground.png`,
       file: path.join(CHILD_RES, `mipmap-${density}`, 'ic_launcher_foreground.png'),
+      w: px, h: px, share: ADAPTIVE_TILE_SHARE, kind: 'appIcon', app: 'child', mask: 'none',
+      transparent: true,
+      missing: `mipmap-${density} does not exist — ${missingChild}`,
+    },
+    /**
+     * The themed-icon layer, which the launcher fills with one colour from the
+     * wallpaper and therefore reads only as a silhouette. That is why it stays
+     * the lockup's shield: the artwork flattened to its alpha channel is a
+     * rounded square and nothing else, so pointing `<monochrome>` at the
+     * foreground — which is what both XMLs used to do, back when the foreground
+     * *was* the shield — would now put a blank tile on the home screen of every
+     * phone with themed icons turned on.
+     */
+    {
+      label: `child android mipmap-${density}/ic_launcher_monochrome.png`,
+      file: path.join(CHILD_RES, `mipmap-${density}`, 'ic_launcher_monochrome.png'),
       w: px, h: px, share: ADAPTIVE_SHARE, kind: 'icon', transparent: true,
       missing: `mipmap-${density} does not exist — ${missingChild}`,
     },
@@ -438,6 +747,8 @@ const check = process.argv.includes('--check');
 const browser = await chromium.launch();
 const stale = [];
 
+for (const [app, uri] of Object.entries(appIconUris)) tiles[app] = await measureTile(browser, uri);
+
 /**
  * The WebP copy of the source mark.
  *
@@ -476,8 +787,8 @@ const encodeWebp = async (w, h) => {
 
 /** Identical geometry is drawn once — the three iOS splash files share a render. */
 const renders = new Map();
-const render = async ({ w, h, share, kind, transparent }) => {
-  const key = `${kind}:${w}x${h}@${share}${transparent ? ':a' : ''}`;
+const render = async ({ w, h, share, kind, transparent, app, mask }) => {
+  const key = `${kind}:${app || ''}:${w}x${h}@${share}:${mask || ''}${transparent ? ':a' : ''}`;
   if (!renders.has(key)) {
     if (kind === 'webp') {
       renders.set(key, await encodeWebp(w, h));
@@ -493,7 +804,9 @@ const render = async ({ w, h, share, kind, transparent }) => {
         ? `<!doctype html><meta charset="utf-8">
 <style>html,body{margin:0;padding:0}body{width:${w}px;height:${h}px;display:grid;place-items:center;background:transparent}
 img{width:${w}px;${WHITE}}</style><img src="${dataUri}" alt="">`
-        : iconPage(w, share, transparent);
+        : kind === 'appIcon'
+          ? appIconPage(app, w, share, mask)
+          : iconPage(w, share, transparent);
     await tab.setContent(html);
     renders.set(key, await tab.screenshot({ type: 'png', omitBackground: !!transparent }));
     await tab.close();
@@ -522,5 +835,5 @@ if (check) {
     console.error(`Out of date, re-run without --check:\n  ${stale.join('\n  ')}`);
     process.exit(1);
   }
-  console.log(`Every brand asset matches the current logo and brand teal (${TARGETS.length} files).`);
+  console.log(`Every brand asset matches its source and the brand teal (${TARGETS.length} files).`);
 }

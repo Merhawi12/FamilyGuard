@@ -1,5 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The adaptive icon, which is what Android 8 and later actually draws.
+
+  Every layer named here used to be Capacitor's scaffolding: a white background
+  colour under `ic_launcher_foreground.png`, which was the pale blue "X" the
+  tool ships as a placeholder. Nothing regenerated it, so that is the icon the
+  family app carried to the Play Store — while the child app, the launch screens
+  and the web all wore the rebrand. Both layers are now written by
+  `scripts/build-brand-assets.mjs` from `brand/family-app-icon.png`.
+
+  The foreground is the whole icon, sized to exactly the 72dp the launcher
+  shows, so `ic_launcher_background` is only what the parallax wobble uncovers
+  at the edge — teal rather than the scaffolded white, which framed the tile.
+
+  `monochrome` is a separate file, not the foreground. A themed icon keeps only
+  the alpha channel, and the foreground is now full-colour artwork whose alpha is
+  a solid rounded square; tinting that would put a blank tile on the home screen.
+  The shield silhouette is what a one-colour rendering of this app should be.
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
     <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <monochrome android:drawable="@mipmap/ic_launcher_monochrome"/>
 </adaptive-icon>
