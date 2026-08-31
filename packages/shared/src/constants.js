@@ -180,6 +180,28 @@ export const planLabel = (key) =>
 /** True for any tier that is billed — the test for "this account pays us". */
 export const isPaidPlan = (key) => PAID_PLAN_KEYS.includes(key);
 
+/**
+ * Stripe subscription states in which the account has stopped being entitled to
+ * the plan it is nominally on.
+ *
+ * Mirrors `UNENTITLED_STATUSES` in `services/api/src/middleware/featureGate.js`,
+ * which is where they are enforced. Change both together;
+ * `sharedConstants.test.js` fails the build when they drift.
+ *
+ * The web app needs them for one reason: to *say so*. Without this, a customer
+ * whose card had finally failed saw a plan screen reading "Premium" and got
+ * "Upgrade required" from every Premium feature — two true statements that
+ * contradict each other, with nothing on the screen to reconcile them.
+ *
+ * `past_due` is deliberately not among them: Stripe is still retrying, and the
+ * account keeps everything while it does.
+ */
+export const UNENTITLED_SUBSCRIPTION_STATUSES = ['unpaid', 'incomplete_expired', 'paused'];
+
+/** Whether a subscription in this state still entitles the account. */
+export const subscriptionIsLapsed = (status) =>
+  UNENTITLED_SUBSCRIPTION_STATUSES.includes(status);
+
 /** Human labels for the alert types the backend emits. */
 /**
  * The content categories a filter rule can name.

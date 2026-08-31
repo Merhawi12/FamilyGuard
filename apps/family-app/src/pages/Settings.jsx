@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   useAuth, auth as authApi, payments, errorMessage, EmptyState, Icon, Toggle, TwoFactorSetup,
-  PLAN_CATALOGUE, planLabel, isPaidPlan, clearTrustedDeviceToken,
+  PLAN_CATALOGUE, planLabel, isPaidPlan, subscriptionIsLapsed, clearTrustedDeviceToken,
 } from '@parentix/shared';
 import PageIntro from '../components/PageIntro';
 import PushSettings from '../components/PushSettings';
@@ -561,6 +561,40 @@ export default function Settings() {
                   </button>
                 )}
               </div>
+
+              {/*
+                * The subscription stopped paying, and the features went with it.
+                *
+                * Without this the account read "Premium" here while every
+                * Premium feature answered "Upgrade required" — two true
+                * statements that contradict each other, with nothing on the
+                * screen to reconcile them. The API withholds entitlements for
+                * exactly these states (middleware/featureGate), so this is the
+                * sentence that makes the refusal make sense.
+                *
+                * Named as a payment problem rather than as a downgrade, because
+                * that is what it is and what it takes to fix: the plan is still
+                * theirs, and Manage billing above is the way back. `past_due` is
+                * absent from the list on purpose — nothing has been withheld
+                * while Stripe is still retrying, so there is nothing to explain.
+                *
+                * Gated on `isPaid` as well, so a free account can never be told
+                * its Premium features are paused. The two should not co-occur —
+                * `customer.subscription.deleted` sets the plan to free and the
+                * status to cancelled together — but a message that confusing is
+                * not worth resting on a webhook ordering guarantee.
+                */}
+              {isPaid && subscriptionIsLapsed(subscription?.status) && (
+                <p className="notice notice-error mt-4">
+                  <Icon name="warning" size={16} className="mt-0.5" />
+                  <span>
+                    We could not collect payment for your subscription, so Premium
+                    features are paused on your account. Your data is safe and
+                    nothing has been deleted
+                    {billingAvailable ? ' — update your payment details under Manage billing to switch them back on.' : '. Please contact support to restore your plan.'}
+                  </span>
+                </p>
+              )}
 
               {user?.plan === 'free' && user?.trialEndsAt && (
                 <p className={`notice mt-4 ${user.trialExpired ? 'notice-error' : 'notice-warning'}`}>

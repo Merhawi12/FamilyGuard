@@ -9,6 +9,7 @@ const { likeOperator } = require('../utils/queryOperators');
 const { normalizeEmail } = require('../utils/normalizeEmail');
 const { isUuid } = require('../utils/ids');
 const { ASSIGNABLE_PLANS, SUSPENDED_PLAN } = require('../config/plans');
+const { UNENTITLED_STATUSES } = require('../middleware/featureGate');
 const {
   PARENT_ROLE, ROLES, PERMISSION_KEYS, STAFF_ROLES, defaultPermissionsFor,
 } = require('../config/roles');
@@ -431,6 +432,25 @@ const updatePlan = async (req, res, next) => {
     // undo a block applied through toggle-block.
     if (plan === SUSPENDED_PLAN) client.isActive = false;
     else if (previousPlan === SUSPENDED_PLAN) client.isActive = true;
+
+    /**
+     * A plan set by hand supersedes what Stripe last said about a subscription
+     * that had stopped paying.
+     *
+     * `effectivePlan` withholds entitlements from an account whose subscription
+     * is `unpaid`, `paused` or `incomplete_expired`. Without this, staff moving
+     * such a customer onto Premium — a goodwill grant, or someone who has
+     * arranged to pay another way — would save the plan, log the change, show it
+     * in the directory, and grant nothing: the stale status would go on
+     * answering for an arrangement that no longer exists.
+     *
+     * `'manual'` rather than `'active'` because it is the true statement of the
+     * two: there is no live Stripe subscription behind this, and a later webhook
+     * for a genuine one overwrites it in any case.
+     */
+    if (plan !== SUSPENDED_PLAN && UNENTITLED_STATUSES.has(client.subscriptionStatus)) {
+      client.subscriptionStatus = 'manual';
+    }
 
     await client.save();
 

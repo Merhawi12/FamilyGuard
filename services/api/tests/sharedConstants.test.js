@@ -41,9 +41,22 @@ const sharedObject = (name) => {
 const sharedArrayLiterals = (name) => {
   const start = sharedSource.indexOf(`export const ${name}`);
   if (start === -1) throw new Error(`${name} is not exported from constants.js`);
-  // First `};` after the declaration — works for both the multi-line objects
-  // and the single-line ones like PLANS.
-  const body = sharedSource.slice(start, sharedSource.indexOf('};', start));
+
+  /**
+   * Whichever terminator comes first, rather than `};` alone.
+   *
+   * A declaration that really is an array ends `];`, and stopping only at `};`
+   * ran on to the end of the *next* object — so the literals of an unrelated
+   * catalogue were read as part of this one. It passed anyway for the callers
+   * that existed, because they were checking a subset relationship; the first
+   * caller to assert an exact list is what found it.
+   */
+  const ends = ['};', '];']
+    .map((token) => sharedSource.indexOf(token, start))
+    .filter((index) => index !== -1);
+  if (ends.length === 0) throw new Error(`${name} has no terminator in constants.js`);
+
+  const body = sharedSource.slice(start, Math.min(...ends));
   return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]);
 };
 
@@ -217,6 +230,26 @@ describe('the pricing catalogue stays in step across API and web apps', () => {
     expect(planCatalogue.PLAN_KEYS).not.toContain('family');
     expect(planCatalogue.DEFAULT_PLAN_FEATURES).not.toHaveProperty('family');
     expect(sharedSource).not.toMatch(/FAMILY:/);
+  });
+
+  /**
+   * The states in which a subscription stops entitling, restated for the web
+   * apps so the plan screen can *explain* a refusal the API is making.
+   *
+   * Drift here is the nastiest kind available: the API would withhold Premium
+   * features for a status the web app does not recognise as a problem, so the
+   * customer would get "Upgrade required" from every feature while the plan
+   * screen showed Premium and said nothing was wrong.
+   */
+  it('agrees on which subscription states stop entitling', () => {
+    const { UNENTITLED_STATUSES } = require('../src/middleware/featureGate');
+    const web = sharedArrayLiterals('UNENTITLED_SUBSCRIPTION_STATUSES');
+
+    expect(web.length).toBeGreaterThan(0);
+    expect(web.sort()).toEqual([...UNENTITLED_STATUSES].sort());
+    // The policy, pinned on both sides: a card Stripe is still retrying keeps
+    // the family's safety features switched on.
+    expect(web).not.toContain('past_due');
   });
 });
 
