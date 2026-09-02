@@ -135,7 +135,9 @@ export const NativeModules = {
   },
 };
 
-export const Platform = { OS: 'android', select: (map) => map.android ?? map.default };
+// `Version` is the Android API level, not the marketing version — the same
+// distinction `services/deviceInfo.js` has to make, so the stub carries it.
+export const Platform = { OS: 'android', Version: 34, select: (map) => map.android ?? map.default };
 
 export class NativeEventEmitter {
   addListener(event, handler) {
@@ -148,7 +150,15 @@ export class NativeEventEmitter {
 // ── expo-device / expo-constants ─────────────────────────────────────────────
 // `isDevice` is fixed true: emulator detection is a property of the hardware,
 // not something this harness can meaningfully vary.
-export const deviceInfoStub = { isDevice: true, manufacturer: 'Google', modelName: 'Pixel 7' };
+export const deviceInfoStub = {
+  isDevice: true,
+  manufacturer: 'Google',
+  modelName: 'Pixel 7',
+  // What the device reports about itself as it links. Deliberately different
+  // from `Platform.Version` above so a test can tell which source was used.
+  osName: 'Android',
+  osVersion: '14',
+};
 
 export const constantsStub = {
   expoConfig: { extra: { eas: { projectId: 'e2e-project-id' } } },

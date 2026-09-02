@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getDeviceToken, handleAuthFailure } from './link';
+import { thisDeviceType, thisOsVersion } from './deviceInfo';
 
 // The child device talks to the API hostname directly rather than through the
 // app hostnames that front the web apps.
@@ -69,8 +70,18 @@ api.interceptors.response.use(
 
 // ── Device linking ────────────────────────────────────────────────────────────
 export const device = {
-  // Returns { device, deviceToken } — store deviceToken for all future calls
-  confirmLink: (code) => api.post('/devices/confirm', { code }),
+  /**
+   * Returns { device, deviceToken } — store deviceToken for all future calls.
+   *
+   * `type` and `osVersion` default to what this handset knows about itself, so
+   * every link reports them whether or not the caller remembered to. They were
+   * sent by nothing until now, which is why the console's fleet table said
+   * "version unknown" under every phone while filling the column in for laptops.
+   * See services/deviceInfo.js. Overridable so a caller with better information
+   * — a test, or a future setup flow — can say so.
+   */
+  confirmLink: (code, { osVersion = thisOsVersion(), type = thisDeviceType() } = {}) =>
+    api.post('/devices/confirm', { code, osVersion, type }),
 
   // Device-authenticated calls
   getRules: () => api.get('/devices/me/rules'),

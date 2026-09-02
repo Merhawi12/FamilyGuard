@@ -198,9 +198,13 @@ const run = async () => {
 
   // ── Device linking ─────────────────────────────────────────────────────────
   step('Child device links itself');
+  // Deliberately the wrong type: the parent picks one from a dashboard that is
+  // not the device being set up, and only the device can correct them. The
+  // desktop agent has always said what it is; the phone said nothing until
+  // services/deviceInfo.js, so a mistake here was permanent.
   const link = await call('POST', '/devices/link', {
     token: parentToken,
-    body: { childId, deviceName: "Ada's Phone", type: 'android' },
+    body: { childId, deviceName: "Ada's Phone", type: 'windows' },
   });
   const linkCode = link.data.code;
 
@@ -210,6 +214,13 @@ const run = async () => {
   check('the app exchanges the code for a device token', !!confirm.data.deviceToken);
   check('the spent code is not handed back to the phone',
     (confirm.data.device.linkingCode ?? null) === null, JSON.stringify(confirm.data.device.linkingCode));
+  check('the phone corrects the device type the parent guessed',
+    confirm.data.device.type === 'android', confirm.data.device.type);
+  // "Android 14", from expo-device — not `Platform.Version`, which is the API
+  // level (34) and would read as a nonsense version on the parent's device list
+  // and in the console's fleet table.
+  check('and reports its OS version, which no phone used to',
+    confirm.data.device.osVersion === 'Android 14', String(confirm.data.device.osVersion));
 
   // Stored through the shipping path rather than by poking the keystore, so
   // this covers what LinkScreen actually calls.
