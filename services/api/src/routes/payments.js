@@ -177,6 +177,72 @@ const sessionIsPaid = (session) =>
   session?.status === 'complete'
   && ['paid', 'no_payment_required'].includes(session.payment_status);
 
+/**
+ * A stored Stripe customer that Stripe does not have.
+ *
+ * `users.stripeCustomerId` is a foreign key into someone else's database, and it
+ * can stop resolving without anything here changing: the deployment's key is
+ * rolled to a different Stripe account, an account is moved between test and
+ * live mode, or the customer is deleted from the dashboard. The id stays on the
+ * row and every later call carries it.
+ *
+ * Production hit exactly this — `No such customer: 'cus_V9bGIsYwyG7Y4a'`,
+ * `resource_missing`, twice within seven minutes — and the shape of the failure
+ * is what made it worth a fix rather than a support ticket. It is a
+ * `StripeInvalidRequestError`, so `RETRY_WILL_NOT_HELP` correctly classified it
+ * as a configuration fault and the plan screen withdrew the Upgrade button. That
+ * verdict was right about "retrying will not help" and wrong about whose problem
+ * it is: nothing was misconfigured, and no amount of fixing the deployment would
+ * have helped, because the dead id was on one user's row. That account could
+ * never subscribe again, by construction, and the button vanishing told them
+ * their deployment could not take payments.
+ */
+const customerIsMissing = (err) => err?.code === 'resource_missing'
+  && (err?.param === 'customer' || /no such customer/i.test(err?.message || ''));
+
+/**
+ * The Stripe customer for this account, creating one if there is not a usable
+ * one already.
+ *
+ * `email` is omitted rather than sent as null for a phone-only account: Stripe
+ * treats an explicit null as "clear it", and a customer with no address simply
+ * has no receipt destination until one is added.
+ */
+const ensureCustomer = async (user) => {
+  if (user.stripeCustomerId) return user.stripeCustomerId;
+
+  const customer = await stripe.customers.create({
+    name: user.name,
+    ...(user.email ? { email: user.email } : {}),
+  });
+  await user.update({ stripeCustomerId: customer.id });
+  return customer.id;
+};
+
+/**
+ * Runs a Stripe call that takes a customer id, and re-creates the customer once
+ * if Stripe says the stored one does not exist.
+ *
+ * One retry, not a loop: the second failure is a real one, and a customer this
+ * service has just created and been handed back cannot also be missing. Forget
+ * before create, so the row never keeps an id that has been proven dead even if
+ * the creation itself then fails.
+ */
+const withLiveCustomer = async (user, call) => {
+  const customerId = await ensureCustomer(user);
+  try {
+    return await call(customerId);
+  } catch (err) {
+    if (!customerIsMissing(err)) throw err;
+
+    logger.warn('Stored Stripe customer no longer exists — creating a replacement', {
+      userId: user.id, staleCustomerId: customerId,
+    });
+    await user.update({ stripeCustomerId: null });
+    return call(await ensureCustomer(user));
+  }
+};
+
 const sendStripeFailure = (res, err, context) => {
   const configFault = RETRY_WILL_NOT_HELP.has(err?.type);
 
@@ -230,21 +296,10 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id);
 
-    // Create or reuse Stripe customer
-    let customerId = user.stripeCustomerId;
-    if (!customerId) {
-      // `email` is omitted rather than sent as null for a phone-only account:
-      // Stripe treats an explicit null as "clear it", and a customer with no
-      // address simply has no receipt destination until one is added.
-      const customer = await stripe.customers.create({
-        name: user.name,
-        ...(user.email ? { email: user.email } : {}),
-      });
-      customerId = customer.id;
-      await user.update({ stripeCustomerId: customerId });
-    }
-
-    const session = await stripe.checkout.sessions.create({
+    // Reuses the stored customer, and replaces it if Stripe no longer has it —
+    // see `withLiveCustomer`. A dead id used to make this account permanently
+    // unable to subscribe.
+    const session = await withLiveCustomer(user, (customerId) => stripe.checkout.sessions.create({
       /**
        * Ours, and not negotiable.
        *
@@ -318,7 +373,7 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
       automatic_tax: { enabled: false },
       allow_promotion_codes: false,
       payment_method_collection: 'always',
-    });
+    }));
 
     res.json({ url: session.url });
   } catch (err) {
@@ -333,12 +388,20 @@ router.post('/customer-portal', authenticate, async (req, res) => {
 
   try {
     const user = await User.findByPk(req.user.id);
+    // Still a 400 rather than a created customer: the portal manages an existing
+    // subscription, and an account that has never had one has nothing to show
+    // there. `withLiveCustomer` would happily mint a customer for it, which is
+    // the right thing before a checkout and the wrong thing here.
     if (!user.stripeCustomerId) return res.status(400).json({ error: 'No active subscription' });
 
-    const session = await stripe.billingPortal.sessions.create({
-      customer: user.stripeCustomerId,
+    // A stale customer id breaks this the same way it broke checkout, and the
+    // customer meets it at a worse moment: cancelling. Replacing it is enough to
+    // open the portal, which then correctly shows no subscription rather than
+    // an error page.
+    const session = await withLiveCustomer(user, (customerId) => stripe.billingPortal.sessions.create({
+      customer: customerId,
       return_url: `${env.clientUrl}/dashboard/settings`,
-    });
+    }));
 
     res.json({ url: session.url });
   } catch (err) {
