@@ -18,6 +18,30 @@ const instance = {
   checkout: {
     sessions: {
       create: jest.fn(async () => ({ id: 'cs_test', url: 'https://stripe.test/checkout' })),
+      /**
+       * Resolves to a completed, paid session by default.
+       *
+       * The opposite choice from `subscriptions.retrieve` above, and for the
+       * opposite reason: that one rejects so the graceful-degradation path is
+       * what gets exercised, whereas this one is the *fulfilment* path — a
+       * customer coming back from Checkout with money already taken — so the
+       * default has to be the case where the plan must actually be granted. A
+       * mock that failed here would make every confirmation test a test of the
+       * failure branch, which is how "paid but never upgraded" survived.
+       *
+       * `customer: 'cus_test'` matches what `customers.create` returns, so a
+       * user who went through create-checkout-session owns this session.
+       */
+      retrieve: jest.fn(async (id) => ({
+        id,
+        status: 'complete',
+        payment_status: 'paid',
+        customer: 'cus_test',
+        subscription: 'sub_test',
+        amount_total: 999,
+        currency: 'cad',
+        metadata: {},
+      })),
     },
   },
   billingPortal: {

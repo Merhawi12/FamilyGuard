@@ -236,6 +236,15 @@ export const safeZones = {
 
 export const payments = {
   createCheckoutSession: (plan) => api.post('/payments/create-checkout-session', { plan }),
+  /**
+   * Turns the session id Stripe hands back into an actually-upgraded account.
+   *
+   * The webhook remains the authority for everything that happens later, but it
+   * is the wrong thing to depend on for the one moment the customer is watching
+   * the screen: a deployment with no `STRIPE_WEBHOOK_SECRET` fails every
+   * delivery, and the plan screen used to congratulate them anyway.
+   */
+  confirmCheckout: (sessionId) => api.post('/payments/checkout/confirm', { sessionId }),
   customerPortal: () => api.post('/payments/customer-portal'),
   getSubscription: () => api.get('/payments/subscription'),
 };

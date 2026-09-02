@@ -5,6 +5,9 @@ const router = express.Router();
 const { User, Transaction } = require('../models');
 const { authenticate } = require('../middleware/auth');
 const { PLANS: PLAN_CATALOGUE, PAID_PLAN_KEYS } = require('../config/plans');
+// The confirm route hands the refreshed account straight back, so the plan
+// screen does not have to make a second call to learn what it just bought.
+const { serializeUser } = require('../utils/serializers');
 // A misconfigured/missing Stripe key must not crash the whole API — payments
 // degrade to 503 while every other route (alerts, location, monitoring) stays up.
 // The client itself lives in services/billing, because closing an account needs
@@ -99,6 +102,81 @@ const RETRY_WILL_NOT_HELP = new Set([
   'StripeIdempotencyError',
 ]);
 
+/**
+ * Records a transaction unless one with this key already exists.
+ *
+ * The key is the caller's, not the event's, because one payment can now be
+ * reported twice: by `checkout.session.completed` and by the customer coming
+ * back from Checkout. Both name the completion `checkout:<session id>`, so the
+ * unique constraint on `stripeEventId` makes the second a no-op instead of a
+ * duplicate row — which would otherwise double-count the sale on the console's
+ * Billing screen.
+ */
+const recordTransaction = async (data, stripeEventId) => {
+  try {
+    await Transaction.create({ ...data, stripeEventId });
+  } catch (err) {
+    // A duplicate surfaces as a SequelizeUniqueConstraintError whose message is
+    // just "Validation error" — check the type, not the text, so real failures
+    // still get logged.
+    if (err.name !== 'SequelizeUniqueConstraintError') {
+      logger.error('Failed to record transaction', { error: err.message });
+    }
+  }
+};
+
+/**
+ * Everything a completed Checkout session does to an account, in one place.
+ *
+ * Two paths reach it — the webhook, and the customer returning with a session
+ * id — and they must not be able to disagree about what "paid" means. The write
+ * is absolute rather than incremental (`plan` set, not bumped), so running it
+ * twice leaves the same account state; only the transaction row needs guarding,
+ * and it is keyed on the session so both paths collapse onto one.
+ *
+ * Premium is the only tier sold, so a session that names no plan is a Premium
+ * one. `customer.subscription.updated` follows within moments and resolves the
+ * plan from the price actually billed if it ever differs.
+ *
+ * `fallbackKey` is what the sale is recorded under when the session carries no
+ * id of its own. Stripe always sends one in practice, but keying on
+ * `checkout:undefined` would be a landmine rather than a safeguard: every
+ * id-less completion the deployment ever saw would collapse onto a single row
+ * and only the first sale would be recorded. The webhook passes its event id,
+ * which is unique per delivery and is exactly what this was keyed on before the
+ * confirm route existed.
+ */
+const applyCheckoutCompletion = async (user, session, fallbackKey) => {
+  const plan = session.metadata?.plan || 'premium';
+
+  await User.update(
+    { plan, stripeSubscriptionId: session.subscription || null, subscriptionStatus: 'active' },
+    { where: { id: user.id } }
+  );
+
+  await recordTransaction({
+    userId: user.id,
+    type: 'checkout_completed',
+    plan,
+    status: 'succeeded',
+    amount: session.amount_total,
+    currency: session.currency,
+  }, session.id ? `checkout:${session.id}` : fallbackKey);
+
+  return plan;
+};
+
+/**
+ * Whether a retrieved session represents money actually taken.
+ *
+ * `no_payment_required` is included deliberately: a full-discount coupon or a
+ * trial with no card due completes the session and owes nothing, and refusing
+ * to grant the plan in that case would be refusing a sale the business made.
+ */
+const sessionIsPaid = (session) =>
+  session?.status === 'complete'
+  && ['paid', 'no_payment_required'].includes(session.payment_status);
+
 const sendStripeFailure = (res, err, context) => {
   const configFault = RETRY_WILL_NOT_HELP.has(err?.type);
 
@@ -180,7 +258,23 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
       metadata: { userId: user.id, plan },
       mode: 'subscription',
       line_items: [{ price: priceIdFor(plan), quantity: 1 }],
-      success_url: `${env.clientUrl}/dashboard/settings?payment=success`,
+      /**
+       * The session id travels back with the customer, and that is what makes
+       * the upgrade survive a webhook that never arrives.
+       *
+       * `?payment=success` alone was a claim the browser made about itself: the
+       * plan screen printed "your plan has been upgraded" on the strength of a
+       * query string, while the only thing that actually upgrades an account is
+       * `checkout.session.completed`. With STRIPE_WEBHOOK_SECRET unset — which
+       * nothing refuses to start over and nothing warns about — every one of
+       * those deliveries fails signature verification, so the customer was
+       * charged, congratulated, and left on Free.
+       *
+       * `{CHECKOUT_SESSION_ID}` is substituted by Stripe. `/checkout/confirm`
+       * exchanges it for the same plan write the webhook performs, keyed on the
+       * same id so whichever path arrives first is the only one that counts.
+       */
+      success_url: `${env.clientUrl}/dashboard/settings?payment=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:  `${env.clientUrl}/dashboard/settings?payment=cancelled`,
 
       /**
@@ -253,6 +347,87 @@ router.post('/customer-portal', authenticate, async (req, res) => {
   return undefined;
 });
 
+/**
+ * POST /api/payments/checkout/confirm — the customer is back from Stripe.
+ *
+ * The second of two ways an account becomes Premium, and the one that does not
+ * depend on a webhook being configured. `checkout.session.completed` remains the
+ * authority for everything that happens away from a browser — a renewal, a card
+ * that fails next month, a subscription cancelled from the portal — but it is
+ * the wrong single point of failure for the one moment the customer is watching:
+ * with `STRIPE_WEBHOOK_SECRET` unset, every delivery fails signature
+ * verification, and nothing in the product noticed. The account was charged and
+ * stayed on Free while the screen said otherwise.
+ *
+ * Stripe is the source of truth here, not the browser. The session id in the URL
+ * proves nothing on its own — anyone can put a string there — so it is exchanged
+ * with Stripe for the real session, and the plan is granted only if Stripe says
+ * that session is complete and paid.
+ *
+ * Ownership is checked twice over. `metadata.userId` is what this service wrote
+ * when it created the session; `customer` is the Stripe customer stored against
+ * the account. Either identifies the owner, and a session matching neither is a
+ * 403 — without that check a customer who guessed or was shown somebody else's
+ * session id could upgrade their own account with another family's payment.
+ *
+ * Idempotent by construction: the plan write is absolute and the transaction is
+ * keyed on the session, so a refresh, a retry and a later webhook delivery all
+ * converge on one upgraded account and one recorded sale.
+ */
+router.post('/checkout/confirm', authenticate, async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Payments are not configured' });
+
+  const { sessionId } = req.body || {};
+  // Stripe's own prefix. Checked before spending a round trip on a value that
+  // cannot be a session, and so the error names the real problem.
+  if (typeof sessionId !== 'string' || !sessionId.startsWith('cs_')) {
+    return res.status(400).json({ error: 'A Checkout session id is required' });
+  }
+
+  try {
+    const [user, session] = await Promise.all([
+      User.findByPk(req.user.id),
+      stripe.checkout.sessions.retrieve(sessionId),
+    ]);
+
+    const ownedByMetadata = session.metadata?.userId === user.id;
+    const ownedByCustomer = !!user.stripeCustomerId && session.customer === user.stripeCustomerId;
+    if (!ownedByMetadata && !ownedByCustomer) {
+      logger.error('Checkout confirmation attempted for a session belonging to another account', {
+        userId: user.id, sessionId,
+      });
+      return res.status(403).json({ error: 'That payment does not belong to this account' });
+    }
+
+    if (!sessionIsPaid(session)) {
+      /**
+       * Not an error, and not a grant either.
+       *
+       * A bank redirect or a delayed payment method can leave a session
+       * `complete` with payment still `unpaid`, and the customer arrives here
+       * before the money does. `checkout.session.completed` will finish the job
+       * when it settles, so the honest answer is that it is pending — which the
+       * plan screen can say, rather than either congratulating them or
+       * announcing a failure that has not happened.
+       */
+      return res.json({
+        activated: false,
+        pending: true,
+        status: session.status,
+        paymentStatus: session.payment_status,
+      });
+    }
+
+    const plan = await applyCheckoutCompletion(user, session);
+    await user.reload();
+
+    logger.info('Checkout confirmed on return from Stripe', { userId: user.id, plan, sessionId });
+    return res.json({ activated: true, plan, user: serializeUser(user) });
+  } catch (err) {
+    return sendStripeFailure(res, err, { where: 'checkout_confirm' });
+  }
+});
+
 // GET /api/payments/subscription
 router.get('/subscription', authenticate, async (req, res) => {
   let user;
@@ -288,22 +463,20 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  const recordTransaction = async (data) => {
-    try {
-      await Transaction.create({ ...data, stripeEventId: event.id });
-    } catch (err) {
-      // A duplicate stripeEventId (already-processed event) surfaces as a
-      // SequelizeUniqueConstraintError whose message is just "Validation error" —
-      // check the error type, not the text, so real failures still get logged.
-      if (err.name !== 'SequelizeUniqueConstraintError') logger.error('Failed to record transaction', { error: err.message });
-    }
-  };
+  // Everything except the checkout completion is keyed on the event, which is
+  // what makes a redelivery a no-op. The completion is keyed on its session
+  // instead — see `applyCheckoutCompletion` — because the customer's own return
+  // from Stripe reports the same sale and the two must collapse onto one row.
+  const record = (data) => recordTransaction(data, event.id);
 
   try {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object;
-        const { userId, plan } = session.metadata || {};
+        // Only the attribution is read here now; the plan is resolved inside
+        // `applyCheckoutCompletion`, which both this and the customer's own
+        // return from Checkout go through.
+        const { userId } = session.metadata || {};
 
         /**
          * Attribution, by metadata first and by Stripe customer second.
@@ -335,20 +508,11 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
           break;
         }
 
-        // Premium is the only tier sold, so an attributed checkout that names no
-        // plan is a Premium one — and `customer.subscription.updated` follows
-        // within moments, resolving the plan from the price that was actually
-        // billed if it ever differs.
-        const resolvedPlan = plan || 'premium';
-
-        await User.update(
-          { plan: resolvedPlan, stripeSubscriptionId: session.subscription, subscriptionStatus: 'active' },
-          { where: { id: user.id } }
-        );
-        await recordTransaction({
-          userId: user.id, type: 'checkout_completed', plan: resolvedPlan, status: 'succeeded',
-          amount: session.amount_total, currency: session.currency,
-        });
+        // The same write the customer's return from Checkout performs, from the
+        // same function, so the two paths cannot come to different conclusions
+        // about what a completed session grants. The event id is the key of last
+        // resort, for a completion that names no session.
+        await applyCheckoutCompletion(user, session, event.id);
         break;
       }
 
@@ -358,7 +522,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         if (user) {
           const plan = planForPrice(sub.items.data[0]?.price?.id);
           await user.update({ subscriptionStatus: sub.status, plan });
-          await recordTransaction({ userId: user.id, type: 'subscription_updated', plan, status: sub.status });
+          await record({ userId: user.id, type: 'subscription_updated', plan, status: sub.status });
         }
         break;
       }
@@ -368,7 +532,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         const user = await User.findOne({ where: { stripeCustomerId: sub.customer } });
         if (user) {
           await user.update({ plan: 'free', stripeSubscriptionId: null, subscriptionStatus: 'cancelled' });
-          await recordTransaction({ userId: user.id, type: 'subscription_cancelled', plan: 'free', status: 'cancelled' });
+          await record({ userId: user.id, type: 'subscription_cancelled', plan: 'free', status: 'cancelled' });
         }
         break;
       }
@@ -377,7 +541,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         const invoice = event.data.object;
         const user = await User.findOne({ where: { stripeCustomerId: invoice.customer } });
         if (user) {
-          await recordTransaction({
+          await record({
             userId: user.id, type: 'invoice_paid', plan: user.plan, status: 'succeeded',
             amount: invoice.amount_paid, currency: invoice.currency,
           });
@@ -390,7 +554,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         const user = await User.findOne({ where: { stripeCustomerId: invoice.customer } });
         if (user) {
           await user.update({ subscriptionStatus: 'past_due' });
-          await recordTransaction({
+          await record({
             userId: user.id, type: 'invoice_failed', plan: user.plan, status: 'failed',
             amount: invoice.amount_due, currency: invoice.currency,
           });

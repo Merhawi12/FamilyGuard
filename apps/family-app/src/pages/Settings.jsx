@@ -57,7 +57,11 @@ const ALERT_TYPES = [
  * both land on the right one.
  */
 export default function Settings() {
-  const { user } = useAuth();
+  // `setUser` so a confirmed payment updates the session in place: the plan
+  // card, the trial notice and the Manage-billing button all read `user`, and
+  // sending someone who has just paid to reload the page to see it would be a
+  // poor end to the one flow the product most wants to feel finished.
+  const { user, setUser } = useAuth();
   const [params, setParams] = useSearchParams();
 
   const requested = params.get('section');
@@ -73,6 +77,10 @@ export default function Settings() {
   const [portalLoading, setPortalLoading] = useState(false);
   const [planMessage, setPlanMessage] = useState('');
   const [planError, setPlanError] = useState('');
+  // True while the return from Stripe is being checked against Stripe itself.
+  // It is a moment with real money behind it, so the screen says it is working
+  // rather than sitting blank between the redirect and the answer.
+  const [confirmingPayment, setConfirmingPayment] = useState(false);
 
   const [notifPrefs, setNotifPrefs] = useState(null);
   const [notifSaving, setNotifSaving] = useState(false);
@@ -134,9 +142,9 @@ export default function Settings() {
   // Stripe sends the parent back here; land them on the billing section with
   // the outcome rather than at the top of a page that says nothing about it.
   useEffect(() => {
-    const payment = params.get('payment');
-    if (payment === 'success') setPlanMessage('Payment successful — your plan has been upgraded.');
-    if (payment === 'cancelled') setPlanError('Payment was cancelled. Nothing has been charged.');
+    if (params.get('payment') === 'cancelled') {
+      setPlanError('Payment was cancelled. Nothing has been charged.');
+    }
 
     /**
      * They picked a paid plan on the way in and checkout could not be opened.
@@ -154,6 +162,86 @@ export default function Settings() {
       );
     }
   }, [params]);
+
+  /**
+   * Back from Stripe — and the upgrade is confirmed rather than announced.
+   *
+   * This was `if (payment === 'success') setPlanMessage('Payment successful —
+   * your plan has been upgraded.')`: a claim the browser made about itself, on
+   * the strength of a query string it had just been handed. The only thing that
+   * upgrades an account is `checkout.session.completed`, and with
+   * `STRIPE_WEBHOOK_SECRET` unset every one of those deliveries fails signature
+   * verification — so a customer could be charged, congratulated, and left on
+   * Free, with "Free Plan" still printed two lines above the congratulations.
+   *
+   * `confirmCheckout` exchanges the session id with the API, which asks Stripe
+   * whether that session is genuinely paid and then applies the same plan write
+   * the webhook would. Three outcomes get three different sentences, and the
+   * refreshed account is pushed into the session so "Current plan" updates
+   * without a reload.
+   *
+   * Its own effect, and not folded into the one above: that one reads the URL
+   * and returns, this one performs a request and has to be able to abandon its
+   * result if the parent navigates away mid-flight.
+   */
+  useEffect(() => {
+    if (params.get('payment') !== 'success') return undefined;
+
+    const sessionId = params.get('session_id');
+    if (!sessionId) {
+      // Nothing to check — a link from before the session id was carried, or a
+      // hand-typed query string. Say only what is known.
+      setPlanMessage('Thanks! If your payment went through, your plan will be updated shortly.');
+      return undefined;
+    }
+
+    let cancelled = false;
+    setConfirmingPayment(true);
+
+    payments.confirmCheckout(sessionId)
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data?.activated) {
+          // The account as the API now has it, so the plan card, the entitlement
+          // notices and the Manage-billing button all agree immediately.
+          if (data.user) setUser(data.user);
+          setPlanMessage(`Payment successful — you are now on ${planLabel(data.plan)}.`);
+          return;
+        }
+        // A method that settles later (a bank redirect, say). Nothing has gone
+        // wrong and nothing has been granted yet, and both halves need saying —
+        // especially "do not pay again", which is what someone does next when a
+        // payment screen is ambiguous.
+        setPlanMessage(
+          'Thanks — your payment is still being confirmed by your bank. Your plan will '
+          + 'switch over as soon as it clears, and you do not need to pay again.'
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        /**
+         * Composed rather than passed through `withReason`, which is the wrong
+         * shape here.
+         *
+         * That helper lets the API's own message *replace* the fallback, which
+         * is right everywhere else and wrong for somebody who has just handed
+         * over a card: it turned this into a bare "Payments are not configured",
+         * which answers a question about the deployment and not the one being
+         * asked, which is "where has my money gone". So the reassurance always
+         * leads, and the reason follows it in parentheses for the operator
+         * reading over their shoulder.
+         */
+        const reason = err.response?.data?.error;
+        setPlanError(
+          'We could not confirm your payment just now. If you were charged, your plan '
+          + 'will update shortly and nothing will be charged twice — please contact '
+          + `support if it does not.${reason ? ` (${reason})` : ''}`
+        );
+      })
+      .finally(() => { if (!cancelled) setConfirmingPayment(false); });
+
+    return () => { cancelled = true; };
+  }, [params, setUser]);
 
   // Both outcomes belong on the plan screen, whatever section the URL asked for.
   const paymentOutcome = params.get('payment') || params.get('checkout');
@@ -538,6 +626,12 @@ export default function Settings() {
           <>
             <PageIntro description="Your subscription and what it includes." />
 
+            {confirmingPayment && (
+              <p className="notice notice-info">
+                <Icon name="info" size={16} className="mt-0.5" />
+                <span>Confirming your payment…</span>
+              </p>
+            )}
             {planMessage && <p className="notice-success">{planMessage}</p>}
             {planError && <p className="notice-error">{planError}</p>}
 

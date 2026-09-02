@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { User, Session } = require('../models');
-const { cancelSubscription } = require('../services/billing');
+const { cancelSubscription, canSell } = require('../services/billing');
 const { eraseAccount } = require('../utils/accountErasure');
 const { sendWelcomeEmail, sendAdminRegistrationNotification, sendVerificationEmail, sendPasswordResetCodeEmail, sendPasswordChangedEmail, sendLoginCodeEmail } = require('../utils/email');
 const { signTrustedDeviceToken, trustsDevice, revokeTrustedDevices } = require('../utils/trustedDevice');
@@ -1069,9 +1069,20 @@ const authProviders = async (req, res, next) => {
        *
        * Reported unauthenticated alongside the rest because it describes the
        * deployment, not the account, and it discloses nothing a failed checkout
-       * would not. It flips back on its own the moment a key is configured.
+       * would not. It flips back on its own the moment the configuration is
+       * complete.
+       *
+       * "Complete" is the word that had to be earned. This was
+       * `!!env.stripe.secretKey`, which is half of what a checkout needs: with a
+       * good key and no `STRIPE_PREMIUM_PRICE_ID`, this answered `true`, the
+       * plan screen drew "Upgrade to Premium", and pressing it got a 503 —
+       * exactly the button this field exists to withhold. The screen then
+       * withdrew the offer *after* the failed click, so the customer saw a
+       * purchase disappear from under them rather than never being offered a
+       * purchase this deployment could not make. See `canSell` in
+       * services/billing.
        */
-      billing: !!env.stripe.secretKey,
+      billing: canSell(),
       /**
        * Whether a password sign-in will be finished with an emailed code.
        *

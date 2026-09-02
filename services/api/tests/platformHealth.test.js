@@ -126,12 +126,47 @@ describe('the Overview alert summary', () => {
     const { body } = await health(admin);
     const byKey = Object.fromEntries(body.channels.map((c) => [c.key, c]));
 
-    expect(Object.keys(byKey).sort()).toEqual(['email', 'push', 'sms']);
+    expect(Object.keys(byKey).sort()).toEqual(['email', 'payments', 'push', 'sms']);
     // Nothing configures a provider in the test environment, so the honest
     // answer is that neither is active — and SMS is not integrated at all.
     expect(byKey.sms.status).toBe('unavailable');
     expect(byKey.push.status).toBe('inactive');
     expect(body.channels.some((c) => /slack/i.test(c.label))).toBe(false);
+  });
+
+  /**
+   * Half-configured Stripe, which is the state with no symptom anywhere else.
+   *
+   * `env.setup.js` gives the suite a secret key and a price and no webhook
+   * secret — which is exactly the shape that takes a customer's money and then
+   * never hears about the renewal, the cancellation or the failed card, because
+   * every delivery fails signature verification. It is neither "Active" nor
+   * "Not configured", and reporting it as either is how it went unnoticed.
+   */
+  it('reports payments as degraded when it can sell but cannot hear back', async () => {
+    const admin = await createUser({ role: 'super_admin' });
+    const { body } = await health(admin);
+    const payments = body.channels.find((c) => c.key === 'payments');
+
+    expect(payments.status).toBe('degraded');
+    // The detail is the whole value of the tile: it has to name the variable an
+    // operator must set, not merely say something is wrong.
+    expect(payments.detail).toMatch(/STRIPE_WEBHOOK_SECRET/);
+  });
+
+  it('reports payments as inactive when there is no Stripe at all', async () => {
+    const { env } = require('../src/config/env');
+    const admin = await createUser({ role: 'super_admin' });
+    const saved = env.stripe.secretKey;
+    env.stripe.secretKey = '';
+    try {
+      const { body } = await health(admin);
+      const payments = body.channels.find((c) => c.key === 'payments');
+      expect(payments.status).toBe('inactive');
+      expect(payments.detail).toMatch(/STRIPE_SECRET_KEY/);
+    } finally {
+      env.stripe.secretKey = saved;
+    }
   });
 
   it('lists every alert type the platform can raise', async () => {

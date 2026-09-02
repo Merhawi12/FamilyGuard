@@ -40,10 +40,21 @@ const LEVELS = {
   info: { label: 'Info', icon: 'file', tile: 'bg-blue-50 text-blue-700 border-blue-100', dot: 'bg-primary-500', badge: 'badge-blue' },
 };
 
-const CHANNEL_ICONS = { email: 'mail', push: 'bell', sms: 'message' };
+const CHANNEL_ICONS = { email: 'mail', push: 'bell', sms: 'message', payments: 'card' };
 
+/**
+ * `degraded` is the state this list did not have, and payments are why.
+ *
+ * Every other channel is on or off. Stripe has a third condition that matters
+ * more than either: configured enough to take a customer's money, and not
+ * enough to hear what happens to it afterwards — a missing webhook secret means
+ * every renewal, cancellation and failed card fails signature verification and
+ * is silently dropped. Reported as "Active" that reads as finished, and reported
+ * as "Not configured" it reads as harmless. It is neither.
+ */
 const CHANNEL_STATUS = {
   active: { label: 'Active', badge: 'badge-green' },
+  degraded: { label: 'Needs attention', badge: 'badge-amber' },
   inactive: { label: 'Not configured', badge: 'badge-amber' },
   unavailable: { label: 'Not integrated', badge: 'badge-gray' },
 };

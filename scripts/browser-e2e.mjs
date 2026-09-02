@@ -2351,6 +2351,65 @@ try {
     await page.close();
   }
 
+  step('Family app — coming back from Stripe proves the upgrade rather than announcing it');
+  {
+    /*
+     * The plan screen used to print "Payment successful — your plan has been
+     * upgraded" on the strength of `?payment=success`, which is a claim the
+     * browser made about itself. Only `checkout.session.completed` upgrades an
+     * account, and with STRIPE_WEBHOOK_SECRET unset every delivery fails
+     * signature verification — so a customer could be charged, congratulated,
+     * and left on Free with "Free Plan" printed two lines above.
+     *
+     * The screen now exchanges the session id for a verdict. All three answers
+     * are driven here, because the difference between them is the whole point
+     * and each one is a different sentence to a person who has just paid.
+     */
+    const openReturn = async (confirmResponse, query = 'payment=success&session_id=cs_test_123') => {
+      const page = await browser.newPage();
+      await page.route('**/api/payments/checkout/confirm', (route) => route.fulfill(confirmResponse));
+      await page.goto(`${FAMILY}/login`);
+      await page.evaluate((t) => localStorage.setItem('fg_token', t), parentToken);
+      await page.goto(`${FAMILY}/dashboard/settings?${query}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(900);
+      const body = await page.locator('body').innerText();
+      await page.close();
+      return body;
+    };
+
+    const json = (status, payload) => ({
+      status, contentType: 'application/json', body: JSON.stringify(payload),
+    });
+
+    const confirmed = await openReturn(json(200, {
+      activated: true,
+      plan: 'premium',
+      user: { id: 'u1', name: 'Parent', email: PARENT_EMAIL, role: 'parent', plan: 'premium' },
+    }));
+    check('a confirmed payment says which plan the account is now on',
+      /Payment successful/.test(confirmed) && /Premium Plan/.test(confirmed),
+      confirmed.slice(0, 160).replace(/\n/g, ' '));
+
+    const pending = await openReturn(json(200, { activated: false, pending: true }));
+    check('a payment still settling is not reported as an upgrade',
+      /still being confirmed/.test(pending) && !/Payment successful/.test(pending),
+      pending.slice(0, 160).replace(/\n/g, ' '));
+    // The sentence somebody needs before they reach for the card again.
+    check('and says not to pay twice', /do not need to pay again/.test(pending));
+
+    const failed = await openReturn(json(503, { error: 'Payments are not configured' }));
+    check('a confirmation that fails does not congratulate anybody',
+      !/Payment successful/.test(failed) && /could not confirm your payment/i.test(failed),
+      failed.slice(0, 160).replace(/\n/g, ' '));
+
+    // A success URL from before the session id was carried: nothing to check
+    // against, so nothing is asserted about the outcome either.
+    const legacy = await openReturn(json(200, { activated: true }), 'payment=success');
+    check('an old success link claims nothing it cannot check',
+      !/Payment successful/.test(legacy) && /will be updated shortly/.test(legacy),
+      legacy.slice(0, 160).replace(/\n/g, ' '));
+  }
+
   step('Family app — two-factor authentication can be switched on');
   {
     // The API supported TOTP long before any screen called /mfa/setup, so this

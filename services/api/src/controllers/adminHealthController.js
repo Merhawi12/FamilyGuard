@@ -7,6 +7,8 @@ const { ALERT_TYPES, ALERT_TYPE_KEYS } = require('../config/alertTypes');
 const { auditLog } = require('../utils/auditLogger');
 const { webPushAvailable } = require('../utils/pushService');
 const { isEnabled: mailIsEnabled } = require('../services/mailer');
+const { canSell, billingGaps } = require('../services/billing');
+const { PLANS, TRIAL_PLAN } = require('../config/plans');
 const { env } = require('../config/env');
 
 /**
@@ -82,6 +84,35 @@ const channels = async () => {
         ? `${subscriptions} subscribed ${subscriptions === 1 ? 'browser' : 'browsers'}`
         : 'No VAPID keypair configured — nothing can be pushed',
     },
+    /**
+     * Payments, by the same rule as email above: asked of the thing that
+     * decides, not of whether a variable is non-empty.
+     *
+     * This is the tile that had no equivalent, and payments are where its
+     * absence cost the most. A deployment could hold a valid secret key and no
+     * price — offering an Upgrade button that answered 503 — or a key and a
+     * price and no webhook secret, which is worse: the customer pays, and every
+     * renewal, cancellation and failed card afterwards fails signature
+     * verification and is never applied. Neither state appeared on any screen.
+     * The only way to learn either was to read the Cloud Run log, and only if
+     * you already suspected it.
+     *
+     * `degraded` rather than `active`/`inactive` is the point: money can be
+     * taken and something is still wrong. Flattening it to "active" is what let
+     * a half-configured Stripe look finished.
+     */
+    (() => {
+      const gaps = billingGaps();
+      const sellable = canSell();
+      return {
+        key: 'payments',
+        label: 'Payments',
+        status: sellable && gaps.length === 0 ? 'active' : (sellable ? 'degraded' : 'inactive'),
+        detail: gaps.length === 0
+          ? `Stripe configured — ${PLANS[TRIAL_PLAN].label} sellable`
+          : gaps.join('; '),
+      };
+    })(),
     {
       // Listed rather than hidden: the reference design asks for it, parents ask
       // for it, and the honest answer is that no provider is integrated. A
