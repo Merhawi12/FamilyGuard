@@ -147,6 +147,46 @@ const getRule = async (req, res) => {
   return res.json(await findOrCreateRule(child.id, null));
 };
 
+/**
+ * Push a rule to the devices it actually governs — and to nothing else.
+ *
+ * A child device joins `child:<childId>` *and* `device:<its own id>` when it
+ * authenticates (see sockets/deviceEvents.js), so "the child's room" contains
+ * every device including the ones the parent has given an exception to. This
+ * used to emit a child-wide edit straight into that room on the reasoning that a
+ * device with its own rule "is not listening for the child-wide one". It is: it
+ * is in the room, and `rules.js` on both agents assigns the payload onto
+ * `screenTimeRule` without looking at whose scope it names — it cannot look,
+ * because clearing an exception delivers a child-wide rule to that same device
+ * legitimately, and the two payloads are identical in shape.
+ *
+ * So the laptop a parent had just given three hours adopted the child's one hour
+ * the next time they edited the shared rule, wrote it to its cache, and enforced
+ * it until the five-minute poll replaced it. Self-healing, invisible, and wrong
+ * in the direction that locks a child out of the device they were told they
+ * could use.
+ *
+ * The rooms already hold the answer: the child's room, minus the devices that
+ * are not governed by the child's rule.
+ */
+const announceRule = async (io, childId, deviceId, rule) => {
+  if (!io) return;
+
+  if (deviceId) {
+    io.to(`device:${deviceId}`).emit('screen_time_updated', rule);
+    return;
+  }
+
+  const overrides = await ScreenTimeRule.findAll({
+    where: { childId, deviceId: { [Op.ne]: null } },
+    attributes: ['deviceId'],
+  });
+
+  io.to(`child:${childId}`)
+    .except(overrides.map((row) => `device:${row.deviceId}`))
+    .emit('screen_time_updated', rule);
+};
+
 const updateRule = async (req, res) => {
   const child = await resolveChild(req.params.childId, req.user.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
@@ -167,12 +207,7 @@ const updateRule = async (req, res) => {
   for (const key of allowed) if (req.body[key] !== undefined) updates[key] = req.body[key];
   await rule.update(updates);
 
-  const io = req.app.get('io');
-  // Only the devices this rule governs. A device with its own rule is not
-  // listening for the child-wide one — it would re-sync and correctly discard
-  // what it was told, which is work for nothing on a battery.
-  io.to(scope.deviceId ? `device:${scope.deviceId}` : `child:${child.id}`)
-    .emit('screen_time_updated', rule);
+  await announceRule(req.app.get('io'), child.id, scope.deviceId, rule);
 
   return res.json(rule);
 };
@@ -197,9 +232,11 @@ const clearDeviceRule = async (req, res) => {
 
   const removed = await ScreenTimeRule.destroy({ where: { childId: child.id, deviceId: scope.deviceId } });
 
-  const io = req.app.get('io');
+  // Straight to the one device, which is now governed by the child's rule again.
+  // The exception has already been destroyed, so `announceRule` would no longer
+  // exclude it from a child-wide broadcast either.
   const childWide = await ScreenTimeRule.findOne({ where: { childId: child.id, deviceId: null } });
-  io.to(`device:${scope.deviceId}`).emit('screen_time_updated', childWide);
+  await announceRule(req.app.get('io'), child.id, scope.deviceId, childWide);
 
   return res.json({ message: removed ? 'Device now follows the child rule' : 'No device rule to remove' });
 };

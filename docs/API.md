@@ -357,8 +357,13 @@ Without it they read and write the child's rule, exactly as before. With it:
   that merely agrees today and stops tracking the child rule the moment it
   changes.
 
-`screen_time_updated` is emitted to `device:<id>` for a device rule and to
-`child:<id>` for a child-wide one.
+`screen_time_updated` is emitted to `device:<id>` for a device rule, and for a
+child-wide one to `child:<id>` **minus the devices that hold an exception**. That
+exclusion is load-bearing: a device joins both rooms, and the agents assign this
+payload onto their cached rule without inspecting its scope — they cannot, since
+`DELETE` legitimately delivers the child-wide rule to one device and the two
+payloads are identical. Without it, editing the shared rule pushed it onto every
+overridden device until the next five-minute poll undid it.
 
 #### Extra time for today — `/screen-time/:childId/grant`
 
@@ -664,8 +669,13 @@ rather than leaving them to be re-added:
   families for. The approved-contact list is a parent's record, not an enforced
   filter.
 
-`activity:update` is kept and relayed, but no shipped agent emits it — the same
-data arrives over `POST /devices/me/activity`.
+`activity:update` and `location:update` are both kept and relayed, and **no
+shipped agent emits either** — the same data arrives over
+`POST /devices/me/activity` and `POST /locations`, and `recordLocation` fans the
+fix out to `parent:<id>` on the way through. So the parent's live map is fed by
+the REST path, not by this one; the handler's "mobile emits this for low-latency
+updates" is a statement about a client that does not exist. Validate any revival
+of it against `parseFix` the way the handler already does.
 
 **Parent → server:** `chat:reply` (the target child is verified against the
 authenticated parent).
