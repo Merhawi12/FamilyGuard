@@ -143,6 +143,28 @@ if [ "$TARGET" = "child" ]; then
   export EXPO_PUBLIC_API_URL="${API_URL}/api"
   export EXPO_PUBLIC_SOCKET_URL="${API_URL}"
 
+  # Force Metro to re-bundle, because Gradle cannot tell when it needs to.
+  #
+  # Almost all of this app's JavaScript is `apps/child-app/shared`, reached
+  # through a `file:` dependency that npm installs as a symlink pointing back out
+  # of the Gradle project. React Native's bundle task declares the project
+  # directory as its input and does not follow that symlink, so editing a screen
+  # leaves `createBundleReleaseJsAndAssets` UP-TO-DATE and the APK is repackaged
+  # around the *previous* bundle.
+  #
+  # Nothing about that failure looks like a failure: the build succeeds, the
+  # native half — manifest, labels, Kotlin — is genuinely rebuilt, and only the
+  # JavaScript is stale, so the app installs and runs and is simply the old one.
+  # It was found by grepping a finished APK for a string that had just been
+  # changed and not finding it.
+  #
+  # Deleting the output is what marks the task out of date. It costs a Metro run
+  # (~30s) on every build, which is the right trade for a script whose whole
+  # purpose is producing an artefact someone is about to install.
+  rm -rf "${ANDROID_ROOT}/app/build/generated/assets/createBundleReleaseJsAndAssets" \
+         "${ANDROID_ROOT}/app/build/generated/assets/createBundleDebugJsAndAssets" \
+         "${ANDROID_ROOT}/app/build/ASSETS"
+
   # Never `expo prebuild`: this Gradle project is committed source holding the
   # accessibility, VPN, usage-stats and DNS modules, and prebuild would delete it.
   # The Android project's package.json deliberately has no `prebuild` script for

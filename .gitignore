@@ -118,3 +118,6 @@ apps/family-app/android/app/src/main/assets/public/
 # they are per-developer Xcode state that can appear outside that directory too.
 *.xcuserstate
 xcuserdata/
+
+# Built app artefacts collected for hand-off (APKs, .app bundles). Never committed.
+/artifacts/
