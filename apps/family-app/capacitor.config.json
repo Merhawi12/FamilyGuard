@@ -1,6 +1,6 @@
 {
   "appId": "ca.parentix.family",
-  "appName": "Parentix",
+  "appName": "Parentix Family",
   "webDir": "dist",
   "android": {
     "allowMixedContent": false

@@ -38,14 +38,14 @@ const STEPS = [
   {
     id: 'usage',
     title: 'Usage access',
-    description: 'Counts your screen time. Android Settings → Apps → Usage Access → Parentix.',
+    description: 'Counts your screen time. Android Settings → Apps → Usage Access → Parentix Child.',
     icon: 'usage',
     available: UsageStats.supported,
   },
   {
     id: 'accessibility',
     title: 'App blocking',
-    description: 'Pauses apps your parent has blocked. Android Settings → Accessibility → Parentix.',
+    description: 'Pauses apps your parent has blocked. Android Settings → Accessibility → Parentix Child.',
     icon: 'apps',
     available: AppBlocker.supported,
   },
@@ -120,10 +120,10 @@ export default function PermissionsScreen({ navigation }) {
         if (!bgGranted) Alert.alert('Background location', 'Background location was not granted. Location will only work while this app is open.');
       } else if (id === 'usage') {
         UsageStats.openSettings();
-        Alert.alert('Usage access', 'Find Parentix in the list and turn it on, then come back here.');
+        Alert.alert('Usage access', 'Find Parentix Child in the list and turn it on, then come back here.');
       } else if (id === 'accessibility') {
         AppBlocker.openSettings();
-        Alert.alert('App blocking', 'Find Parentix, tap it, and switch it on, then come back here.');
+        Alert.alert('App blocking', 'Find Parentix Child, tap it, and switch it on, then come back here.');
       } else if (id === 'vpn') {
         const already = await VpnControl.requestPermission();
         if (!already) Alert.alert('Website filtering', 'Accept the prompt when it appears.');
@@ -139,7 +139,7 @@ export default function PermissionsScreen({ navigation }) {
           // system settings is the only thing left that helps.
           Alert.alert(
             'Notifications are off',
-            'Android will not ask again. Turn notifications on for Parentix in Settings → Apps → Parentix → Notifications.',
+            'Android will not ask again. Turn notifications on in Settings → Apps → Parentix Child → Notifications.',
           );
         } else if (result.status === 'unsupported') {
           Alert.alert('Not available', 'Notifications need a real device — an emulator cannot receive them.');

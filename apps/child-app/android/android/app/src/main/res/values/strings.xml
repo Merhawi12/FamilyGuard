@@ -1,5 +1,5 @@
 <resources>
-  <string name="app_name">Parentix</string>
+  <string name="app_name">Parentix Child</string>
   <string name="accessibility_description">Parentix monitors the active app to enforce parental controls set by a parent.</string>
   <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
   <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>

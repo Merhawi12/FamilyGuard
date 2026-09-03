@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Parentix</string>
-    <string name="title_activity_main">Parentix</string>
+    <string name="app_name">Parentix Family</string>
+    <string name="title_activity_main">Parentix Family</string>
     <string name="package_name">ca.parentix.family</string>
     <string name="custom_url_scheme">ca.parentix.family</string>
 </resources>

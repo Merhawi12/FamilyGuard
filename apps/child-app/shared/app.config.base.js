@@ -30,7 +30,12 @@
 const BUNDLE_ID = 'com.parentix.child';
 
 const base = {
-  name: 'Parentix',
+  /**
+   * The name on both stores and on the child's launcher. The parent's half of
+   * the product ships separately as "Parentix Family", so neither app can be
+   * called plain "Parentix" without one of the two being the wrong download.
+   */
+  name: 'Parentix Child',
   slug: 'familyguard-child',
   version: '1.0.0',
   orientation: 'portrait',

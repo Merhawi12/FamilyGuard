@@ -489,7 +489,7 @@ export default function Children() {
                     compact
                     icon="phone"
                     title="No devices linked"
-                    description="Install the Parentix app on their phone and enter a link code to connect it."
+                    description="Install Parentix Child on their phone and enter a link code to connect it."
                     action={
                       <button onClick={() => setShowLinkForm(true)} className="btn-primary">
                         Link a device
