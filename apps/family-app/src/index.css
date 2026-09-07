@@ -65,3 +65,139 @@
     animation: none;
   }
 }
+
+
+/* ── The water behind the signed-out screens ───────────────────────────────
+   Drawn by src/components/AuthBackground.jsx, which carries the reasoning for
+   why this is SVG rather than a photograph, and why ribbons rather than blurred
+   blobs. What lives here is the placement and the motion. */
+
+.auth-water {
+  position: fixed;
+  inset: 0;
+  /* Shapes drift past the edge; a scrollbar from a decorative layer is how a
+     phone ends up scrolled sideways with a field off-screen. */
+  overflow: hidden;
+  pointer-events: none;
+  /* Zero, not a negative value, and this is why the background is visible at
+     all. `body` is painted `bg-gray-50`, and a negative z-index puts an element
+     behind its ancestors' backgrounds — so `-z-10` here rendered the water
+     underneath the body's grey and showed nothing. The content above is lifted
+     with `relative z-10` instead. */
+  z-index: 0;
+  background: #d9f6f7;
+}
+
+.auth-water__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Each ribbon drifts on its own duration. The values are mutually prime
+   (29 · 37 · 43 · 53 · 61), so the composite loop is their lowest common
+   multiple — weeks — and never visibly repeats. Water reads as water because
+   nothing in it returns to where it was.
+
+   `transform` only: no layout, no repaint, all of it on the compositor. The
+   paths are drawn far past the viewBox on both sides, so a drift can never pull
+   an edge into view.
+
+   `transform-box: fill-box` is what makes a percentage translate mean anything
+   on an SVG child — without it the percentage resolves against the whole
+   viewport's box and the shapes fly off. */
+.auth-water__ribbon,
+.auth-water__glow {
+  will-change: transform;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.auth-water__ribbon--a { animation: water-ribbon-a 29s ease-in-out infinite alternate; }
+.auth-water__ribbon--b { animation: water-ribbon-b 37s ease-in-out infinite alternate; }
+.auth-water__ribbon--c { animation: water-ribbon-c 43s ease-in-out infinite alternate; }
+.auth-water__glow      { animation: water-glow 61s ease-in-out infinite alternate; }
+
+/* The dark wave along the bottom edge, in its own element so it survives the
+   canvas's `slice` crop at landscape aspect ratios — see AuthBackground.jsx.
+   Height in `vh` rather than a viewBox fraction, so it stays a band along the
+   bottom on a 390px phone and on a widescreen desktop alike. */
+.auth-water__wave {
+  position: absolute;
+  left: -4%;
+  right: -4%;
+  bottom: 0;
+  width: 108%;
+  height: 34vh;
+  min-height: 190px;
+  display: block;
+}
+
+.auth-water__wave-crest,
+.auth-water__wave-deep {
+  will-change: transform;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* The two bands drift against each other rather than together — a crest that
+   moved in lockstep with the water under it would read as one shape sliding,
+   not as a surface. Wider than the viewport (the -4% insets) so the horizontal
+   travel never pulls an end into view. */
+.auth-water__wave-crest { animation: water-wave-crest 47s ease-in-out infinite alternate; }
+.auth-water__wave-deep  { animation: water-wave-deep 67s ease-in-out infinite alternate; }
+
+@keyframes water-wave-crest {
+  from { transform: translate3d(-2.5%, 4%, 0); }
+  to   { transform: translate3d(2.5%, -3%, 0); }
+}
+
+@keyframes water-wave-deep {
+  from { transform: translate3d(2%, 2%, 0); }
+  to   { transform: translate3d(-2%, -2%, 0); }
+}
+
+@keyframes water-ribbon-a {
+  from { transform: translate3d(-2%, -1.5%, 0) scaleY(1); }
+  to   { transform: translate3d(3%, 1.5%, 0) scaleY(1.08); }
+}
+
+@keyframes water-ribbon-b {
+  from { transform: translate3d(3%, 1%, 0) scaleY(1.05); }
+  to   { transform: translate3d(-3%, -1.5%, 0) scaleY(0.97); }
+}
+
+@keyframes water-ribbon-c {
+  from { transform: translate3d(-3%, 1%, 0) scaleY(0.98); }
+  to   { transform: translate3d(2%, -1.5%, 0) scaleY(1.06); }
+}
+
+@keyframes water-glow {
+  from { transform: translate3d(-4%, -3%, 0) scale(0.94); }
+  to   { transform: translate3d(5%, 4%, 0) scale(1.1); }
+}
+
+/* Gentle. The first version put 72% white over the top 38% of the screen and
+   flattened the art it was there to protect; this is enough to hold the mark
+   and the tagline at their worst moment and little enough to leave the water
+   looking like water. */
+.auth-water__veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0) 26%);
+}
+
+/* Still water. The picture is unchanged — only the drift stops — because the
+   ribbons are composed to look right at any point in their travel, not only
+   mid-animation. A background that vanished for these users would be a
+   different screen, not an accessible one. */
+@media (prefers-reduced-motion: reduce) {
+  .auth-water__ribbon,
+  .auth-water__glow,
+  .auth-water__wave-crest,
+  .auth-water__wave-deep {
+    animation: none;
+  }
+}

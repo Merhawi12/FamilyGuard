@@ -20,6 +20,7 @@
  * field ends under the gesture bar.
  */
 import { BrandLogo } from '@parentix/shared';
+import AuthBackground from './AuthBackground';
 
 export default function AuthShell({ children }) {
   // The wash behind the card is built from brand tokens rather than a stock
@@ -28,9 +29,24 @@ export default function AuthShell({ children }) {
   // sign-in, sign-up, verification, two-factor and password-reset screens all
   // kept a lavender background behind a teal product. It is the first thing
   // anyone sees, and it was the last thing still blue.
+  //
+  // That gradient is now AuthBackground: the same brand colours, drawn as
+  // drifting layers of water. It goes here rather than on the two pages the
+  // brief named because this shell *is* every signed-out screen — sign in, sign
+  // up, email and SMS verification, the two-factor challenge and the password
+  // reset. Putting it on Login and the sign-up form alone would have left a
+  // parent who mistyped a code looking at a different product.
+  //
+  // The container keeps no background of its own: the fixed layer behind it
+  // covers the viewport however far the form scrolls, which a `bg-` on this
+  // element would not on a sign-up form taller than a short phone.
   return (
-    <div className="min-h-dvh flex flex-col items-center justify-center bg-gradient-to-br from-primary-50 via-white to-primary-100 px-4 pt-8 pb-[calc(2rem+env(safe-area-inset-bottom))]">
-      <div className="w-full max-w-md">
+    <div className="relative min-h-dvh flex flex-col items-center justify-center px-4 pt-8 pb-[calc(2rem+env(safe-area-inset-bottom))]">
+      <AuthBackground />
+      {/* `relative z-10` is load-bearing, not tidiness: the water is a fixed
+          layer at z-index 0, so unpositioned content would paint underneath it
+          and the form would be behind the background. */}
+      <div className="relative z-10 w-full max-w-md">
         <div className="text-center mb-6">
           <a href="/" aria-label="Parentix home">
             <BrandLogo className="h-16 sm:h-20 w-auto mx-auto" />
