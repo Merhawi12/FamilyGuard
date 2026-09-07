@@ -276,20 +276,26 @@ const run = async () => {
   platformState.usageStats = {
     'com.example.game': { appName: 'Example Game', minutes: 25 },
     /*
-     * `com.parentix.child` is this app's real `applicationId` — see
-     * android/app/build.gradle. The exclusion list said `com.parentix`, which is
-     * the *Kotlin package* the native modules live in and is not any installed
-     * app, so it never matched anything and Parentix counted itself: every
-     * minute a child spent on the screen that tells them how much time they have
-     * left was charged against that time, and the Permissions and Settings
-     * screens the app sends them to pushed them towards a lock.
+     * `ca.parentix.child` is this app's real `applicationId` — see
+     * android/app/build.gradle. The exclusion list once said only the bare
+     * vendor prefix, which is the *Kotlin package* the native modules live in
+     * and is not any installed app, so it never matched anything and Parentix
+     * counted itself: every minute a child spent on the screen that tells them
+     * how much time they have left was charged against that time, and the
+     * Permissions and Settings screens the app sends them to pushed them towards
+     * a lock.
      *
      * This check could not see it, because it asserted on the one package name
-     * the phone never reports. Both are exercised now — the real id, and the
-     * prefix a future sibling build would carry.
+     * the phone never reports. All four shapes are exercised now — the real id
+     * and the bare prefix, under both the current `ca.` vendor prefix and the
+     * `com.` one this app shipped under before the rename. A handset that was
+     * monitored under the old build still reports the old id, so an exclusion
+     * that dropped it would reintroduce the bug on the longest-monitored phones.
      */
-    'com.parentix.child': { appName: 'Parentix', minutes: 99 },
-    'com.parentix': { appName: 'Parentix (legacy id)', minutes: 40 },
+    'ca.parentix.child': { appName: 'Parentix', minutes: 99 },
+    'ca.parentix': { appName: 'Parentix (bare id)', minutes: 40 },
+    'com.parentix.child': { appName: 'Parentix (pre-rename id)', minutes: 77 },
+    'com.parentix': { appName: 'Parentix (pre-rename bare id)', minutes: 33 },
   };
   await stubs.taskManagerStub.__run('fg-monitoring-task');
 
@@ -297,7 +303,7 @@ const run = async () => {
   const games = activity.data.rows.filter((r) => r.appPackage === 'com.example.game');
   check('the parent sees the reported app usage', games.length === 1, JSON.stringify(activity.data.count));
   check('the monitoring app excludes itself from the totals',
-    !activity.data.rows.some((r) => String(r.appPackage || '').startsWith('com.parentix')),
+    !activity.data.rows.some((r) => /^(ca|com)\.parentix\b/.test(String(r.appPackage || ''))),
     JSON.stringify(activity.data.rows.map((r) => r.appPackage)));
   check('the device reports its own screen-time total', monitoring.getMonitoringStatus().todayMinutes === 25,
     String(monitoring.getMonitoringStatus().todayMinutes));

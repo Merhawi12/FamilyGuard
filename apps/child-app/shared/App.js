@@ -22,7 +22,7 @@ const SCREEN_FOR = {
 /**
  * Deep links, and the reason they are built per-state rather than declared once.
  *
- * `com.parentix.child://` is registered on both platforms — by hand in
+ * `ca.parentix.child://` is registered on both platforms — by hand in
  * AndroidManifest.xml, and by `scheme` in app.json for the iOS project EAS
  * prebuilds. Until now nothing consumed it on either: the Android intent filter
  * had been there all along and the app simply opened on whatever screen it would
@@ -35,13 +35,18 @@ const SCREEN_FOR = {
  * every path collapses to the Link screen, which is both the only screen that
  * works and the only one worth showing.
  *
- * `link/:code?` is the one that earns its keep: `com.parentix.child://link/ABC12345`
+ * `link/:code?` is the one that earns its keep: `ca.parentix.child://link/ABC12345`
  * prefills the eight characters the parent is reading out. The QR the API used to
  * mint was removed because nothing could scan it without adding a camera
  * permission to a monitoring app — a link needs no camera and no new permission.
+ *
+ * The old `com.parentix.child://` scheme is still accepted. It cost one array
+ * entry, and it is what stops a link a parent sent last week — or one sitting in
+ * a chat thread — opening nothing on a phone that has since been updated. See
+ * shared/app.config.base.js for why the identifier changed.
  */
 const linkingFor = (linked) => ({
-  prefixes: ['com.parentix.child://', 'https://app.parentix.ca'],
+  prefixes: ['ca.parentix.child://', 'com.parentix.child://', 'https://app.parentix.ca'],
   config: {
     screens: linked
       ? {

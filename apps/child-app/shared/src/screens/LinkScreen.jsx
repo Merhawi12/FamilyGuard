@@ -19,7 +19,7 @@ export default function LinkScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   /**
    * Prefilled when the screen was opened by a deep link carrying the code —
-   * `com.parentix.child://link/ABC12345`, which is what a parent can send
+   * `ca.parentix.child://link/ABC12345`, which is what a parent can send
    * instead of reading eight characters down the phone.
    *
    * Only the initial value: it is deliberately not an effect that keeps the box
