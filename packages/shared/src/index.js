@@ -40,3 +40,9 @@ export { useDismissable } from './hooks/useDismissable.js';
 export { API_ORIGIN, API_BASE_URL, SOCKET_URL } from './config.js';
 export { localDateKey, lastLocalDays, timeAgo, formatMinutes } from './dates.js';
 export * from './constants.js';
+// The charts both apps draw with, in place of Recharts. Exported from the barrel
+// like everything else, but note that every call site still loads them through
+// `lazy()`: they are the heaviest thing on a screen that has one, and no screen
+// leads with its chart. See charts/BarChart.jsx.
+export { default as BarChart } from './charts/BarChart.jsx';
+export { default as DonutChart } from './charts/DonutChart.jsx';

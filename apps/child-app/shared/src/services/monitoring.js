@@ -23,15 +23,25 @@ const LOCK_TICK_MS = 60 * 1000;
 /**
  * Packages excluded from screen-time totals: this app, launchers, core system UI.
  *
- * The entry here was `com.parentix`, and the app's `applicationId` is
- * `com.parentix.child` — so the exclusion never matched and Parentix counted
+ * The entry here was the bare `ca.parentix` while the app's `applicationId` was
+ * `ca.parentix.child` — so the exclusion never matched and Parentix counted
  * itself. Every minute a child spent on the screen that tells them how much time
  * they have left was charged against that time, and worse, the minutes spent in
  * Permissions and Settings — screens the app itself sends them to — pushed them
- * towards a lock. `com.parentix` is kept as a prefix so a future sibling package
- * (a family build, a rename) is excluded too, rather than repeating this.
+ * towards a lock. The bare id is kept alongside the prefix so a sibling package
+ * is excluded too, rather than repeating this.
+ *
+ * **Both vendor prefixes are matched, and that is not belt-and-braces.** This app
+ * shipped as `com.parentix.child` before it was renamed to `ca.parentix.child`
+ * (see shared/app.config.base.js). A phone still carrying the old build reports
+ * its usage under the old id, and a handset that is upgraded in place keeps the
+ * old package installed until it is removed — so dropping `com.parentix` here
+ * would silently reintroduce the exact bug described above, on precisely the
+ * devices that were monitored longest.
  */
 const isExcludedPackage = (pkg) =>
+  pkg === 'ca.parentix' ||
+  pkg.startsWith('ca.parentix.') ||
   pkg === 'com.parentix' ||
   pkg.startsWith('com.parentix.') ||
   pkg.startsWith('com.android.launcher') ||
@@ -374,6 +384,9 @@ async function syncUsageStats() {
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
 
+  const samples = [];
+  const measuredAt = new Date().toISOString();
+
   for (const [packageName, data] of Object.entries(stats)) {
     if (data.minutes < 1) continue;
     if (isExcludedPackage(packageName)) continue;
@@ -381,19 +394,41 @@ async function syncUsageStats() {
     appMinutes[packageName] = data.minutes;
     appNames[packageName] = data.appName || packageName;
 
+    samples.push({
+      appPackage: packageName,
+      appName: data.appName || packageName,
+      category: 'app_usage',
+      startTime: data.startTime || dayStart.toISOString(),
+      endTime: measuredAt,
+      durationMinutes: Math.round(data.minutes),
+    });
+  }
+
+  /**
+   * The whole day, in one request.
+   *
+   * This was a `logActivity` call per app, awaited inside the loop above. A
+   * phone with forty used apps therefore made forty sequential round trips
+   * every time this ran — at launch, on every background-fetch wake, and on
+   * every return from Android Settings — which on a school 4G connection is
+   * something like twelve seconds of radio for one screenful of numbers, out of
+   * a battery this app is supposed to be unnoticeable on.
+   *
+   * Failing the whole batch on a bad connection is not a regression: the loop
+   * only ever kept going through a *per-app* failure, and a phone that has lost
+   * the network fails all forty anyway. Nothing is lost either way — the server
+   * upserts by (child, app, day) from a cumulative total, so the next sync
+   * fifteen minutes later re-sends the same numbers and lands them.
+   *
+   * The totals below are set from what the device measured, not from what the
+   * upload returned, and deliberately: screen-time enforcement is local, and a
+   * child must not get unmetered time because the API was unreachable.
+   */
+  if (samples.length > 0) {
     try {
-      await deviceApi.logActivity({
-        appPackage: packageName,
-        appName: data.appName || packageName,
-        category: 'app_usage',
-        startTime: data.startTime || dayStart.toISOString(),
-        endTime: new Date().toISOString(),
-        durationMinutes: Math.round(data.minutes),
-      });
+      await deviceApi.logActivityBatch(samples);
     } catch (err) {
-      // One app failing to upload must not abort the rest of the batch; the
-      // next sync re-sends it, and the server upserts by (child, app, day).
-      console.warn('[monitoring] activity upload failed:', packageName, err.message);
+      console.warn('[monitoring] activity upload failed:', err.message);
     }
   }
 

@@ -31,7 +31,7 @@ export default defineConfig({
       output: {
         // No `maps` group — the console has no map screen. See
         // packages/shared/vendor-chunks.mjs for why this is a function.
-        manualChunks: vendorChunks(['react', 'charts']),
+        manualChunks: vendorChunks(['react']),
       },
     },
   },

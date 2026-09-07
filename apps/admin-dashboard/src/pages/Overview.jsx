@@ -1,11 +1,24 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import {
   admin as adminApi, errorMessage, timeAgo, EmptyState, Icon, StatsCard, Toggle,
   useAuth, hasPermission, PERMISSIONS,
 } from '@parentix/shared';
 import DataTable from '../components/DataTable';
+
+/**
+ * The growth charts, kept out of this screen's own chunk.
+ *
+ * This is the console's landing screen, and it opens on the alert panel — the
+ * part an operator is actually here for. The charts sit below it and answer a
+ * question nobody asks before the alerts are dealt with, so they have no claim
+ * on the first paint. The family app's dashboard splits its chart for the same
+ * reason; see apps/family-app/src/pages/Dashboard.jsx.
+ */
+const GrowthCharts = lazy(() => import('../components/GrowthCharts.jsx'));
+
+/** Held by the placeholder too, so the page does not jump as the chunk lands. */
+const CHART_HEIGHT = 220;
 
 /**
  * Overview — what the platform is doing right now, and how it is growing.
@@ -27,10 +40,6 @@ import DataTable from '../components/DataTable';
  * The panel needs `view_audit_logs`. An account without it sees the analytics
  * alone rather than a permission error.
  */
-
-const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
-
-const TOOLTIP_STYLE = { borderRadius: 12, border: '1px solid #f3f4f6', fontSize: 12 };
 
 /** How each severity reads: the tile, the dot beside a history row, its icon. */
 const LEVELS = {
@@ -464,42 +473,14 @@ export default function AdminOverview() {
         <StatsCard icon="sparkle" title="Signups" subtitle="Last 30 days" value={signupTotal} color="red" />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-5">
-        <div className="card">
-          <h2 className="section-title mb-4">Signups (last 30 days)</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            {/* `left: 0`. A negative margin moves the tick labels off the left
-                edge of the SVG, where they are cut rather than shrunk — 16px of
-                usable width drew a three-figure signup count as its last two
-                digits. Same trap as the family app's screen-time chart. */}
-            <BarChart data={signupData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} />
-              <YAxis
-                axisLine={false} tickLine={false} allowDecimals={false} width={40}
-                tick={{ fontSize: 11, fill: '#9ca3af' }}
-              />
-              <Tooltip cursor={{ fill: '#f3f4f6' }} contentStyle={TOOLTIP_STYLE} />
-              <Bar dataKey="count" fill="#2563eb" radius={[6, 6, 0, 0]} maxBarSize={32} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="card">
-          <h2 className="section-title mb-4">Users by plan</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <PieChart>
-              <Pie
-                data={data.byPlan} dataKey="count" nameKey="plan"
-                cx="50%" cy="45%" outerRadius="75%" innerRadius="45%" paddingAngle={2}
-              >
-                {data.byPlan.map((entry, i) => <Cell key={entry.plan} fill={COLORS[i % COLORS.length]} />)}
-              </Pie>
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      {/* The fallback is an empty box of the chart's exact height rather than a
+          spinner: the alert detail below would otherwise be shoved down as the
+          chunk lands, and a page that jumps reads worse than one still drawing. */}
+      <Suspense
+        fallback={<div style={{ height: CHART_HEIGHT + 68 }} aria-hidden="true" />}
+      >
+        <GrowthCharts signups={signupData} byPlan={data.byPlan} height={CHART_HEIGHT} />
+      </Suspense>
 
       {/* ── The alerts in full, under the growth charts ────────────────────── */}
       {mayReadLogs && health && (

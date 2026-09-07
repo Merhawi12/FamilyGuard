@@ -52,16 +52,20 @@ const packageOf = (id) => {
   return first?.startsWith('@') ? `${first}/${second}` : first || null;
 };
 
+/**
+ * There is no `charts` group any more, and that is the point.
+ *
+ * It used to name recharts and the fourteen packages it drags in — d3-scale,
+ * d3-shape, victory-vendor, react-smooth and the rest — which together were
+ * 390 kB, the largest chunk either app shipped and bigger than React, the
+ * router, the API client and every screen put together. Both apps draw their
+ * charts with `packages/shared/src/charts/` now, which is application code and
+ * belongs in the chunk of whichever screen imports it.
+ */
 const groups = {
   react: [
     'react', 'react-dom', 'react-is', 'scheduler',
     'react-router', 'react-router-dom', '@remix-run/router',
-  ],
-  charts: [
-    'recharts', 'recharts-scale', 'victory-vendor', 'react-smooth',
-    'internmap', 'decimal.js-light',
-    'd3-array', 'd3-color', 'd3-ease', 'd3-format', 'd3-interpolate',
-    'd3-path', 'd3-scale', 'd3-shape', 'd3-time', 'd3-time-format', 'd3-timer',
   ],
   maps: [
     '@react-google-maps/api', '@react-google-maps/infobox',

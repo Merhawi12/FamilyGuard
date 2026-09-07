@@ -1,17 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
-  BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
-} from 'recharts';
-import {
   children as childrenApi, reports as reportsApi, localDateKey, EmptyState, errorMessage,
+  BarChart, DonutChart,
 } from '@parentix/shared';
 import ChildTabs from '../components/ChildTabs';
 import PageIntro from '../components/PageIntro';
 import { PRIMARY, SERIES } from '../brand';
 
 const COLORS = SERIES;
-
-const TOOLTIP_STYLE = { borderRadius: 12, border: '1px solid #f3f4f6', fontSize: 12 };
 
 const formatHours = (minutes) => {
   const hours = minutes / 60;
@@ -160,17 +156,22 @@ export default function Reports() {
 
           <div className="card">
             <h2 className="section-title mb-4">Screen time by day</h2>
-            <ResponsiveContainer width="100%" height={200}>
-              {/* `left: 0` — a negative margin here cuts the leading digits off
-                  the minute labels and turns "105m" into "5m". See the note in
-                  components/WeeklyUsageChart.jsx. */}
-              <BarChart data={weeklyChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} />
-                <YAxis unit="m" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#9ca3af' }} width={46} />
-                <Tooltip cursor={{ fill: '#f3f4f6' }} contentStyle={TOOLTIP_STYLE} />
-                <Bar dataKey="minutes" fill={PRIMARY} radius={[6, 6, 0, 0]} maxBarSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
+            {/* `yWidth` has to fit "1440m" — the axis labels are what turned
+                "105m" into "5m" when this was Recharts. See the note in
+                components/WeeklyUsageChart.jsx. */}
+            <BarChart
+              data={weeklyChartData}
+              xKey="date"
+              yKey="minutes"
+              height={200}
+              color={PRIMARY}
+              maxBarSize={40}
+              yWidth={46}
+              unit="m"
+              formatValue={(v) => `${v} min`}
+              valueLabel="Screen time"
+              ariaLabel="Screen time per day over the reported week, in minutes"
+            />
           </div>
 
           <div className="card">
@@ -213,20 +214,16 @@ export default function Reports() {
 
                 {categoryData.length > 0 && (
                   <div>
-                    <ResponsiveContainer width="100%" height={220}>
-                      <PieChart>
-                        <Pie
-                          data={categoryData} dataKey="value" nameKey="name"
-                          cx="50%" cy="45%" outerRadius="75%" innerRadius="45%" paddingAngle={2}
-                        >
-                          {categoryData.map((entry, i) => (
-                            <Cell key={entry.name} fill={COLORS[i % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [`${v} min`]} />
-                        <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                      </PieChart>
-                    </ResponsiveContainer>
+                    <DonutChart
+                      data={categoryData}
+                      dataKey="value"
+                      nameKey="name"
+                      colors={COLORS}
+                      height={220}
+                      formatValue={(v) => `${v} min`}
+                      centerLabel="That day"
+                      ariaLabel="Screen time by category for the selected day"
+                    />
                   </div>
                 )}
               </div>

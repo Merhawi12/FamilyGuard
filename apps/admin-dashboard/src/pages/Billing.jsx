@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { admin as adminApi, errorMessage, EmptyState, Icon, Modal } from '@parentix/shared';
+import { admin as adminApi, errorMessage, EmptyState, Icon, Modal, BarChart } from '@parentix/shared';
 import DataTable from '../components/DataTable';
 import StatTile from '../components/StatTile';
 
@@ -137,36 +136,23 @@ function RevenueTrend({ summary, range, onRange }) {
             No payments recorded over {active.title}.
           </p>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            {/* `left: 0` — the axis needs its whole declared width, or a money
-                label loses its leading digits. See Overview.jsx. */}
-            <BarChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-              <XAxis
-                dataKey="label" axisLine={false} tickLine={false} interval={tickInterval}
-                tick={{ fontSize: 11, fill: '#9ca3af' }}
-              />
-              <YAxis
-                axisLine={false} tickLine={false} width={56}
-                tick={{ fontSize: 11, fill: '#9ca3af' }}
-                tickFormatter={(value) => compactMoney(value, summary?.currency)}
-              />
-              <Tooltip
-                cursor={{ fill: '#f3f4f6' }}
-                contentStyle={{ borderRadius: 12, border: '1px solid #f3f4f6', fontSize: 12 }}
-                formatter={(value) => [money(value, summary?.currency), 'Billed']}
-              />
-              <Bar dataKey="amount" radius={[6, 6, 0, 0]} maxBarSize={44}>
-                {data.map((entry, i) => (
-                  <Cell
-                    // Positional by nature — these are periods, not identified things.
-                    // eslint-disable-next-line react/no-array-index-key
-                    key={i}
-                    fill={i === data.length - 1 ? '#0b2451' : '#c2d4f0'}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          /* `yWidth` has to fit the widest money label the axis will print, or
+             it loses its leading digits. See GrowthCharts.jsx. */
+          <BarChart
+            data={data}
+            xKey="label"
+            yKey="amount"
+            yWidth={56}
+            maxBarSize={44}
+            tickInterval={tickInterval}
+            // The most recent period picked out in navy, the rest in the pale
+            // blue the console uses for history.
+            color={(entry, i) => (i === data.length - 1 ? '#0b2451' : '#c2d4f0')}
+            formatY={(value) => compactMoney(value, summary?.currency)}
+            formatValue={(value) => money(value, summary?.currency)}
+            valueLabel="Billed"
+            ariaLabel={`Revenue by period over ${active.title}`}
+          />
         )}
       </div>
     </div>
