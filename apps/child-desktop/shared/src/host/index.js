@@ -8,6 +8,8 @@ import {
   createMainWindow, showMain, sendToMain, showLock, hideLock, setApiHost, watchDisplays,
 } from './windows.js';
 import { createTray, trayIconPath } from './tray.js';
+import { registerProtocol, watchSetupUrls } from './setupLink.js';
+import { startUpdater, stopUpdater, getUpdateStatus } from './updater.js';
 
 /**
  * Everything the Windows and macOS projects have in common, which is almost all
@@ -63,6 +65,16 @@ export async function bootstrap({ createOs, projectRoot }) {
   }
   app.on('second-instance', () => showMain());
 
+  /**
+   * `parentix://` — how the family app hands this computer its linking code.
+   *
+   * Registered before `whenReady`, because on Windows a click that *launches*
+   * the app arrives as an argument on this very process and the handlers below
+   * have to be attached before anything reads argv. See setupLink.js for what a
+   * URL is and is not allowed to do.
+   */
+  registerProtocol(app);
+
   // Windows needs this before a notification will show the app's name and icon
   // rather than "electron.app.Electron"; it is also what the installer's Start
   // Menu shortcut is matched against.
@@ -85,8 +97,13 @@ export async function bootstrap({ createOs, projectRoot }) {
 
   const dataDir = app.getPath('userData');
 
+  const os = createOs({ dataDir });
+
+  /** Electron's answer: is the Run key (or the macOS login item) set for us? */
+  const loginItemEnabled = async () => app.getLoginItemSettings().openAtLogin;
+
   const platform = setPlatform({
-    ...createOs({ dataDir }),
+    ...os,
     dataDir: () => dataDir,
 
     /**
@@ -120,11 +137,32 @@ export async function bootstrap({ createOs, projectRoot }) {
 
     autostart: {
       supported: true,
-      enabled: async () => app.getLoginItemSettings().openAtLogin,
+      enabled: loginItemEnabled,
       set: async (on) => {
         app.setLoginItemSettings({ openAtLogin: on, openAsHidden: true, args: ['--parentix-autostart'] });
         return app.getLoginItemSettings().openAtLogin;
       },
+
+      /**
+       * Will this computer start Parentix on its own?
+       *
+       * A different question from `enabled`, and only on Windows — where the
+       * installer starts the agent from an elevated scheduled task, precisely
+       * because Windows refuses to auto-start an elevated app from the Run key.
+       * A healthy Windows install therefore reports `openAtLogin: false` for
+       * ever, so the tamper watcher asking `enabled` would have raised a false
+       * alarm on every one of them. See `windows/src/platform/autostart.js`.
+       *
+       * macOS contributes no override: there the app writes its own login item,
+       * so Electron's answer is the true one.
+       *
+       * `null` means the question could not be answered — a policy that forbids
+       * querying scheduled tasks, say — and nothing acts on it. Not knowing is
+       * not evidence.
+       */
+      systemIntact: os.autostart?.systemIntact
+        ? () => os.autostart.systemIntact(loginItemEnabled)
+        : loginItemEnabled,
     },
   });
 
@@ -211,6 +249,8 @@ export async function bootstrap({ createOs, projectRoot }) {
    */
   ipcMain.handle('lock:use-allowed', () => ok(agent.useAllowedApps()));
 
+  ipcMain.handle('update:status', () => ok(getUpdateStatus()));
+
   ipcMain.handle('permissions:list', async () => {
     try { return ok(await platform.permissions.list()); } catch (error) { return fail(error); }
   });
@@ -243,6 +283,9 @@ export async function bootstrap({ createOs, projectRoot }) {
     if (stopping) return;
     event.preventDefault();
     app.isQuitting = true;
+    // Before the race, not inside it: a downloaded update installs *after* this
+    // process exits, so the timer must not be what keeps it from exiting.
+    stopUpdater();
     stopping = Promise.race([
       agent.stopAgent(),
       new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS)),
@@ -251,6 +294,58 @@ export async function bootstrap({ createOs, projectRoot }) {
 
   await agent.startAgent();
   tray?.rebuild();
+
+  /**
+   * A linking code arriving from the browser.
+   *
+   * Three things happen in a deliberate order. The window comes up **first**,
+   * before the network call, because the parent has just clicked a button and
+   * needs to see something happen; a silent two-second POST followed by a window
+   * reads as the button having done nothing. Then the code is put in front of
+   * the renderer whatever the outcome, so a failure leaves the child looking at
+   * a pre-filled link screen they can retry from rather than an empty one. Then
+   * it is redeemed.
+   *
+   * **An already-linked computer ignores the code entirely.** This is the one
+   * check here that is load-bearing: without it, any web page the child opened
+   * could re-link a monitored laptop onto an account of its choosing, and the
+   * parent would find their device silently gone from their dashboard. A
+   * computer that is already somebody's stays theirs until they unlink it.
+   */
+  const applySetupCode = async (code) => {
+    showMain();
+    if (agent.getAgentStatus().linked) return;
+
+    sendToMain('setup:code', code);
+    try {
+      await agent.linkThisDevice(code);
+      sendToMain('agent:status', agent.getAgentStatus());
+      tray?.rebuild();
+    } catch (error) {
+      // The server's sentence, on the link screen, with the code still in the
+      // box — same treatment as a code the child typed themselves.
+      sendToMain('setup:error', error?.response?.data?.error || error?.message || 'That code was not recognised.');
+    }
+  };
+
+  const launchCode = watchSetupUrls({
+    app,
+    onCode: (code) => { applySetupCode(code).catch(() => {}); },
+  });
+  // The cold-start case: the app was launched *by* the URL, so there is no event
+  // coming and the code is sitting in this process's own argv. Deferred a tick so
+  // the renderer exists to be told about it.
+  if (launchCode) setTimeout(() => { applySetupCode(launchCode).catch(() => {}); }, 500).unref?.();
+
+  /**
+   * Updates last, and never in the way. `startUpdater` is a no-op on a dev build
+   * and reports itself unsupported rather than failing, so this needs no branch.
+   */
+  startUpdater({
+    app,
+    onChange: (status) => sendToMain('update:status', status),
+    feedUrl: process.env.PARENTIX_UPDATE_URL || null,
+  }).catch(() => { /* an update check is never a reason not to start */ });
 
   return platform;
 }

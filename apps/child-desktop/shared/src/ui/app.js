@@ -25,6 +25,8 @@ document.head.prepend(style);
 
 let status = null;
 let tab = 'home';
+/** `{ current, pending, … }` from the updater — see `versionFact`. */
+let updateStatus = null;
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
@@ -166,6 +168,21 @@ function renderHome() {
   $('blocked-empty').hidden = rows.length > 0;
 }
 
+/**
+ * The version line on "This computer".
+ *
+ * Deliberately one string rather than a card with a "Check now" button. Updates
+ * here are silent and automatic (see `host/updater.js`); a control offering to
+ * check would imply the child has a say in it, and a button that only ever says
+ * "up to date" is furniture. What is worth stating is the one case where the
+ * running version is not the one that will be running tomorrow.
+ */
+function versionFact() {
+  if (!updateStatus?.current) return '—';
+  if (updateStatus.pending) return `${updateStatus.current} (${updateStatus.pending} installs on restart)`;
+  return updateStatus.current;
+}
+
 function renderSettings() {
   const capabilities = status.capabilities || [];
   const monitorState = {
@@ -223,6 +240,10 @@ function renderSettings() {
   const facts = [
     ['Computer', status.osVersion],
     ['Connected to', bridge.apiHost],
+    // Shown to the child on purpose, alongside everything else on this screen.
+    // It is also the answer to the first question support asks, and reading it
+    // off the machine beats a parent describing what they think is installed.
+    ['Parentix version', versionFact()],
     ['Rules updated', status.sync?.lastSyncAt ? new Date(status.sync.lastSyncAt).toLocaleString() : 'Never'],
     ['Websites checked', status.webFilter?.stats ? String(status.webFilter.stats.queries) : '—'],
     ['Waiting to send', String(status.webHistory?.queued ?? 0)],
@@ -318,6 +339,35 @@ $('link-code').addEventListener('input', (event) => {
   event.target.value = event.target.value.toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 8);
 });
 
+/**
+ * A code handed over by the browser (`parentix://link/…`).
+ *
+ * The main process is already redeeming it — this screen's whole job is to look
+ * like something is happening and to leave a usable form behind if it fails.
+ * The box is filled and disabled rather than hidden, because the two outcomes a
+ * second later are "the app moves on" and "an error appears above a code you can
+ * press Link on", and both read better from a form that was visibly there.
+ */
+bridge.onSetupCode((code) => {
+  const input = $('link-code');
+  const submit = $('link-submit');
+  input.value = String(code || '').toUpperCase().slice(0, 8);
+  $('link-error').hidden = true;
+  input.disabled = true;
+  submit.disabled = true;
+  submit.textContent = 'Connecting…';
+});
+
+bridge.onSetupError((message) => {
+  const submit = $('link-submit');
+  const error = $('link-error');
+  $('link-code').disabled = false;
+  submit.disabled = false;
+  submit.textContent = 'Link this computer';
+  error.textContent = message || 'That code was not recognised.';
+  error.hidden = false;
+});
+
 $('message-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const input = $('message-text');
@@ -360,9 +410,17 @@ bridge.onStatus((next) => {
   render();
 });
 
+bridge.update.onStatus((next) => {
+  updateStatus = next;
+  // Only one screen shows it, and re-rendering the others from an event that
+  // fires twice a day would be work for nothing.
+  if (tab === 'settings') render();
+});
+
 (async () => {
   $('api-host').textContent = bridge.apiHost;
   $('autostart').checked = await bridge.autostart.get();
+  updateStatus = await bridge.update.status().catch(() => null);
   status = await bridge.getStatus();
   render();
   if (status.linked) loadMessages();

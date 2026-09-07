@@ -242,6 +242,7 @@ export const ALERT_LABELS = {
   blocked_app_attempt: 'Blocked App Attempt',
   app_installed: 'New App Used',
   safety_pattern: 'Safety Pattern Detected',
+  tamper_detected: 'Protection Interrupted',
 };
 
 export const alertLabel = (type) => ALERT_LABELS[type] || type;

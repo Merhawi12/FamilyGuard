@@ -331,15 +331,218 @@ review cycle, with the extension needing user approval. The launchd helper reach
 the same place with no Apple negotiation. If the entitlement is ever granted,
 `src/dns/proxy.js` moves into the provider and nothing else changes.
 
+## 9a. Getting it onto a computer
+
+The agent is the one Parentix client with no store behind it, so the platform has
+to answer two questions nobody else answers for it: **where are the bytes**, and
+**is this copy current**. Both are configuration rather than code, which is
+exactly why they are pinned by tests — every one of their failure modes is
+silent.
+
+### The route a parent takes
+
+```
+parentix.ca/download ─→ Parentix-Setup-<version>.exe ─→ install (UAC once)
+                                                          │
+family app · Children · Link a device ── setup code ──────┘
+                                                          ↓
+                        typed, or handed over by parentix://link/<CODE>
+```
+
+The download page (`apps/family-app/public/download.html`, served at `/download`)
+asks `GET /api/downloads/child-desktop` what is published before it draws a
+button. That indirection is the point: an unconfigured deployment answers `503`
+and the page says the installer is not available, rather than sending a parent to
+a 404 they would read as a corrupt 190 MB download and retry.
+
+`GET /api/downloads/child-desktop/windows` **302s** to the artifact and never
+proxies it. Streaming an installer through Cloud Run would put every download on
+an instance's clock, and a busy day would take the whole API down — sign-in
+included.
+
+The URL deliberately carries no version, so a bookmark or a year-old support
+article still fetches the current build.
+
+### The combined installer is the default, on purpose
+
+electron-builder produces `-x64`, `-arm64` **and** a combined `.exe`. The button
+links to the combined one. A parent who has to work out whether their child's
+laptop is ARM has already been failed, and the wrong choice produces *"This app
+can't run on your PC"* — a message they cannot act on. The smaller builds are
+offered as a secondary link for anyone who wants one.
+
+### Linking without reading eight characters aloud
+
+Typing the code still works and is still the path that always works — it is the
+only one that survives the parent setting the laptop up from another room.
+
+But when the parent is *at* the child's computer, which is the common case, the
+family app's link sheet (`ComputerSetup.jsx`) offers **Connect this computer**,
+pointing at `parentix://link/<CODE>`. Windows hands that to the running agent,
+which links itself. Registered from the `protocols` block in both build configs;
+handled in `shared/src/host/setupLink.js`.
+
+Two things about it are load-bearing:
+
+- **An inbound code is a string a stranger chose.** Any page the child visits can
+  fire a `parentix://` URL, so it is validated to the code format and handed to
+  the same unauthenticated `POST /devices/confirm` a typed code goes to — which
+  already refuses unknown, expired, redeemed and suspended-account codes.
+- **An already-linked computer ignores them entirely.** Without that check a web
+  page could re-link a monitored laptop onto an account of its choosing, and the
+  parent would find their device silently gone from their dashboard.
+
+Stamping the code into the *installer's filename* was considered and rejected:
+it needs the API to serve the bytes (see above), and browsers rename collisions,
+proxies rewrite downloads and "Save link as" lets the parent choose the name —
+each producing an installer that links nothing, on a path with no way to report
+that it did not work. A URL scheme is one extra click and fails visibly.
+
+### Updates
+
+`electron-updater`, `generic` provider, feed baked in from the `publish` block.
+Three rules, in `shared/src/host/updater.js`:
+
+1. **The child is never asked.** No prompt, no restart nag. An update dialog on a
+   monitored computer is a dialog with a Cancel button on the software doing the
+   monitoring.
+2. **A failed check is invisible to the child** and never blocks startup.
+3. **Nothing runs unpackaged** — `app.isPackaged`, because that is the fact that
+   decides whether `app-update.yml` exists.
+
+The security of it is worth stating precisely: electron-updater verifies the
+downloaded installer's SHA-512 against the feed before running it, so a corrupt
+download is rejected. That is **integrity, not provenance** — anyone who can
+write to the artifact bucket can publish a build this will install. Provenance
+needs Authenticode (§9), after which electron-updater also refuses an installer
+whose signature does not match `publisherName`.
+
+### Publishing a release
+
+```bash
+npm run desktop:win                                  # build
+DESKTOP_DOWNLOAD_BASE_URL=https://parentix-downloads.web.app \
+  npm run desktop:publish:check                      # every check, publishes nothing
+DESKTOP_DOWNLOAD_BASE_URL=https://parentix-downloads.web.app \
+  npm run desktop:publish                            # → Firebase Hosting
+```
+
+**Firebase Hosting is the default target**, on the `downloads` site. It is the
+host this project already deploys to, so publishing needs no second set of
+credentials, and the artifacts are plain static files — electron-updater's
+`generic` provider only needs `<base>/child-desktop/win/latest.yml` to resolve
+over HTTPS. `--target=gcs --bucket=gs://…` uploads to a bucket instead, for when
+Hosting's bandwidth stops being the right shape (its free tier is 10 GB/month,
+which is roughly fifty downloads of the combined installer).
+
+The site's public directory is `apps/child-desktop/dist-publish`, a **staging
+folder the script fills and git ignores**. Deploying `windows/dist` directly
+would upload `builder-debug.yml` and ~700 MB of unpacked build output, and would
+serve the artifacts at the root rather than under `child-desktop/win/` — so one
+`DESKTOP_DOWNLOAD_BASE_URL` would stop working across hosts. The staging folder
+is rebuilt from empty each time, because a withdrawn installer left behind stays
+downloadable for ever at a URL nothing references.
+
+`scripts/publish-desktop.mjs` refuses to publish unless:
+
+- the version in the project's `package.json` matches
+  `services/api/src/config/desktopRelease.js`;
+- `latest.yml` exists — without it every installed copy 404s on every update
+  check for ever, and a failed check is indistinguishable from being up to date;
+- the checksum in `latest.yml` matches the file beside it, the failure where
+  every machine downloads the update and then refuses to install it, in a loop;
+- **`DESKTOP_DOWNLOAD_BASE_URL` and `build.publish.url` name the same
+  directory.** Nothing else connects them, and when they disagree you get
+  working downloads and a fleet that never updates again, with nothing anywhere
+  reporting a problem.
+
+Cache headers come from `firebase.json` (or `--cache-control` on the GCS path):
+a year of `immutable` on the installers, whose names carry the version, and
+`no-cache` on `latest.yml`, whose URL is the same every release. That second one
+is the header that would break updates for everybody at once.
+
+### Switching it on
+
+A release is only reachable once **three** things are true, and each fails
+differently:
+
+| | Symptom if missing |
+| --- | --- |
+| Artifacts published (above) | `/api/downloads/child-desktop` reports `available: false`; the page says so |
+| `DESKTOP_DOWNLOAD_BASE_URL` set on the API | same — the manifest is `configured: false` |
+| The API deployed with the `/downloads` routes | the route 404s and the page says the download could not be checked |
+
+```bash
+curl -sI https://api.parentix.ca/api/downloads/child-desktop/windows | head -1
+```
+
+`302` means a parent can download it. `503` means the API is running but has no
+base URL. `404` means the API predates these routes and needs deploying.
+
+## 9b. Noticing when the controls stop being in force
+
+`shared/src/services/tamper.js`. It is worth being blunt about what this is: **it
+is not anti-tamper.** A child with the administrator password on their own
+Windows account can end this process, and no code inside the process being ended
+changes that.
+
+What is achievable is that circumvention is **not silent**. Every route around
+the agent leaves the same footprint — the controls stop being applied — and the
+parent is told. That turns a technical arms race the product loses into a
+conversation between a parent and their child. Same judgement as the lock screen
+in §4.
+
+Three signals, checked every two minutes, one alert per kind per six hours (a
+laptop with a VPN client that rewrites DNS on every connect would otherwise
+produce twenty alerts an hour, and the parent would stop reading them):
+
+| Signal | How it is detected | What happens |
+| --- | --- | --- |
+| The last run was killed | `repairSystemDns()` found a leftover redirect at startup | reported |
+| The resolver drifted back | `platform.dns.isApplied()` — **every** connected interface must be on the loopback | re-applied, then reported |
+| Start-at-sign-in removed | `platform.autostart.systemIntact()` | re-enabled where possible, then reported |
+
+They reach the parent as the `tamper_detected` alert, over `alert:tamper` on the
+device socket. Four details are deliberate:
+
+- **The wording never accuses.** A flat battery, a power cut and a forced restart
+  all reach the first signal by exactly the same route as a deliberate kill.
+- **`systemIntact`, never `enabled`.** Electron's `getLoginItemSettings()` reads
+  the Run key, and on Windows the Run key is *not* how Parentix starts (§6) — so
+  a healthy install reports `openAtLogin: false` for its whole life, and a check
+  written against it would have raised a false alarm on **every** Windows machine
+  ninety seconds after first start. `windows/src/platform/autostart.js` asks
+  about the scheduled task instead. An alert that fires when nothing is wrong is
+  what teaches a parent to ignore the real ones.
+- **`null` means "could not tell"** — a policy-locked machine, a missing cmdlet —
+  and nothing acts on it. Not knowing is not evidence.
+- **Reports are queued, not fired and forgotten.** `emitSocket` drops what it
+  cannot send, and the most important report of the three is raised at startup
+  *before* `connectSocket()` runs. A kind is only marked as reported once it has
+  actually left the machine.
+
+Alongside it, two things in the installer make the boundary harder to cross by
+accident: a **watchdog** scheduled task restarts the agent every five minutes if
+it is not running (the single-instance lock means it can be an unconditional
+start command), and `perMachine: true` puts UAC in front of uninstalling from
+Windows Settings.
+
 ## 10. What has been verified, and what has not
 
-**Verified by running it, on Windows, 2026-08-17:**
+**Verified by running it, on Windows, 2026-08-17 (and extended 2026-09-06):**
 
-- `npm run test:e2e:desktop` — **59 checks** against a real API, driving the
+- `npm run test:e2e:desktop` — **123 checks** against a real API, driving the
   shipping service layer. The DNS proxy is the real one, on a high port, with a
   real upstream on the loopback: blocked, allowed, canary and DoH lookups are
   actual packets and the response codes are read off the wire. A parent socket
   connects alongside, so "the parent sees it" is checked on a second client.
+- The 2026-09-06 additions cover the two features in §9a and §9b: a real linking
+  code parsed out of a real `parentix://` URL (and hostile shapes refused), and
+  the whole tamper path — a healthy machine raising nothing, an unelevated
+  install not being accused of losing a redirect it never made, the resolver
+  being put back *before* the parent is told, the six-hour repeat suppression,
+  "could not tell" not counting as evidence, and a report raised before the
+  socket exists surviving to be delivered afterwards.
 - The real Electron application, driven with Playwright: it boots to the link
   screen, redeems a real code, switches to My Day with the child's name and the
   parent's limit, lists the blocked app and site, reports the unelevated state
@@ -350,8 +553,15 @@ the same place with no Apple negotiation. If the entitlement is ever granted,
   display within seconds, showed *"It is bedtime, Sam"*, its "Ask for more time"
   button put a real message in the parent's thread, and lifting the rule took it
   away.
-- `services/api/tests/childDesktopPlatforms.test.js` — 23 tests pinning the
-  agreements that drift silently.
+- `services/api/tests/childDesktopPlatforms.test.js` — the agreements that drift
+  silently, now including the distribution ones: version parity between the
+  build and `desktopRelease.js`, artifact names matching electron-builder's
+  template, a `publish` block whose URL lands in the same directory the API
+  serves from, the `parentix` scheme registered by both installers, and both
+  scheduled tasks being created *and* removed.
+- `services/api/tests/downloads.test.js` — the endpoints, including the two that
+  matter most: an unconfigured deployment answering 503 rather than redirecting
+  into nowhere, and `no-store` so a browser never pins one release's file.
 
 **Not verified, and each needs a machine:**
 
@@ -365,10 +575,21 @@ the same place with no Apple negotiation. If the entitlement is ever granted,
   `powershell.exe`. `Set-DnsClientServerAddress` has never been called by this
   code on a real machine, so the redirect, the restore and the DHCP-vs-static
   distinction are unproven.
-- **Both installers.** Nothing has been packaged. The NSIS scheduled task, the
-  `.pkg` scripts and the icon conversion are all untried.
+- **What the installers do when they run.** `npm run desktop:win` has been run
+  and produces the three `.exe` artifacts, so packaging itself works — but
+  nothing has been *installed*. The NSIS scheduled tasks (both of them), the
+  `parentix://` registry keys, the uninstaller's DNS restore, the `.pkg` scripts
+  and the icon conversion have never executed on a real machine.
+- **The update path end to end.** `electron-updater` is wired in and the feed is
+  generated, but no release has been published to a host and no installed copy
+  has ever updated itself. Until one has, treat §9a as a design.
+- **`autostart.js`'s `Get-ScheduledTask` call.** Exercised through the harness's
+  fake platform, not against `powershell.exe`. Its `false` answer is what raises
+  a tamper alert, so a wrong error-message match there would mean false alarms —
+  which is why it returns `null` for anything that is not a clean yes or no.
 
-The first two are the ones to do first, and in that order.
+The first two are the ones to do first, and in that order. The third and fourth
+both resolve on the first real install.
 
 ## 11. Environment
 
@@ -379,6 +600,11 @@ The first two are the ones to do first, and in that order.
 | `PARENTIX_DNS_PORT` | `53` | the resolver's port. Anything else skips the system change — `netsh` and `networksetup` set an address, not a port, so a proxy on 5353 would never be consulted |
 | `PARENTIX_DNS_UPSTREAM_PORT` | `53` | where allowed lookups go; for the harness only |
 | `PARENTIX_DEV` / `--dev` | unset | adds a Quit item to the tray |
+| `PARENTIX_UPDATE_URL` | the feed baked in at build time | overrides where the agent checks for updates. Exists for one situation a new build cannot fix — moving the artifacts to a different host, after which a copy that only knows the dead URL can never update again |
+
+On the API side, `DESKTOP_DOWNLOAD_BASE_URL` decides where `/api/downloads`
+sends people; blank means 503 and a download page that says so. It has to name
+the same directory as `build.publish.url` in each project — see §9a.
 
 The API host is **shown on the link screen**, and that is not decoration. A
 linking code is a row in one database, so a parent whose dashboard is pointed at

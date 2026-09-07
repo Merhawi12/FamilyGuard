@@ -11,15 +11,30 @@ const { version } = JSON.parse(fs.readFileSync(path.join(here, 'package.json'), 
 
 /**
  * `/` serves the static marketing page. In production Firebase Hosting rewrites
- * `/` to landing.html and `/contact` to contact.html (see firebase.json), so dev
- * and prod behave identically.
+ * `/` to landing.html, `/contact` to contact.html and `/download` to
+ * download.html (see firebase.json), so dev and prod behave identically.
+ *
+ * **This list and firebase.json's `rewrites` are one decision in two files**, and
+ * the failure when they drift is entirely one-directional and therefore easy to
+ * ship: a page missing here still works in production and is simply unreachable
+ * in dev, where the request falls through to the `**` rule and is answered by the
+ * SPA shell. Nobody sees a 404 — they see the app, which reads as a broken link
+ * rather than a missing rewrite. `staticPages.test.js` pins the two together.
  */
+const STATIC_PAGES = {
+  '/contact': '/contact.html',
+  '/download': '/download.html',
+};
+
 const landingAtRoot = {
   name: 'landing-at-root',
   configureServer(server) {
     server.middlewares.use((req, _res, next) => {
-      if (req.url === '/' || req.url === '/?') req.url = '/landing.html';
-      else if (req.url === '/contact') req.url = '/contact.html';
+      // The query string has to survive: `/download?utm_source=…` is an ordinary
+      // arrival from a link, and matching on the whole URL would miss it.
+      const [pathname, query] = (req.url || '').split('?');
+      if (pathname === '/') req.url = '/landing.html';
+      else if (STATIC_PAGES[pathname]) req.url = STATIC_PAGES[pathname] + (query ? `?${query}` : '');
       next();
     });
   },
@@ -78,7 +93,7 @@ const stampApiOrigin = {
     const origin = (process.env.VITE_API_URL || '').replace(/\/$/, '');
     if (!origin) return;
 
-    for (const page of ['landing.html', 'contact.html']) {
+    for (const page of ['landing.html', 'contact.html', 'download.html']) {
       const file = path.join(here, 'dist', page);
       if (!fs.existsSync(file)) continue;
 
@@ -151,7 +166,7 @@ export default defineConfig({
         // for why this is a function rather than the object Rollup also takes:
         // the object form silently pinned the whole Google Maps bundle to the
         // sign-in screen.
-        manualChunks: vendorChunks(['react', 'charts', 'maps']),
+        manualChunks: vendorChunks(['react', 'maps']),
       },
     },
   },

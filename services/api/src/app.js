@@ -167,6 +167,7 @@ app.use('/api/contacts', require('./routes/contacts'));
 app.use('/api/contact', require('./routes/contactForm'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/uploads', require('./routes/uploads'));
+app.use('/api/downloads', require('./routes/downloads'));
 // Cloud Scheduler, not a browser — see routes/tasks.js.
 app.use('/api/tasks', require('./routes/tasks'));
 

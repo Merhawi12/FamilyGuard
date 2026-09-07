@@ -266,6 +266,56 @@ const run = async () => {
   const linkSvc = await import(src('services/link.js'));
   const store = await import(src('services/store.js'));
 
+  /*
+   * The code arriving from the browser rather than from the keyboard.
+   *
+   * `parentix://link/<CODE>` is what the family app's "Connect this computer"
+   * button fires, and the parsing is checked against a real code from a real
+   * `POST /devices/link` — not a made-up string — because the thing that would
+   * actually break this is the API changing the shape of a code. The delivery
+   * mechanism above it (`app.on('open-url')`, the Windows re-launch argv) is
+   * Electron's and cannot be driven from here; what is worth pinning is that the
+   * code that comes out is the one that went in, and that nothing else does.
+   */
+  const setupLink = await import(src('host/setupLink.js'));
+  check('a setup URL yields the code the parent was shown',
+    setupLink.parseSetupUrl(`parentix://link/${linkCode}`) === linkCode,
+    String(setupLink.parseSetupUrl(`parentix://link/${linkCode}`)));
+  check('the same code arrives as a Windows launch argument',
+    setupLink.parseSetupArgs(['C:\\Parentix.exe', `parentix://link/${linkCode}`]) === linkCode);
+  check('a lowercase code from a URL is corrected',
+    setupLink.parseSetupUrl(`parentix://link/${linkCode.toLowerCase()}`) === linkCode);
+  /*
+   * Any page the child visits can fire a `parentix://` URL, so what comes out of
+   * here is a string a stranger chose. It is validated to the code format before
+   * it is used, and everything else is refused — passing `parentix://link/hello`
+   * on would put a server error on a screen for a link nobody clicked.
+   */
+  check('a URL carrying something that is not a code is refused',
+    setupLink.parseSetupUrl('parentix://link/hello') === null);
+  check('another application\'s scheme is refused',
+    setupLink.parseSetupUrl(`myapp://link/${linkCode}`) === null);
+  check('an ordinary argument list yields nothing',
+    setupLink.parseSetupArgs(['C:\\Parentix.exe', '--parentix-autostart']) === null);
+
+  /*
+   * A tamper report raised before there is a socket to send it on.
+   *
+   * This is the real sequence, not a contrived one: `reportStartupState` runs
+   * from `startAgent` *before* `connectSocket`, so the single most important
+   * alert in the feature — "the agent was killed and has restarted" — is by
+   * definition raised while nothing is connected. `emitSocket` drops what it
+   * cannot send and says so by returning false, so a fire-and-forget emit would
+   * have thrown that alert away every single time. It is queued instead; the
+   * delivery is asserted further down, once the agent is running.
+   */
+  const tamperSvc = await import(src('services/tamper.js'));
+  tamperSvc.resetTamperState();
+  await tamperSvc.reportStartupState(true);
+  check('a restart report raised before the socket exists is held, not lost',
+    Object.keys(tamperSvc.__testing.pending()).includes('unexpected_stop'),
+    JSON.stringify(tamperSvc.__testing.pending()));
+
   const linkedDevice = await agent.linkThisDevice(linkCode.toLowerCase());
   check('the agent exchanges the code for a device token', await linkSvc.hasLink());
   check('a lowercase code is accepted', !!linkedDevice);
@@ -428,6 +478,126 @@ const run = async () => {
   fake.emitForeground({ appId: 'code.exe', appName: 'Visual Studio Code' });
   await sleep(300);
   check('an app with no rule is left alone', fake.spy.closed.length === 0, JSON.stringify(fake.spy.closed));
+
+  // ── Tamper ─────────────────────────────────────────────────────────────────
+  /*
+   * The controls stopping being in force, and the parent being told.
+   *
+   * Driven through `__testing.check()` rather than by waiting out the two-minute
+   * timer, and that is the only thing shortened here: the decision, the repair
+   * and the alert are the shipping ones, and the alert is read off the parent's
+   * real socket at the far end.
+   */
+  step('Switching the controls off tells the parent');
+  const tamper = tamperSvc;
+  const filterState = await import(src('services/webFilter.js'));
+
+  /*
+   * First, the report queued back before this computer had a socket. The agent
+   * has been connected for several steps by now, so a flush is all it takes —
+   * which is the point: the alert survived the interval in which it could not be
+   * sent, rather than being lost in it.
+   */
+  await tamper.__testing.flush();
+  const restartAlert = await waitFor(
+    () => parentEvents.alerts.find((a) => a.type === 'tamper_detected' && /without shutting down/i.test(a.message)),
+    'the queued restart alert',
+  );
+  check('the held restart report reaches the parent once there is a socket', !!restartAlert);
+  /*
+   * The wording, asserted deliberately. A flat battery, a power cut and a forced
+   * restart all arrive here by the same route as a deliberate kill, and an alert
+   * that told a parent their child had done it would be an accusation the
+   * product cannot support.
+   */
+  check('without accusing the child of anything',
+    !/child|kill|tamper/i.test(restartAlert.message), restartAlert.message);
+
+  tamper.resetTamperState();
+  const tamperAlerts = () => parentEvents.alerts.filter((a) => a.type === 'tamper_detected');
+  const alertsBefore = tamperAlerts().length;
+  const appliedBefore = fake.spy.dnsApplied;
+
+  // Nothing wrong: the check must be silent on a healthy machine. This is the
+  // assertion that would have caught the autostart false positive — a watcher
+  // that alerts on a working computer is worse than no watcher.
+  await tamper.__testing.check();
+  await sleep(200);
+  check('a healthy computer raises nothing',
+    tamperAlerts().length === alertsBefore,
+    JSON.stringify(tamperAlerts().map((a) => a.message)));
+
+  /*
+   * An install that never redirected the resolver must stay silent too, and
+   * this is the state the harness is genuinely in: the proxy runs on a high
+   * port, so `systemDnsApplied` is false, exactly as it is on an unelevated
+   * Windows install. "The redirect you never made is missing" is not tampering.
+   */
+  check('an install that never redirected DNS is not accused of losing it',
+    filterState.getWebFilterStatus().systemDnsApplied === false);
+  fake.machine.dnsStillOurs = false;
+  await tamper.__testing.check();
+  await sleep(200);
+  check('an unelevated install raises nothing when DNS is not ours',
+    tamperAlerts().length === alertsBefore,
+    JSON.stringify(tamperAlerts().map((a) => a.message)));
+
+  /*
+   * Now the elevated case: the agent did redirect the machine, and the child has
+   * put DNS back to automatic — fifteen seconds in Settings, and the most
+   * effective thing they can do short of ending the process. The flag is set
+   * directly because a high-port proxy can never set it itself; see
+   * `webFilter.__testing`.
+   */
+  filterState.__testing.setSystemDnsApplied(true);
+  await tamper.__testing.check();
+
+  const bypassAlert = await waitFor(() => tamperAlerts()[alertsBefore], 'the tamper alert');
+  check('the parent is told the filter was bypassed',
+    bypassAlert.message.toLowerCase().includes('network settings'), bypassAlert.message);
+  check('the resolver was put back before the parent was told',
+    fake.spy.dnsApplied > appliedBefore, `${appliedBefore} → ${fake.spy.dnsApplied}`);
+
+  /*
+   * A laptop that fights the agent — a VPN client rewriting DNS on every
+   * connect — would otherwise produce an alert every two minutes, and a parent
+   * who receives forty of those learns to ignore the forty-first.
+   */
+  fake.machine.dnsStillOurs = false;
+  await tamper.__testing.check();
+  await sleep(300);
+  check('the same problem is not reported twice',
+    tamperAlerts().length === alertsBefore + 1,
+    String(tamperAlerts().length - alertsBefore));
+
+  fake.machine.dnsStillOurs = true;
+
+  /*
+   * Start-at-sign-in being deleted is the other half, and the one with a trap in
+   * it: on Windows the installer uses an elevated scheduled task, so the login
+   * item Electron reports is *false* on a healthy machine. The watcher asks
+   * `systemIntact`, which is the question the platform answers correctly.
+   */
+  tamper.resetTamperState();
+  fake.machine.startupIntact = null; // "could not tell" — a policy-locked machine
+  await tamper.__testing.check();
+  await sleep(200);
+  check('not being able to tell is not reported as tampering',
+    tamperAlerts().length === alertsBefore + 1,
+    String(tamperAlerts().length - alertsBefore));
+
+  fake.machine.startupIntact = false;
+  await tamper.__testing.check();
+  const startupAlert = await waitFor(() => tamperAlerts()[alertsBefore + 1], 'the autostart alert');
+  check('the parent is told Parentix was stopped from starting',
+    startupAlert.message.toLowerCase().includes('start'), startupAlert.message);
+  check('and it was switched back on', fake.machine.startupIntact === true);
+
+  // Leave the machine as it was found, so the sections after this one are not
+  // running against a laptop this one broke.
+  tamper.resetTamperState();
+  filterState.__testing.setSystemDnsApplied(false);
+  fake.resetMachine();
 
   // ── The daily limit ────────────────────────────────────────────────────────
   step('The daily limit locks the computer');

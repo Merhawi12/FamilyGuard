@@ -33,9 +33,47 @@
   ${If} $0 != 0
     DetailPrint "Could not register the sign-in task (code $0). Parentix will still run, without website filtering."
   ${EndIf}
+
+  ; ── The watchdog ───────────────────────────────────────────────────────────
+  ;
+  ; The logon task above answers "start when the child signs in". It does not
+  ; answer "start again when the child ends the process", and that is about
+  ; fifteen seconds of work in Task Manager for anyone who has thought to look.
+  ;
+  ; A second task, every five minutes, starts the agent if it is not running.
+  ; `schtasks` has no "only if not already running" flag, so the condition lives
+  ; in the agent instead — it takes a single-instance lock and a second copy
+  ; quits immediately (see `requestSingleInstanceLock` in host/index.js). That is
+  ; why this can be a plain start command rather than a script that checks first:
+  ; the check is in the thing being started, where it cannot go stale.
+  ;
+  ; Five minutes, not one. It bounds how long the machine is unprotected while
+  ; being cheap enough to be invisible, and it is deliberately not a fight — a
+  ; child sitting there ending the process repeatedly will win each round, and
+  ; the alert their parent gets (see tamper.js) is the part that does not.
+  ;
+  ; `/RL HIGHEST` for the same reason as the logon task: an agent restarted
+  ; without elevation comes back unable to filter websites, which is the quieter
+  ; half of what killing it achieved.
+  DetailPrint "Registering the Parentix watchdog…"
+  nsExec::ExecToLog 'schtasks /Create /F /RL HIGHEST /SC MINUTE /MO 5 /RU "%USERDOMAIN%\%USERNAME%" /TN "Parentix Child Agent Watchdog" /TR "$\"$INSTDIR\Parentix.exe$\" --parentix-autostart"'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "Could not register the watchdog task (code $0). Parentix will still run."
+  ${EndIf}
 !macroend
 
 !macro customUnInstall
+  ; ── Stop it coming back, before undoing anything ───────────────────────────
+  ;
+  ; The watchdog fires on a timer rather than on a logon, so it is the one task
+  ; that can start the agent again *during* an uninstall — putting the DNS
+  ; redirect back moments after the line below removed it, against an
+  ; installation directory that is being emptied underneath it. So both tasks go
+  ; first, and the watchdog first of the two.
+  nsExec::ExecToLog 'schtasks /Delete /F /TN "Parentix Child Agent Watchdog"'
+  nsExec::ExecToLog 'schtasks /Delete /F /TN "Parentix Child Agent"'
+
   ; An uninstall is the one path with no next startup, so the resolver has to be
   ; put back here — `repairSystemDns` will never get the chance.
   ;
@@ -55,5 +93,4 @@
   DetailPrint "Restoring this computer's DNS settings…"
   nsExec::ExecToLog `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-DnsClientServerAddress | Where-Object { $$_.ServerAddresses -contains '127.0.0.1' -or $$_.ServerAddresses -contains '::1' } | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $$_.InterfaceIndex -ResetServerAddresses -ErrorAction SilentlyContinue }; Clear-DnsClientCache"`
 
-  nsExec::ExecToLog 'schtasks /Delete /F /TN "Parentix Child Agent"'
 !macroend

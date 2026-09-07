@@ -10,6 +10,9 @@
         ],
         "admin": [
           "parentix-admin"
+        ],
+        "downloads": [
+          "parentix-downloads"
         ]
       }
     }

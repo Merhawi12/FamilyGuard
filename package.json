@@ -25,6 +25,8 @@
     "dev:family": "npm run dev --workspace apps/family-app",
     "desktop:win": "npm --prefix apps/child-desktop/windows run build",
     "desktop:mac": "npm --prefix apps/child-desktop/macos run build",
+    "desktop:publish": "node scripts/publish-desktop.mjs",
+    "desktop:publish:check": "node scripts/publish-desktop.mjs --dry-run",
     "apk:child": "bash scripts/build-apk.sh child",
     "check:dns": "node scripts/check-dns.mjs",
     "mail:setup": "bash scripts/setup-google-mail.sh",
@@ -58,8 +60,5 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^4.6.2",
     "playwright": "^1.62.1"
-  },
-  "dependencies": {
-    "@getbrevo/brevo": "^6.0.3"
   }
 }

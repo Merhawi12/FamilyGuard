@@ -46,6 +46,7 @@
  * @property {() => Promise<boolean>} dns.canConfigure          are we elevated?
  * @property {() => Promise<string[]>} dns.upstreams            resolvers to forward to
  * @property {(o: {port: number, ipv6: boolean}) => Promise<boolean>} dns.apply   point the machine at us
+ * @property {() => Promise<boolean>} dns.isApplied             is *every* interface still on us?
  * @property {() => Promise<boolean>} dns.restore               and put it back
  *
  * @property {object} lockScreen             the full-screen "time is up" surface
@@ -56,8 +57,13 @@
  *
  * @property {object} autostart              run when the child signs in
  * @property {boolean} autostart.supported
- * @property {() => Promise<boolean>} autostart.enabled
+ * @property {() => Promise<boolean>} autostart.enabled          is the login item set?
  * @property {(on: boolean) => Promise<boolean>} autostart.set
+ * @property {() => Promise<boolean|null>} autostart.systemIntact  will this computer
+ *   start Parentix on its own, by *any* arrangement? Not the same question as
+ *   `enabled` on Windows, where the installer uses an elevated scheduled task
+ *   and the login item is never set. `null` means it could not be determined,
+ *   and nothing acts on that.
  *
  * @property {object} permissions
  * @property {() => Promise<PermissionState[]>} permissions.list
@@ -109,13 +115,25 @@ export const UNSUPPORTED = Object.freeze({
     canConfigure: async () => false,
     upstreams: async () => [],
     apply: async () => false,
+    // `true`, not `false`: on a platform that cannot redirect the resolver there
+    // is no redirect to have been undone, and the tamper watcher must not read
+    // "we never applied it" as "somebody removed it".
+    isApplied: async () => true,
     restore: async () => false,
   },
 
   lockScreen: { show: () => {}, hide: () => {} },
   notify: () => {},
 
-  autostart: { supported: false, enabled: async () => false, set: async () => false },
+  autostart: {
+    supported: false,
+    enabled: async () => false,
+    set: async () => false,
+    // `null`, not `false`: a platform with no autostart has nothing that could
+    // have been switched off, and the tamper watcher treats "cannot tell" as
+    // nothing to report. `false` here would alert every parent, for ever.
+    systemIntact: async () => null,
+  },
   permissions: { list: async () => [], open: async () => {} },
 });
 

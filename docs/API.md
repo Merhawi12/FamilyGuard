@@ -216,7 +216,21 @@ previous object.
 | GET    | `/me/contacts`    | device | The approved contact list                      |
 | POST   | `/me/heartbeat`   | device |                                                |
 | POST   | `/me/activity`    | device | App-usage upsert (one row per app per day)     |
+| POST   | `/me/activity/batch` | device | `{samples:[…]}` — a whole usage sync, ≤200 per request |
 | POST   | `/me/web-history` | device | A batch of resolved domains, ≤200 per request  |
+
+`/me/activity/batch` is what the child app and the desktop agent call. It takes
+the same sample shape as `/me/activity`, applies the same per-(child, app, day)
+upsert with the same "largest cumulative total wins" rule, and answers
+`{created, updated, unchanged, rejected, received}`. The single-item route is
+kept because builds already installed go on using it, and the two write to the
+same rows — a household mid-rollout has one device on each.
+
+The reason it exists is the loop it replaces: the agents posted once per app,
+awaited, so a phone with forty used apps made forty sequential round trips on
+every sync — at launch, on every background-fetch wake, and on every return from
+the OS settings screen. A sync that reports unchanged totals, which is the common
+case for a phone in a pocket, now writes nothing at all.
 
 `type` on `/confirm` is the device correcting its own row as it links. The parent
 picks a type on a dashboard that is, by definition, not the computer or phone
@@ -631,11 +645,56 @@ Refuses acting on your own account for role changes, deactivation and deletion.
 
 ## Public
 
-| Method | Path           | Notes                                    |
-| ------ | -------------- | ---------------------------------------- |
-| POST   | `/contact`     | Marketing-site contact form              |
-| GET    | `/health`      | Liveness — the ALB target check          |
-| GET    | `/ready`       | Liveness plus a database check           |
+| Method | Path                                   | Notes                                    |
+| ------ | -------------------------------------- | ---------------------------------------- |
+| POST   | `/contact`                             | Marketing-site contact form              |
+| GET    | `/downloads/child-desktop`             | Which Child Desktop build is published   |
+| GET    | `/downloads/child-desktop/:platform`   | 302 to the installer (`windows`, `mac`)  |
+| GET    | `/downloads/child-desktop/:platform/feed` | Where the agent checks for updates    |
+| GET    | `/health`                              | Liveness — the ALB target check          |
+| GET    | `/ready`                               | Liveness plus a database check           |
+
+### Downloads — `/downloads`
+
+Public because they have to be: the installer is linked from the marketing site,
+from support articles and from mail a parent sent themselves, none of which carry
+a session. There is nothing behind them to protect — a copy of the agent does
+nothing at all until somebody redeems a linking code against a real account.
+
+`GET /downloads/child-desktop` answers the manifest the download page and the
+family app's link sheet read:
+
+```json
+{
+  "version": "1.0.0",
+  "configured": true,
+  "platforms": {
+    "windows": {
+      "available": true,
+      "version": "1.0.0",
+      "url": "https://…/child-desktop/win/Parentix-Setup-1.0.0.exe",
+      "variants": [{ "arch": "x64", "url": "…" }, { "arch": "arm64", "url": "…" }]
+    },
+    "mac": { "available": false, "reason": "The Mac installer has not been published yet." }
+  }
+}
+```
+
+`GET /downloads/child-desktop/:platform` **302s** to the artifact — it never
+proxies it, because streaming a 190 MB installer through Cloud Run would put
+every download on an instance's clock and a busy day would take the whole API
+down, sign-in included. `?arch=x64|arm64` picks a smaller single-architecture
+build; without it the combined installer is served, so a parent never has to know
+what processor their child's laptop has.
+
+Two behaviours are deliberate and pinned by `tests/downloads.test.js`:
+
+- **503, not a redirect, when `DESKTOP_DOWNLOAD_BASE_URL` is unset** or the
+  platform has no build. Redirecting into a 404 gives a parent a broken download
+  they cannot distinguish from a corrupt file, so they retry.
+- **`Cache-Control: no-store` and a 302, never a 301.** The target names a
+  version, so a permanent redirect would have browsers pinning the *next*
+  release's button to this release's file, cached where nobody can clear it.
 
 ---
 
@@ -653,7 +712,17 @@ ignored, and a pre-auth (MFA-incomplete) token is refused.
 
 **Device → server:** `location:update`, `chat:send`, `activity:update`, and the
 alert events `alert:blocked_app`, `alert:screen_time_exceeded`,
-`alert:app_installed`.
+`alert:app_installed`, `alert:tamper`.
+
+`alert:tamper` is desktop-only, and the split in its handler is the point: the
+device sends `{ kind, message, restored }` and the server pins `type` to
+`tamper_detected` itself. `type` decides delivery, muting and the parent's
+per-type preference, so it belongs where the server can reason about it; the
+wording is the agent's, because only the agent knows which of its three signals
+fired and whether it managed to put things back. A `kind` this build does not
+recognise still produces a true alert rather than an empty one — which is the
+case that matters when an older API is running in front of a newer agent, exactly
+what the auto-updater creates. See `docs/CHILD-DESKTOP.md` §9b.
 
 Three names that used to be listed here are gone, and it is worth saying which
 rather than leaving them to be re-added:

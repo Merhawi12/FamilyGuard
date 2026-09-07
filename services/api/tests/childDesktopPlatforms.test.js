@@ -99,6 +99,109 @@ describe('Child Desktop — the two platform projects agree', () => {
   });
 });
 
+/**
+ * Distribution: getting the installer to a family, and a newer one to a machine
+ * that already has it.
+ *
+ * Everything in this block is a piece of configuration whose failure mode is
+ * silence. There is no exception to catch and no test that would go red on its
+ * own — a wrong feed URL is a fleet that quietly stops updating, and a version
+ * the API disagrees with is a download button pointing at a file that is not
+ * there. The only place these can be checked is against each other.
+ */
+describe('Child Desktop — the installer can be found and updated', () => {
+  const { VERSION, ARTIFACTS } = require('../src/config/desktopRelease');
+  const projects = [['windows', windows], ['macos', macos]];
+
+  /*
+   * The API cannot import an Electron project's package.json — it is outside the
+   * API's install tree and absent from its container — so it states the version
+   * itself. This is what makes that copy safe.
+   */
+  it('the API and the build agree on which version is current', () => {
+    expect(VERSION).toBe(windows.version);
+    expect(VERSION).toBe(macos.version);
+  });
+
+  it('the API names installers the build actually produces', () => {
+    // `artifactName` is electron-builder's template; the API composes the same
+    // string by hand. A rename on either side breaks the download button.
+    expect(windows.build.win.artifactName).toBe('Parentix-Setup-${version}-${arch}.${ext}');
+    expect(ARTIFACTS.windows.variants.map((v) => v.file)).toEqual([
+      `Parentix-Setup-${VERSION}-x64.exe`,
+      `Parentix-Setup-${VERSION}-arm64.exe`,
+    ]);
+    // The combined build carries no arch, and it is what the website links to —
+    // a parent must not have to know whether the laptop is ARM.
+    expect(ARTIFACTS.windows.file).toBe(`Parentix-Setup-${VERSION}.exe`);
+    expect(ARTIFACTS.windows.variants.map((v) => v.arch)).toEqual(windows.build.win.target[0].arch);
+  });
+
+  /*
+   * Without a `publish` block electron-builder writes no `latest.yml`, and
+   * electron-updater then 404s on every check for the life of the install. The
+   * artifacts and the feed have to land in one directory, so the publish URL and
+   * the API's prefix are the same string.
+   */
+  it.each(projects)('%s is built with an update feed', (name, project) => {
+    const [publish] = project.build.publish;
+    expect(publish.provider).toBe('generic');
+    expect(publish.url).toMatch(/^https:\/\//);
+    const prefix = ARTIFACTS[name === 'macos' ? 'mac' : 'windows'].prefix;
+    expect(publish.url).toMatch(new RegExp(`/${prefix}/$`));
+  });
+
+  it.each(projects)('%s ships the updater it is configured for', (_name, project) => {
+    expect(project.dependencies['electron-updater']).toBeDefined();
+    expect(macos.dependencies['electron-updater']).toBe(windows.dependencies['electron-updater']);
+  });
+
+  /*
+   * `parentix://` is how the family app hands a computer its linking code
+   * without anybody reading eight characters aloud. Registering it is a build
+   * concern on both platforms — NSIS writes the registry keys, and the Info.plist
+   * gets a CFBundleURLTypes entry — so a scheme that only the JavaScript knew
+   * about would be a button in the parent's dashboard that does nothing.
+   */
+  it.each(projects)('%s registers the parentix:// scheme with the OS', (_name, project) => {
+    const [protocol] = project.build.protocols;
+    expect(protocol.schemes).toEqual(['parentix']);
+  });
+
+  it('the agent answers to the scheme the installers register', () => {
+    const setupLink = read(`${DESKTOP}/shared/src/host/setupLink.js`);
+    expect(setupLink).toContain("export const PROTOCOL = 'parentix'");
+    // And the family app sends one of the shapes it parses.
+    expect(read('apps/family-app/src/components/ComputerSetup.jsx')).toContain('parentix://link/');
+  });
+
+  /*
+   * The elevated logon task is what makes website filtering possible at all (the
+   * app manifest is deliberately `asInvoker` — see installer.nsh). The watchdog
+   * is what makes ending the process from Task Manager a temporary win. Both are
+   * created at install and both must be removed at uninstall, or an uninstalled
+   * product leaves a task behind that tries to start a program that is gone.
+   */
+  it('the Windows installer registers and removes both scheduled tasks', () => {
+    const nsh = read(`${DESKTOP}/windows/build/installer.nsh`);
+    for (const task of ['Parentix Child Agent', 'Parentix Child Agent Watchdog']) {
+      expect(nsh).toContain(`/TN "${task}"`);
+      expect(nsh).toContain(`schtasks /Delete /F /TN "${task}"`);
+    }
+    expect(windows.build.win.requestedExecutionLevel).toBe('asInvoker');
+  });
+
+  /*
+   * The uninstaller needs an administrator, which is the whole of what stops a
+   * child removing Parentix from Windows Settings on their own. `perMachine`
+   * installs to Program Files and puts UAC in front of the uninstall; a
+   * per-user install would not, and nothing else in the product would notice.
+   */
+  it('the Windows build installs per-machine, so uninstalling needs an admin', () => {
+    expect(windows.build.nsis.perMachine).toBe(true);
+  });
+});
+
 describe('Child Desktop — the device types line up end to end', () => {
   const controller = read('services/api/src/controllers/deviceController.js');
   const childrenPage = read('apps/family-app/src/pages/Children.jsx');

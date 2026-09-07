@@ -130,6 +130,33 @@ export const dns = {
     return !!result.ok;
   },
 
+  /**
+   * Is every network service still resolving through us?
+   *
+   * Read directly rather than asked of the helper, because it is a read: any
+   * account can run `-getdnsservers`, so there is no reason to wake a root
+   * daemon to answer a question that needs no privilege. See the Windows
+   * implementation for why the strict form ("every service", not "any") is the
+   * one that matters.
+   *
+   * `networksetup` answers a service with no explicit servers with the sentence
+   * "There aren't any DNS Servers set on Wi-Fi." — which means DHCP's, which
+   * means not ours.
+   */
+  async isApplied() {
+    const list = await services();
+    if (list.length === 0) return true;
+    for (const service of list) {
+      const out = await tryRun('/usr/sbin/networksetup', ['-getdnsservers', service]);
+      const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (lines.length === 0 || /aren't any/i.test(lines[0])) return false;
+      const servers = lines.filter((l) => /^[0-9a-f.:]+$/i.test(l));
+      if (servers.length === 0) return false;
+      if (!servers.every((a) => a === '127.0.0.1' || a === '::1')) return false;
+    }
+    return true;
+  },
+
   async restore() {
     if (process.getuid?.() === 0) return restoreDirectly();
     try {

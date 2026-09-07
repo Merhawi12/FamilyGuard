@@ -10,6 +10,7 @@ import {
   Icon,
   Modal,
 } from '@parentix/shared';
+import ComputerSetup from '../components/ComputerSetup';
 import DeviceCard from '../components/DeviceCard';
 import PageIntro from '../components/PageIntro';
 
@@ -253,6 +254,17 @@ export default function Children() {
   const justLinked = linkedDevice && linkData?.device?.id === linkedDevice.deviceId
     ? linkedDevice
     : null;
+
+  /**
+   * Which kind of device this code was made for.
+   *
+   * Read from the created row first and the form second, because the two paths
+   * into this sheet set different things: creating a device fills `deviceForm`,
+   * while re-issuing a code for one that never connected has only the row. The
+   * row is also the more truthful of the two — it is what the API stored.
+   */
+  const linkingType = linkData?.device?.type || linkTarget?.type || deviceForm.type;
+  const isComputer = linkingType === 'windows' || linkingType === 'mac';
 
   /* ── A device that never connected ───────────────────────────────────────
      Linking codes expire after 30 minutes and the sheet that showed one does
@@ -601,7 +613,10 @@ export default function Children() {
         description={
           linkTarget
             ? 'This device was set up but never connected. Here is a fresh code for it.'
-            : selected ? `Connect a phone or tablet to ${selected.name}.` : undefined
+            // Named for what it can actually take, now that a laptop is one of
+            // the answers: a parent told "phone or tablet" reasonably concludes
+            // the computer they came here to add is not supported.
+            : selected ? `Connect a phone, tablet or computer to ${selected.name}.` : undefined
         }
       >
         {!linkData && linkTarget ? (
@@ -622,6 +637,18 @@ export default function Children() {
               {justLinked.osVersion ? ` · ${justLinked.osVersion}` : ''}.
             </p>
             <button onClick={closeLinkForm} className="btn-primary btn-block mt-5">
+              Done
+            </button>
+          </div>
+        ) : linkData && isComputer ? (
+          /* A computer needs the software before it needs the code — see
+             ComputerSetup for why that reordering is the whole point of it. */
+          <div>
+            <ComputerSetup type={linkingType} code={linkData.code} />
+            <p className="text-xs text-gray-400 mt-5 text-center">
+              This page updates as soon as the computer connects.
+            </p>
+            <button onClick={closeLinkForm} className="btn-secondary btn-block mt-2">
               Done
             </button>
           </div>

@@ -44,6 +44,7 @@ const ALERT_TYPES = [
   { key: 'blocked_app_attempt', label: 'Blocked app attempt' },
   { key: 'dangerous_content', label: 'Risky site opened' },
   { key: 'app_installed', label: 'New app used' },
+  { key: 'tamper_detected', label: 'Protection interrupted' },
 ];
 
 /**

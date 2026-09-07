@@ -120,6 +120,40 @@ const initSocketHandlers = (io) => {
       await createAlert(io, { parentId, childId, deviceId, type: 'app_installed', message: `${appName} was opened for the first time on a child device`, severity: 'medium', metadata: { appName, appPackage } });
     });
 
+    /**
+     * A computer reporting that its own controls stopped being in force.
+     *
+     * Desktop-only — see `config/alertTypes.js` for why the phones have no
+     * equivalent. Three kinds arrive here (`unexpected_stop`, `filter_bypassed`,
+     * `autostart_removed`) and the device sends the sentence with them.
+     *
+     * **The message is taken from the device and the type is not.** That is the
+     * split that matters: `type` decides delivery, muting and the parent's
+     * per-type preferences, so it is pinned here where the server can reason
+     * about it, while the wording is the agent's because only the agent knows
+     * which of the three happened and whether it managed to put things back. A
+     * device that sends a kind this build does not know still produces a true
+     * alert rather than an empty one, which is the case that matters when an
+     * older API is running in front of a newer agent — the exact situation the
+     * auto-updater creates.
+     */
+    socket.on('alert:tamper', async ({ kind, message, restored }) => {
+      if (role !== 'child') return;
+      const known = ['unexpected_stop', 'filter_bypassed', 'autostart_removed'].includes(kind);
+      const text = typeof message === 'string' && message.trim()
+        ? message.trim().slice(0, 300)
+        : 'Parentix protection on a child computer was interrupted.';
+      await createAlert(io, {
+        parentId,
+        childId,
+        deviceId,
+        type: 'tamper_detected',
+        message: text,
+        severity: 'high',
+        metadata: { kind: known ? kind : 'unknown', restored: !!restored },
+      });
+    });
+
     /*
      * `alert:dangerous_content` is raised by the server now, not the device —
      * see utils/riskyBrowsing.js. The phone reports the domains it resolves and

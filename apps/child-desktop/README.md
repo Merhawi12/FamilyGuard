@@ -98,6 +98,28 @@ Three things are worth knowing before touching it:
   machine pointed at `127.0.0.1` with nothing listening has no internet at all
   and nothing on screen would explain why. See §5.
 
+## 3a. How a family gets it, and how it stays current
+
+A parent downloads it from `parentix.ca/download` and links it with the same
+eight-character code the phones use — or, when they are already signed in to
+Parentix in a browser on the computer they are setting up, with one click on
+**Connect this computer**, which fires `parentix://link/<CODE>` at the freshly
+installed agent.
+
+Updates install themselves in the background and are never offered to the child:
+an update dialog on a monitored computer is a dialog with a Cancel button on the
+software doing the monitoring.
+
+Nothing here stops a determined child ending the process — see §4 for why that
+is the honest position — but it does not go unnoticed. The agent watches for the
+controls *stopping being in force* (a run that was killed, the resolver put back
+to automatic, start-at-sign-in deleted), puts what it can back, and tells the
+parent. Wording matters there: a flat battery reaches the first of those by
+exactly the same route a deliberate kill does.
+
+Detail, and the traps in each: [docs/CHILD-DESKTOP.md](../../docs/CHILD-DESKTOP.md)
+§9a and §9b.
+
 ## 4. The lock screen is a deterrent, not a cage
 
 When a screen-time rule bites, a full-screen window opens on every display,
@@ -169,9 +191,13 @@ PARENTIX_API_URL=http://127.0.0.1:5000/api npm run dev:desktop:mac    # macOS
 npm run desktop:win        # NSIS, x64 + arm64
 npm run desktop:mac        # .pkg + .dmg — needs macOS
 
+# Publishing a release (see docs/CHILD-DESKTOP.md §9a)
+DESKTOP_DOWNLOAD_BASE_URL=https://parentix-downloads.web.app npm run desktop:publish:check
+DESKTOP_DOWNLOAD_BASE_URL=https://parentix-downloads.web.app npm run desktop:publish
+
 # Tests
 npm run lint
-npm run test:e2e:desktop   # 59 checks against a real API and a real resolver
+npm run test:e2e:desktop   # 123 checks against a real API and a real resolver
 npm run assets             # regenerate build/icon.png and build/tray.png
 ```
 

@@ -44,6 +44,29 @@ contextBridge.exposeInMainWorld('parentix', {
 
   link: (code) => call('agent:link', code),
 
+  /**
+   * A linking code that arrived from the browser rather than from the keyboard.
+   *
+   * The main process does the linking itself — this is only how the link screen
+   * learns to fill its box in and, if the server refused, what to say. Two
+   * separate channels rather than one event with an optional error, because the
+   * code arrives first and the answer arrives up to a couple of seconds later.
+   */
+  onSetupCode: (handler) => {
+    ipcRenderer.on('setup:code', (_event, code) => handler(code));
+  },
+  onSetupError: (handler) => {
+    ipcRenderer.on('setup:error', (_event, message) => handler(message));
+  },
+
+  /** Which build this is, and whether a newer one is waiting — "This computer". */
+  update: {
+    status: () => call('update:status'),
+    onStatus: (handler) => {
+      ipcRenderer.on('update:status', (_event, status) => handler(status));
+    },
+  },
+
   messages: {
     list: () => call('chat:list'),
     send: (text) => call('chat:send', text),

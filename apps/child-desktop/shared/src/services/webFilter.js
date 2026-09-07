@@ -179,4 +179,20 @@ export async function stopWebFilter() {
   _state.blockedCount = 0;
 }
 
-export const __testing = { proxy: () => _proxy, BACKUP_KEY };
+export const __testing = {
+  proxy: () => _proxy,
+  BACKUP_KEY,
+
+  /**
+   * `systemDnsApplied` can only ever become true on port 53 — `netsh` and
+   * `networksetup` set an address, not a port, so a proxy anywhere else would
+   * never be consulted. The harness runs the real proxy on a high port precisely
+   * so it never touches the machine it is running on, which leaves the flag that
+   * gates the tamper watcher's filter check unreachable from a test.
+   *
+   * Rather than leave that path uncovered — it is the one that notices a child
+   * putting DNS back to automatic — the harness sets it directly. Nothing in the
+   * application calls this.
+   */
+  setSystemDnsApplied(value) { _state.systemDnsApplied = !!value; },
+};

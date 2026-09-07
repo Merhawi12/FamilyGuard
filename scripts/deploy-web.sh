@@ -181,12 +181,16 @@ assert_family_layout() {
 # publishing at all beats publishing a page whose contact form goes nowhere.
 assert_api_origin_stamped() {
   local dist="$1" page
-  for page in landing.html contact.html; do
+  # download.html is here for the same reason and a different symptom: it asks
+  # the API which build is published, and an unstamped call would be answered by
+  # the Hosting rewrite with app.html. The JSON parse fails, the catch runs, and
+  # the page reports the download as unavailable — on a day when it is not.
+  for page in landing.html contact.html download.html; do
     [ -f "${dist}/${page}" ] || die "${dist}/${page} is missing."
     grep -q "name=\"parentix-api\" content=\"${API_URL}\"" "${dist}/${page}" \
-      || die "${page} is not stamped with ${API_URL} — its contact form would post to the Hosting rewrite and be silently discarded. See the stamp-api-origin plugin in apps/family-app/vite.config.js."
+      || die "${page} is not stamped with ${API_URL} — its API calls would hit the Hosting rewrite and be silently discarded. See the stamp-api-origin plugin in apps/family-app/vite.config.js."
   done
-  log "Contact form origin: ${API_URL}"
+  log "Static page API origin: ${API_URL}"
 }
 
 TARGETS=()

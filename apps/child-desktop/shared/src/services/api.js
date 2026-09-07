@@ -52,6 +52,13 @@ api.interceptors.response.use(
   },
 );
 
+/**
+ * Samples per activity request. Mirrors `MAX_SAMPLES_PER_BATCH` in
+ * services/api/src/controllers/deviceController.js, which refuses anything
+ * larger.
+ */
+const MAX_ACTIVITY_BATCH = 200;
+
 // ── Device linking ────────────────────────────────────────────────────────────
 export const device = {
   /**
@@ -74,6 +81,24 @@ export const device = {
   getContacts: () => api.get('/devices/me/contacts'),
   heartbeat: () => api.post('/devices/me/heartbeat'),
   logActivity: (data) => api.post('/devices/me/activity', data),
+  /**
+   * Today's totals for every app, in one request.
+   *
+   * `uploadUsage` sent these one at a time in an awaited loop, which on a laptop
+   * that has been open all day is dozens of sequential round trips per upload
+   * pass. Chunked at the server's own `MAX_SAMPLES_PER_BATCH` so a machine with
+   * an unusually long app list degrades into two requests rather than a 400 and
+   * a day of missing usage.
+   */
+  logActivityBatch: async (samples) => {
+    let last;
+    for (let i = 0; i < samples.length; i += MAX_ACTIVITY_BATCH) {
+      last = await api.post('/devices/me/activity/batch', {
+        samples: samples.slice(i, i + MAX_ACTIVITY_BATCH),
+      });
+    }
+    return last;
+  },
   logWebHistory: (visits) => api.post('/devices/me/web-history', { visits }),
 };
 

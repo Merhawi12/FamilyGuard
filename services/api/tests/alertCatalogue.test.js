@@ -27,9 +27,25 @@ const {
 const REPO = path.join(__dirname, '../../..');
 const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
 
-/** Every `emitEvent('alert:x')` the child app really performs. */
-const childEmitted = () => {
-  const dir = path.join(REPO, 'apps/child-app/shared/src');
+/**
+ * Every `emitEvent('alert:x')` a child *device* really performs.
+ *
+ * Both device clients are scanned, and that is the point rather than a detail.
+ * "The device" is two applications now — the phone in `apps/child-app` and the
+ * laptop agent in `apps/child-desktop` — and they do not raise the same set.
+ * `tamper_detected` comes only from the desktop, because a laptop is the
+ * platform where the controls can be switched off without the OS mediating it;
+ * scanning the phone alone would have called that row a lie.
+ *
+ * The converse matters as much: a type that neither client emits is still
+ * caught, which is the failure this suite was written for.
+ */
+const DEVICE_SOURCES = [
+  'apps/child-app/shared/src',
+  'apps/child-desktop/shared/src',
+];
+
+const deviceEmitted = () => {
   const files = [];
   const walk = (d) => {
     for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
@@ -38,7 +54,7 @@ const childEmitted = () => {
       else if (/\.jsx?$/.test(entry.name)) files.push(full);
     }
   };
-  walk(dir);
+  for (const source of DEVICE_SOURCES) walk(path.join(REPO, source));
 
   return new Set(
     files
@@ -52,7 +68,7 @@ const childEmitted = () => {
  * the server records that as `blocked_app_attempt`, and `screen_time_exceeded`
  * is spelled the same on both sides. Only the names that differ are listed.
  */
-const SERVER_TYPE_FOR = { blocked_app: 'blocked_app_attempt' };
+const SERVER_TYPE_FOR = { blocked_app: 'blocked_app_attempt', tamper: 'tamper_detected' };
 
 describe('the alert catalogue', () => {
   it('marks a type as raiseable only when a producer is named', () => {
@@ -95,8 +111,8 @@ describe('the alert catalogue', () => {
    * whose producer is the child device must correspond to something the child
    * app actually emits.
    */
-  it('does not claim a device producer the child app has no emitter for', () => {
-    const emitted = new Set([...childEmitted()].map((name) => SERVER_TYPE_FOR[name] || name));
+  it('does not claim a device producer no child client has an emitter for', () => {
+    const emitted = new Set([...deviceEmitted()].map((name) => SERVER_TYPE_FOR[name] || name));
 
     const lying = ALERT_TYPES
       .filter((type) => type.producer === 'sockets/deviceEvents.js')

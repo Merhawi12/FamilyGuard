@@ -126,6 +126,32 @@ Clear-DnsClientCache
   },
 
   /**
+   * Is every connected interface still resolving through us?
+   *
+   * The question the tamper watcher asks, and it is deliberately the strict
+   * form: *one* interface left pointing at the router is a machine whose
+   * browsing is unfiltered and unrecorded while the agent goes on reporting
+   * website blocking as On. That is the failure the IPv6 handling in
+   * `startWebFilter` exists to prevent at start-up, and this is the same failure
+   * arriving later — because the child changed the adapter's DNS by hand, or
+   * because a VPN client, a docking station or a new Wi-Fi profile added an
+   * interface after we had already redirected the ones that existed.
+   *
+   * A machine with no connected interfaces at all answers `true`: there is
+   * nothing being resolved anywhere, so there is nothing escaping. Reporting
+   * that as tampering would fire an alert at every parent whose child closed
+   * the laptop lid.
+   */
+  async isApplied() {
+    const interfaces = await readInterfaces();
+    if (interfaces.length === 0) return true;
+    return interfaces.every((row) => {
+      const servers = [].concat(row.dns4 || [], row.dns6 || []);
+      return servers.length > 0 && servers.every((a) => a === '127.0.0.1' || a === '::1');
+    });
+  },
+
+  /**
    * Put every interface back.
    *
    * Safe to call when there is nothing to restore, and safe to call twice —

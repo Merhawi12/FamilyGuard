@@ -33,6 +33,14 @@
 <link rel="preload" as="image" href="/hero.webp" fetchpriority="high" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Every photograph below the hero is served from this origin — nineteen of
+     them. Without this the first one cannot start until a DNS lookup, a TCP
+     handshake and a TLS negotiation have finished, and none of that begins until
+     the parser reaches an `<img>` that is `loading="lazy"` and therefore is not
+     fetched until it nears the viewport. On a phone that is a few hundred
+     milliseconds of nothing at the moment the visitor starts to scroll. The
+     handshake is done up front instead, in parallel with the fonts. -->
+<link rel="preconnect" href="https://images.pexels.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..800;1,9..144,400..600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 
 <!-- ICON SYMBOL LIBRARY -->
@@ -608,6 +616,7 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
       <a href="#ai-features">AI Coach</a>
       <a href="#pricing">Pricing</a>
       <a href="#how-it-works">How it works</a>
+      <a href="/download">Download</a>
       <a href="#contact">Contact</a>
     </nav>
     <div class="nav-right">
@@ -957,9 +966,19 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
     <div class="how-steps">
       <div class="how-step" data-reveal><div class="how-num-solo">1</div><h3>Create your account</h3><p>Sign up as a parent in under a minute.</p></div>
       <div class="how-step" data-reveal><div class="how-num-solo">2</div><h3>Add your child</h3><p>Create a child profile with their name and age.</p></div>
-      <div class="how-step" data-reveal><div class="how-num-solo">3</div><h3>Link their device</h3><p>Enter the 8-character code on the child's phone.</p></div>
+      <div class="how-step" data-reveal><div class="how-num-solo">3</div><h3>Link their device</h3><p>Enter the 8-character code on their phone, tablet or computer.</p></div>
       <div class="how-step" data-reveal><div class="how-num-solo">4</div><h3>Stay in control</h3><p>Monitor, block, and protect from your dashboard.</p></div>
     </div>
+    <!--
+      The one place on this page where a visitor is thinking about a device
+      rather than about the product, which is the moment the laptop question
+      occurs to them. It goes here rather than in the hero on purpose: the hero
+      sells Parentix, and an installer link there would ask somebody to download
+      software before they have an account to connect it to.
+    -->
+    <p class="contact-more" data-reveal>
+      Setting up a Windows laptop or PC? <a href="/download">Download Parentix for Windows →</a>
+    </p>
   </div>
 </section>
 
@@ -1036,6 +1055,7 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
     <div class="footer-links">
       <a href="/privacy-policy">Privacy Policy</a>
       <a href="/terms">Terms of Service</a>
+      <a href="/download">Download for Windows</a>
       <a href="/contact.html">Contact</a>
     </div>
     <div class="footer-copy">&copy; 2026 Parentix. Parental Control &amp; Digital Safety.</div>

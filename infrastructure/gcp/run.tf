@@ -197,6 +197,16 @@ resource "google_cloud_run_v2_service" "api" {
         value = google_storage_bucket.uploads.name
       }
 
+      # The Child Desktop download. Declared here rather than set by hand on the
+      # service, because a value applied with `gcloud run services update` is
+      # reverted by the next `terraform apply` — and the symptom is a download
+      # button that worked yesterday and answers 503 today, with no deploy of
+      # the API to blame it on.
+      env {
+        name  = "DESKTOP_DOWNLOAD_BASE_URL"
+        value = var.desktop_download_base_url
+      }
+
       env {
         name  = "EMAIL_PROVIDER"
         value = "smtp"

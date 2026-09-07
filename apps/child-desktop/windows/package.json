@@ -18,6 +18,7 @@
   "dependencies": {
     "@parentix/child-desktop-shared": "file:../shared",
     "axios": "^1.6.2",
+    "electron-updater": "^6.3.9",
     "socket.io-client": "^4.6.2"
   },
   "devDependencies": {
@@ -38,6 +39,21 @@
       "build/tray.png",
       "!dist",
       "!**/*.map"
+    ],
+    "protocols": [
+      {
+        "name": "Parentix setup link",
+        "schemes": [
+          "parentix"
+        ]
+      }
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://parentix-downloads.web.app/child-desktop/win/",
+        "channel": "latest"
+      }
     ],
     "win": {
       "target": [

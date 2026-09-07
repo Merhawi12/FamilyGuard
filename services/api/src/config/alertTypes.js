@@ -109,6 +109,29 @@ const ALERT_TYPES = [
     severity: 'medium',
     producer: 'sockets/deviceEvents.js',
   },
+  /**
+   * Raised only by the desktop agent, and worth saying why the phones do not.
+   *
+   * On Android the controls are held by the OS: an accessibility service and a
+   * VPN service that the child can switch off, but only from a settings screen
+   * that tells them what they are doing, and the app notices immediately because
+   * its own callbacks stop. A Windows or macOS laptop has no such frame — the
+   * agent is an ordinary program that an ordinary Task Manager can end, and the
+   * resolver it depends on is a setting anybody with the administrator password
+   * can put back in fifteen seconds. Nothing announces either.
+   *
+   * So the desktop agent watches for the *effects* and reports them. See
+   * `apps/child-desktop/shared/src/services/tamper.js`, which is careful about
+   * the wording for a reason: a flat battery reaches this alert by exactly the
+   * same route a deliberate kill does, and the message must not accuse.
+   */
+  {
+    key: 'tamper_detected',
+    label: 'Protection interrupted',
+    condition: "A computer's Parentix agent stopped unexpectedly, or its controls were switched off",
+    severity: 'high',
+    producer: 'sockets/deviceEvents.js',
+  },
 ];
 
 const ALERT_TYPE_KEYS = ALERT_TYPES.map((t) => t.key);

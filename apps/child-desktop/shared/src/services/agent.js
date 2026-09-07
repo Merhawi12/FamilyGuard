@@ -13,6 +13,7 @@ import {
   blockedAppsFor, blockedDomainsFor, allowedAppsFor, allowedAppNames, enforce, resetEnforcement,
 } from './appControl.js';
 import { reportNewApps } from './newApps.js';
+import { startTamperWatch, stopTamperWatch, reportStartupState } from './tamper.js';
 import { connectSocket, disconnectSocket, onSocket } from './socket.js';
 import { lockState, bonusMinutesFrom, minutesUntilLimit } from './schedule.js';
 import { loadChildName } from './profile.js';
@@ -421,7 +422,13 @@ export async function startAgent() {
   // Before anything else touches the network stack: a previous run that did not
   // shut down cleanly may have left this machine pointed at a resolver that is
   // no longer listening, and that is a computer with no internet at all.
-  await repairSystemDns();
+  //
+  // Its answer is also the one piece of evidence the agent has that the last run
+  // was killed rather than quit, so it is captured rather than discarded — see
+  // tamper.js. Recorded before the socket exists; the report is queued and goes
+  // out when it connects.
+  const repaired = await repairSystemDns();
+  await reportStartupState(repaired);
 
   await startRulesSync(applyRules);
   await startContactsSync(() => publish());
@@ -461,6 +468,10 @@ export async function startAgent() {
   _syncTimer = setInterval(syncPass, SYNC_INTERVAL_MS);
   _syncTimer.unref?.();
 
+  // Last, because it checks whether the things above are still in force and
+  // would otherwise race the startup it is meant to be watching over.
+  startTamperWatch();
+
   _state.running = true;
   await syncPass();
   return getAgentStatus();
@@ -474,6 +485,9 @@ export async function startAgent() {
  * resolve a name.
  */
 export async function stopAgent() {
+  // First: a check that fires while the filter is being torn down would see the
+  // resolver going back and report the agent's own clean shutdown as tampering.
+  stopTamperWatch();
   stopRulesSync();
   stopContactsSync();
   stopWebHistory();

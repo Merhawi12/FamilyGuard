@@ -1,6 +1,7 @@
 import os from 'node:os';
 import { foreground } from './foreground.js';
 import { apps } from './processes.js';
+import { autostart } from './autostart.js';
 import { dns, configureDnsBackup } from './dns.js';
 import { permissions } from './permissions.js';
 
@@ -40,5 +41,14 @@ export function createWindowsPlatform({ dataDir }) {
     apps,
     dns,
     permissions,
+    /**
+     * Partial on purpose: the host owns `enabled` and `set` (Electron's login
+     * item works the same on both platforms), and this contributes only the one
+     * question Windows answers differently. `bootstrap` merges the two rather
+     * than replacing, so a platform that adds nothing here keeps the generic
+     * behaviour — which is what macOS does, because there the app writes its own
+     * login item and the login item is therefore the truthful answer.
+     */
+    autostart,
   };
 }

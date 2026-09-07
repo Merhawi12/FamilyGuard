@@ -25,6 +25,15 @@ build/
 # git will not look inside an excluded directory to find a negated file.
 !apps/child-desktop/*/build/
 
+# The Firebase Hosting staging folder for a desktop release, filled by
+# scripts/publish-desktop.mjs. Named `dist-publish` rather than `dist` because
+# it is not build output — it is the previous line's `dist/` rearranged into the
+# `child-desktop/win/` shape the download URLs promise — and it needs its own
+# rule, since `dist/` matches a directory called exactly that and nothing else.
+# ~390 MB of installers; the one thing in this repository that must never be
+# committed by accident.
+/apps/child-desktop/dist-publish/
+
 # Firebase CLI upload cache. firebase.json and .firebaserc are committed —
 # they are the hosting configuration; this is only a per-machine hash index of
 # what was last uploaded.

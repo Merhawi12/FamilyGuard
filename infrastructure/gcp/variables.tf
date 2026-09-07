@@ -314,6 +314,24 @@ variable "email_from" {
   default     = "Parentix <support@parentix.ca>"
 }
 
+# Where the Child Desktop installers and their electron-updater feed are served
+# from — the origin, no trailing slash. Artifacts land under
+# <base>/child-desktop/win/ (see scripts/publish-desktop.mjs).
+#
+# Empty is a real setting, not an oversight: /api/downloads answers 503 and the
+# website's download page says the installer is not available. That beats
+# redirecting to a URL that 404s, which a parent cannot distinguish from a
+# corrupt 190 MB download.
+#
+# THIS MUST MATCH `build.publish.url` in apps/child-desktop/*/package.json.
+# Disagreeing gives working downloads and a fleet that silently never updates —
+# the publish script refuses to run when they differ.
+variable "desktop_download_base_url" {
+  description = "Origin serving the Child Desktop installers and update feed. Empty disables downloads."
+  type        = string
+  default     = ""
+}
+
 variable "admin_email" {
   description = <<-EOT
     Receives contact-form submissions and new-registration notices.

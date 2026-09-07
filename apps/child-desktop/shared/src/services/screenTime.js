@@ -179,31 +179,37 @@ export async function uploadUsage() {
   dayStart.setHours(0, 0, 0, 0);
   const endTime = new Date().toISOString();
 
-  let uploaded = 0;
-  for (const [appId, minutes] of Object.entries(appMinutes)) {
-    try {
-      await deviceApi.logActivity({
-        appPackage: appId,
-        appName: appNames[appId] || appId,
-        category: 'app_usage',
-        startTime: dayStart.toISOString(),
-        endTime,
-        durationMinutes: minutes,
-      });
-      uploaded += 1;
-    } catch (err) {
-      // One app failing must not abort the rest of the batch; the next pass
-      // re-sends it, and the server upserts by (child, app, day).
-      _state.lastError = err.message;
-      console.warn('[screenTime] activity upload failed:', appId, err.message);
-    }
+  const samples = Object.entries(appMinutes).map(([appId, minutes]) => ({
+    appPackage: appId,
+    appName: appNames[appId] || appId,
+    category: 'app_usage',
+    startTime: dayStart.toISOString(),
+    endTime,
+    durationMinutes: minutes,
+  }));
+
+  if (samples.length === 0) return 0;
+
+  /**
+   * One request for the whole list, not one per app.
+   *
+   * This looped and awaited per app, so a laptop that had been open all day
+   * spent dozens of sequential round trips on every upload pass to send what is
+   * one small object. The retry story is unchanged and is why batching is safe
+   * here: the totals are cumulative and the server upserts by (child, app, day),
+   * so a failed pass costs nothing but the wait until the next one.
+   */
+  try {
+    await deviceApi.logActivityBatch(samples);
+  } catch (err) {
+    _state.lastError = err.message;
+    console.warn('[screenTime] activity upload failed:', err.message);
+    return 0;
   }
 
-  if (uploaded > 0) {
-    _state.lastUploadAt = new Date().toISOString();
-    if (uploaded === Object.keys(appMinutes).length) _state.lastError = null;
-  }
-  return uploaded;
+  _state.lastUploadAt = new Date().toISOString();
+  _state.lastError = null;
+  return samples.length;
 }
 
 /**

@@ -76,6 +76,18 @@ const server = spawn(process.execPath, ['src/server.js'], {
     REDIS_URL: '',
 
     /**
+     * A published Child Desktop build, so the download page and the family
+     * app's computer-setup sheet are driven in the state a parent meets.
+     *
+     * Nothing is served from this origin and nothing needs to be: the API only
+     * ever redirects to it, and what is being checked here is that the button
+     * becomes real and points at the right endpoint. The *unconfigured* case —
+     * 503 rather than a redirect into a 404 — is the API's own behaviour and is
+     * covered in `tests/downloads.test.js`, where it costs nothing.
+     */
+    DESKTOP_DOWNLOAD_BASE_URL: 'https://downloads.browser-e2e.test',
+
+    /**
      * No SMS provider, stated rather than assumed.
      *
      * This block neutralises every external service by name, and the SMS ones
@@ -298,7 +310,7 @@ const serveApp = (dist, port, landingAtRoot) => {
     }
   }
   const rewrites = landingAtRoot
-    ? [['/', '/landing.html'], ['/contact', '/contact.html'], ['**', shell]]
+    ? [['/', '/landing.html'], ['/contact', '/contact.html'], ['/download', '/download.html'], ['**', shell]]
     : [['**', shell]];
 
   const srv = http.createServer((req, res) => {
@@ -577,6 +589,111 @@ try {
     await page.close();
   }
 
+  step('Family app — the Windows download page');
+  {
+    /*
+     * The page a parent lands on from the marketing site, and the one place the
+     * product hands out a binary. What is worth driving in a browser rather
+     * than asserting against the HTML is the button's *state*: it is drawn
+     * disabled and is only made real once `GET /api/downloads/child-desktop`
+     * has said something is published. A button that looked ready and then 404'd
+     * would be read as a corrupt 190 MB download rather than an unconfigured
+     * server, and the parent would try again.
+     *
+     * The API is configured with a published build for this run, so this is the
+     * state a parent meets. The unconfigured one — 503 rather than a redirect
+     * into a 404 — is the API's own behaviour and is checked in
+     * `services/api/tests/downloads.test.js`.
+     */
+    const page = await browser.newPage();
+    const w = watch(page, 'download');
+    await page.goto(`${FAMILY}/download`, { waitUntil: 'networkidle' });
+
+    check('the download page renders', (await page.locator('#dlPrimary').count()) === 1, await page.title());
+    check('the download page is clean', w.problems.length === 0, w.problems.join(' | '));
+
+    const label = await page.locator('#dlPrimaryLabel').innerText();
+    const disabled = await page.locator('#dlPrimary').getAttribute('aria-disabled');
+    const href = await page.locator('#dlPrimary').getAttribute('href');
+    check('the button becomes real once the API confirms a build',
+      disabled === 'false' && /Download for Windows/i.test(label), `${disabled} / ${label}`);
+
+    /*
+     * The endpoint, not the artifact URL the manifest also carries. Both point
+     * at the same file today; only the endpoint keeps pointing at the current
+     * one after the next release — and this href ends up in bookmarks and
+     * support articles nobody comes back to edit.
+     */
+    check('and points at the versionless endpoint, not at a pinned file',
+      href.endsWith('/api/downloads/child-desktop/windows'), String(href));
+
+    const meta = await page.locator('#dlMeta').innerText();
+    check('the version being downloaded is stated', /Version \d+\.\d+\.\d+/.test(meta), meta);
+    /*
+     * The smaller per-architecture builds are offered as a secondary link and
+     * never as the button: a parent who has to work out whether their child's
+     * laptop is ARM has already been failed, and the wrong choice produces
+     * "This app can't run on your PC", which they cannot act on.
+     */
+    check('the smaller per-architecture builds are offered but not chosen',
+      /x64/.test(meta) && /arm64/.test(meta) && !/x64|arm64/.test(href), meta);
+
+    /*
+     * And the platform with nothing built stays honest on the same page. A Mac
+     * download button here would send a parent to a file that has never existed.
+     */
+    const macFact = await page.locator('#macFact').innerText();
+    check('a platform with no build is not offered anyway',
+      /not available|in development/i.test(macFact), macFact);
+
+    if (process.env.BROWSER_E2E_SHOTS) {
+      mkdirSync(process.env.BROWSER_E2E_SHOTS, { recursive: true });
+      /*
+       * Scroll the whole page before capturing it.
+       *
+       * These marketing pages fade their sections in from `opacity: 0` when an
+       * IntersectionObserver first sees them, and `fullPage: true` does not
+       * scroll — it captures a tall viewport. So a straight screenshot of this
+       * page comes out with a correct hero and everything below it blank, which
+       * looks exactly like a page that failed to render and is not one. A
+       * screenshot nobody can trust is worse than no screenshot: the next person
+       * to look at it spends an hour on a bug that is not there.
+       *
+       * Stepped rather than jumped to the bottom, because the observer's
+       * callbacks are asynchronous and a single jump outruns them — which is how
+       * this was diagnosed in the first place.
+       */
+      await page.evaluate(async () => {
+        for (let y = 0; y < document.body.scrollHeight; y += 300) {
+          window.scrollTo(0, y);
+          await new Promise((done) => { setTimeout(done, 80); });
+        }
+        // Wait at the bottom before going back, or the last section gets 80ms
+        // to be noticed and the observer's callback arrives after we have
+        // already scrolled away from it — which left "The details" blank in a
+        // shot where everything above it was fine.
+        await new Promise((done) => { setTimeout(done, 600); });
+        window.scrollTo(0, 0);
+      });
+      await page.waitForTimeout(900);
+      await page.screenshot({ path: path.join(process.env.BROWSER_E2E_SHOTS, 'download.png'), fullPage: true });
+    }
+
+    /*
+     * The instruction that decides whether the install works at all. The logon
+     * task is created for whichever account runs the installer, so a parent who
+     * installs from their own Windows account gets an agent that never starts
+     * for their child — and nothing anywhere would report that.
+     */
+    const body = await page.locator('body').innerText();
+    check('the page says to install from the child\'s Windows account',
+      /signed in to your child.s Windows account/i.test(body));
+    check('and warns about the administrator password up front',
+      /administrator password/i.test(body));
+
+    await page.close();
+  }
+
   step('Family app — the contact form is received, stored and confirmed');
   {
     /*
@@ -758,6 +875,129 @@ try {
     check('signing in again with the same number reaches the dashboard',
       page.url().includes('/dashboard'), page.url());
     check('the phone sign-in screens are clean', w.problems.length === 0, w.problems.join(' | '));
+    await page.close();
+  }
+
+  /**
+   * Sign in with Google inside the Android shell.
+   *
+   * Google refuses OAuth in an embedded WebView, so the packaged app cannot use
+   * the script every browser uses; it asks Play Services through the app's own
+   * Capacitor plugin instead. That plugin is Java and nothing here can run it —
+   * but everything above it is the same JavaScript that ships to the phone, and
+   * for a long time all of that was the missing half. The APK drew an "or
+   * continue with" divider, printed "Could not reach Google to sign in" beneath
+   * it in red, and offered nothing to tap.
+   *
+   * What stands in for the device is the object Capacitor injects into the
+   * WebView, shaped as the real one is: `androidBridge` is what makes
+   * `@capacitor/core` report the platform as Android, `PluginHeaders` is how it
+   * learns a native plugin called GoogleAuth is registered, and `nativePromise`
+   * is the channel every plugin call travels down. Faking those three exercises
+   * the real adapter, the real plugin registration and the real button —
+   * only the Java behind them is substituted.
+   */
+  step('Family app — the Android shell signs in with Google natively');
+  {
+    const page = await browser.newPage();
+    const w = watch(page, 'native google sign-in');
+
+    await page.addInitScript(() => {
+      window.androidBridge = { postMessage: () => {} };
+      window.__google = { calls: [], cancel: false, token: 'stand-in.id.token' };
+      window.Capacitor = {
+        isNativePlatform: () => true,
+        getPlatform: () => 'android',
+        PluginHeaders: [{
+          name: 'GoogleAuth',
+          methods: [
+            { name: 'isAvailable', rtype: 'promise' },
+            { name: 'signIn', rtype: 'promise' },
+          ],
+        }],
+        nativePromise: async (plugin, method) => {
+          window.__google.calls.push(`${plugin}.${method}`);
+          if (method === 'isAvailable') return { available: true, reason: '' };
+          if (window.__google.cancel) {
+            const err = new Error('Sign-in cancelled');
+            err.code = 'cancelled';
+            throw err;
+          }
+          return { idToken: window.__google.token };
+        },
+      };
+    });
+
+    await page.route('**/api/auth/providers', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        password: true, google: true, phone: false, maintenance: false,
+        billing: false, loginCode: true,
+      }),
+    }));
+
+    // The API's own half is covered by services/api/tests/googleSignIn.test.js,
+    // and it cannot be reached from here anyway: this run has no OAuth client,
+    // so a real POST would be answered 503 whatever the token said.
+    let posted = null;
+    await page.route('**/api/auth/google', (route) => {
+      posted = JSON.parse(route.request().postData() || '{}');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          token: parentToken,
+          user: { id: 'u1', name: 'Parent', email: PARENT_EMAIL, role: 'parent' },
+        }),
+      });
+    });
+
+    let gsiRequested = false;
+    await page.route('https://accounts.google.com/**', (route) => {
+      gsiRequested = true;
+      return route.abort('aborted');
+    });
+
+    await page.goto(`${FAMILY}/login`, { waitUntil: 'networkidle' });
+
+    const button = page.getByRole('button', { name: 'Sign in with Google' });
+    check('the app draws its own Google button', (await button.count()) === 1,
+      oneLine(await page.locator('form').innerText().catch(() => '')).slice(0, 160));
+    check('and never asks for the script Google will not run in a WebView', !gsiRequested);
+
+    // The wording follows the tab, exactly as the web button's `text` does —
+    // this is the half of the request that says "create an account".
+    await page.getByRole('button', { name: 'Sign Up' }).click();
+    check('the sign-up screen offers to create the account with Google',
+      (await page.getByRole('button', { name: 'Sign up with Google' }).count()) === 1);
+    await page.getByRole('button', { name: 'Log In' }).click();
+
+    // ── A dismissed chooser is not a failure ──
+    await page.evaluate(() => { window.__google.cancel = true; });
+    await button.click();
+    await page.waitForTimeout(600);
+    check('closing the Google chooser leaves no error on the screen',
+      (await page.locator('.notice-error').count()) === 0,
+      oneLine(await page.locator('.notice-error').first().innerText().catch(() => '')));
+    check('and signs nobody in', page.url().includes('/login'), page.url());
+    // Asserted here rather than at the end: the dashboard this reaches next is
+    // full of plugins that are genuinely absent from the stand-in bridge.
+    check('the native sign-in screen is clean', w.problems.length === 0, w.problems.join(' | '));
+
+    // ── And the sign-in itself ──
+    await page.evaluate(() => { window.__google.cancel = false; });
+    await button.click();
+    await page.waitForURL('**/dashboard**', { timeout: 15000 }).catch(() => {});
+
+    const calls = await page.evaluate(() => window.__google.calls);
+    check('the device is asked whether it can do this before the button appears',
+      calls.includes('GoogleAuth.isAvailable'), calls.join(', '));
+    check('the token Play Services returned is what reaches the API',
+      posted?.credential === 'stand-in.id.token', JSON.stringify(posted));
+    check('a native Google sign-in reaches the dashboard',
+      page.url().includes('/dashboard'), page.url());
+
     await page.close();
   }
 
@@ -1763,6 +2003,78 @@ try {
     check('it is not shown as still waiting to be connected',
       !/Watched Phone[\s\S]{0,80}Waiting to be connected/.test(listBody),
       listBody.slice(0, 300).replace(/\n/g, ' '));
+
+    /*
+     * ── Linking a computer, which is a different chore ────────────────────
+     *
+     * A phone already has the app; the parent hands it over and reads out eight
+     * characters. A laptop has nothing on it, and a sheet that opened on a code
+     * would be answering the question the parent has in ten minutes' time. So
+     * choosing "Windows computer" replaces the code panel with the actual order
+     * of the work — download, install, then connect — and this drives the
+     * difference rather than asserting the component exists.
+     */
+    await page.click('button:has-text("Link device")');
+    await page.waitForTimeout(400);
+    await page.locator('label:has-text("Device name") input').fill("Sam's Laptop");
+    await page.selectOption('label:has-text("Device type") select', 'windows');
+    await page.click('button:has-text("Generate code")');
+    await page.waitForTimeout(900);
+
+    const pcCode = (await page.locator('p.font-mono').first().innerText()).trim();
+    check('a computer gets the same eight-character code', /^[0-9A-F]{8}$/.test(pcCode), pcCode);
+
+    const pcSheet = await page.locator('[role="dialog"]').innerText();
+    check('the sheet leads with getting the software, not with the code',
+      pcSheet.indexOf('Step 1') < pcSheet.indexOf(pcCode), pcSheet.slice(0, 200).replace(/\n/g, ' '));
+    check('step one is getting Parentix onto the computer',
+      /download Parentix and run the installer/i.test(pcSheet),
+      pcSheet.slice(0, 300).replace(/\n/g, ' '));
+    check('with a download button in the sheet itself',
+      /Download for Windows/.test(pcSheet), pcSheet.slice(0, 400).replace(/\n/g, ' '));
+    check('pointing at the same endpoint the website uses',
+      (await page.locator('[role="dialog"] a[href$="/downloads/child-desktop/windows"]').count()) === 1);
+    /*
+     * The instruction that decides whether the install works at all: the logon
+     * task is created for whichever account runs the installer, so a parent who
+     * installs from their own Windows account gets an agent that never starts
+     * for their child, with nothing anywhere to report it.
+     */
+    check('and the administrator prompt explained before it appears',
+      /administrator password/i.test(pcSheet), pcSheet.slice(0, 500).replace(/\n/g, ' '));
+
+    if (process.env.BROWSER_E2E_SHOTS) {
+      mkdirSync(process.env.BROWSER_E2E_SHOTS, { recursive: true });
+      await page.locator('[role="dialog"]').screenshot({
+        path: path.join(process.env.BROWSER_E2E_SHOTS, 'link-computer.png'),
+      });
+    }
+
+    /*
+     * The one-click alternative to reading the code aloud. It is only correct
+     * when the parent is sitting at the child's computer, which nothing here can
+     * detect — so what matters is that the sentence next to it says so, and that
+     * the href carries this code and not a stale one.
+     */
+    const connectHref = await page.locator('a[href^="parentix://"]').getAttribute('href');
+    check('and a one-click connect carrying this code', connectHref === `parentix://link/${pcCode}`,
+      String(connectHref));
+    check('with the caveat that it only works on the machine being set up',
+      /only if you are reading this on the Windows computer/i.test(pcSheet),
+      pcSheet.slice(-400).replace(/\n/g, ' '));
+
+    // The same realtime confirmation the phone gets — the agent redeems its own
+    // code, so the parent must not have to close the sheet to find out.
+    const pcConfirmed = await api('POST', '/devices/confirm', {
+      body: { code: pcCode, osVersion: 'Windows 11 Pro 10.0.26200', type: 'windows' },
+    });
+    check('a computer can redeem it', pcConfirmed.status === 200, JSON.stringify(pcConfirmed.data));
+    await page.waitForTimeout(1200);
+    check('the sheet says the computer connected',
+      /Sam's Laptop is connected/.test(await page.locator('[role="dialog"]').innerText()),
+      (await page.locator('[role="dialog"]').innerText()).slice(0, 200).replace(/\n/g, ' '));
+    await page.click('button:has-text("Done")');
+    await page.waitForTimeout(800);
 
     check('the Children page is clean', w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
     await page.close();
@@ -3000,7 +3312,33 @@ try {
     check('a failed charge is called out rather than left to be found',
       /payment.{0,3} failed in the last/i.test(body));
     check('the revenue chart draws its bars',
-      await page.locator('.recharts-bar-rectangle').count() > 0);
+      await page.locator('[data-chart-bar]').count() > 0);
+
+    /**
+     * The axis labels are whole, and this is not a style check.
+     *
+     * Both apps' bar charts printed wrong numbers for a long time — a negative
+     * left margin moved Recharts' tick labels off the edge of the SVG, where
+     * they were cut rather than shrunk, so "105m" drew as "5m" and "140" as
+     * "40". Not a clipped label: a plausible wrong number, in the same shape as
+     * a right one, on a screen someone makes decisions from. The charts are
+     * plain DOM text now, so the failure is measurable — a label wider than the
+     * box reserved for it is the thing that used to be invisible.
+     */
+    const axisOverflow = await page.evaluate(() => {
+      const out = [];
+      for (const axis of document.querySelectorAll('[data-chart-axis]')) {
+        const box = axis.getBoundingClientRect();
+        for (const label of axis.querySelectorAll('span')) {
+          // The labels are right-anchored, so an over-wide one runs off the
+          // left edge of the axis column — which is exactly where the plot is,
+          // so it is not even visibly cut. Measured rather than eyeballed.
+          if (label.getBoundingClientRect().left < box.left - 1) out.push(label.textContent);
+        }
+      }
+      return out;
+    });
+    check('no value-axis label is clipped', axisOverflow.length === 0, JSON.stringify(axisOverflow));
 
     // Six columns and an action on a 1280px screen — the same trap the directory
     // and the fleet fell into, where a column that will not shrink parks the row

@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Download Parentix for Windows — Parentix</title>
+<meta name="description" content="Install Parentix on your child's Windows laptop or PC. Block websites and apps, set screen-time limits and schedules, and manage everything from the Parentix Family App." />
+<!-- Matches --current below; see landing.html. -->
+<meta name="theme-color" content="#0C6478" />
+<!--
+  Where this page's API lives; see the longer note in landing.html. Empty is
+  same-origin (dev proxy, browser harness); the stamp-api-origin plugin in
+  apps/family-app/vite.config.js fills it at build time and deploy-web.sh
+  refuses to publish if it did not take.
+
+  It matters more here than on the contact page. This page asks the API what
+  version is published and where the installer is; a relative call that Firebase
+  Hosting answered with app.html would parse as nothing, and the download button
+  would sit there permanently saying "checking…" with no error anywhere.
+-->
+<meta name="parentix-api" content="" />
+<link rel="canonical" href="https://parentix.ca/download" />
+<link rel="icon" href="/logo.png" />
+<link rel="apple-touch-icon" href="/logo.png" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..800;1,9..144,400..600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<symbol id="ic-menu" viewBox="0 0 24 24"><line x1="4" y1="7" x2="20" y2="7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="4" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="ic-close" viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="ic-download" viewBox="0 0 24 24"><path d="M12 3.5v11.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7.6 10.6 12 15l4.4-4.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 17.2v1.6a1.7 1.7 0 0 0 1.7 1.7h11.6a1.7 1.7 0 0 0 1.7-1.7v-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="ic-windows" viewBox="0 0 24 24"><path d="M3.4 6.1 10.6 5v6.3H3.4Zm0 11.8 7.2 1.1v-6.2H3.4Zm8.6 1.3 8.6 1.3v-8.4H12Zm0-15.1v7.3h8.6V2.9Z" fill="currentColor"/></symbol>
+<symbol id="ic-check" viewBox="0 0 24 24"><path d="M5 12.6l4.2 4.2L19 6.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="ic-shieldcheck" viewBox="0 0 24 24"><path d="M12 3.3 19.5 6.6v5.1c0 5-3 7.7-7.5 9-4.5-1.3-7.5-4-7.5-9V6.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.8 12.3l2.1 2.1 4.3-4.3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="ic-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="6.3" y1="6.3" x2="17.7" y2="17.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+<symbol id="ic-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 7.6v4.6l3.2 2.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="ic-grid" viewBox="0 0 24 24"><rect x="3.6" y="3.6" width="6.4" height="6.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="3.6" width="6.4" height="6.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3.6" y="14" width="6.4" height="6.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="14" width="6.4" height="6.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+<symbol id="ic-moon" viewBox="0 0 24 24"><path d="M15.8 3.5a8.5 8.5 0 1 0 4.7 12.8A7 7 0 0 1 15.8 3.5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+<symbol id="ic-lock" viewBox="0 0 24 24"><rect x="5.3" y="10.6" width="13.4" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 10.6V7.8a4 4 0 0 1 8 0v2.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+<symbol id="ic-alertbubble" viewBox="0 0 24 24"><path d="M4 5.6A1.6 1.6 0 0 1 5.6 4h12.8A1.6 1.6 0 0 1 20 5.6v9.2A1.6 1.6 0 0 1 18.4 16.4H10l-4.6 3.7v-3.7H5.6A1.6 1.6 0 0 1 4 14.8Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="12" y1="7.4" x2="12" y2="11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="13.4" r="0.9" fill="currentColor" stroke="none"/></symbol>
+</defs>
+</svg>
+
+<style>
+/* ============ TOKENS ============ */
+:root{
+  --abyss:#0A1B2E;
+  --abyss-soft:#102536;
+  --abyss-soft-2:#142C40;
+  --current:#0C6478;
+  --tide:#15B8C9;
+  --tide-light:#8FE9EF;
+  --foam:#F2F9FA;
+  --sand:#FFF6F1;
+  --coral:#FF6F59;
+  --coral-deep:#E85541;
+  --ink:#0F2233;
+  --slate:#5C7080;
+  --slate-soft:#7C8E9B;
+  --line:#E2EDEE;
+  --line-soft:#EDF4F4;
+  --white:#FFFFFF;
+  --grad-tide:linear-gradient(135deg,var(--current),var(--tide));
+  --shadow-sm:0 1px 2px rgba(15,34,51,.06), 0 1px 1px rgba(15,34,51,.04);
+  --shadow-md:0 8px 24px -8px rgba(15,34,51,.14), 0 2px 8px rgba(15,34,51,.06);
+  --shadow-lg:0 24px 48px -16px rgba(15,34,51,.22), 0 6px 16px rgba(15,34,51,.08);
+  --radius-card:22px;
+  --radius-pill:999px;
+  --container:1180px;
+  --ease-flow:cubic-bezier(.16,.84,.44,1);
+}
+
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  font-family:'Plus Jakarta Sans',system-ui,sans-serif;
+  color:var(--ink);
+  background:var(--white);
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+img,svg{display:block;}
+a{color:inherit;text-decoration:none;}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+.use-icon{width:1em;height:1em;display:inline-block;vertical-align:middle;}
+:focus-visible{outline:2px solid var(--tide);outline-offset:3px;border-radius:4px;}
+
+.wrap{max-width:var(--container);margin:0 auto;padding-inline:clamp(1.25rem,5vw,2rem);}
+.section{position:relative;padding-block:clamp(4.2rem,9vw,7.2rem);}
+.section--tight{padding-block:clamp(3rem,6vw,4.6rem);}
+
+.eyebrow{
+  display:inline-flex;align-items:center;gap:.5rem;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:.72rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--current);
+  background:rgba(12,100,120,.08);
+  border:1px solid rgba(12,100,120,.16);
+  padding:.45rem .9rem;border-radius:var(--radius-pill);
+  margin-bottom:1.4rem;
+}
+
+.head-row{max-width:680px;}
+.head-row.center{margin-inline:auto;text-align:center;}
+h1,h2,h3{
+  font-family:'Fraunces',serif;
+  font-weight:600;
+  letter-spacing:-.01em;
+  color:var(--ink);
+  line-height:1.08;
+}
+h1{font-size:clamp(2.2rem,4.4vw,3.2rem);}
+h2{font-size:clamp(1.9rem,3.6vw,2.7rem);}
+h3{font-size:1.06rem;line-height:1.3;}
+.section-sub{color:var(--slate);font-size:1.06rem;margin-top:1.1rem;max-width:560px;}
+.head-row.center .section-sub{margin-inline:auto;}
+
+/* ============ BUTTONS ============ */
+.btn{
+  position:relative;overflow:hidden;
+  display:inline-flex;align-items:center;justify-content:center;gap:.55rem;
+  font-weight:700;font-size:.96rem;
+  padding:.85rem 1.7rem;border-radius:var(--radius-pill);
+  transition:transform .35s var(--ease-flow),box-shadow .35s var(--ease-flow),background .35s;
+  white-space:nowrap;
+}
+.btn-primary{
+  background:var(--grad-tide);color:#fff;
+  box-shadow:0 10px 28px -10px rgba(12,100,120,.55);
+  --ripple-color:rgba(255,255,255,.55);
+}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 16px 34px -10px rgba(12,100,120,.65);}
+.btn-secondary{background:#fff;color:var(--ink);border:1.5px solid var(--line);--ripple-color:rgba(12,100,120,.18);}
+.btn-secondary:hover{transform:translateY(-2px);border-color:var(--tide);}
+.btn-sm{padding:.6rem 1.25rem;font-size:.86rem;min-height:2.75rem;}
+.btn-lg{padding:1.05rem 2.2rem;font-size:1.05rem;}
+.btn-ripple{position:absolute;border-radius:50%;background:var(--ripple-color,rgba(255,255,255,.5));transform:scale(0);animation:rippleAnim .65s ease-out forwards;pointer-events:none;}
+@keyframes rippleAnim{to{transform:scale(1);opacity:0;}}
+/*
+  The disabled state is real, not decorative. Until the API has said which build
+  is published there is nothing to download, and a button that looked ready and
+  then 404'd would be read as a corrupt file rather than a page that had not
+  finished loading.
+*/
+.btn[aria-disabled="true"]{opacity:.55;pointer-events:none;box-shadow:none;transform:none;}
+
+/* ============ NAV ============ */
+.nav{
+  position:fixed;top:0;left:0;right:0;z-index:80;
+  padding-block:.3rem;
+  transition:padding .3s,background .3s,box-shadow .3s,backdrop-filter .3s;
+}
+.nav::before{
+  content:"";position:absolute;inset:0;
+  background:rgba(255,255,255,0);
+  backdrop-filter:blur(0px);
+  transition:background .35s,backdrop-filter .35s,box-shadow .35s;
+  z-index:-1;
+}
+.nav.is-scrolled{padding-block:.7rem;}
+.nav.is-scrolled::before{background:rgba(255,255,255,.82);backdrop-filter:blur(14px);box-shadow:0 1px 0 var(--line),0 12px 24px -16px rgba(15,34,51,.18);}
+.nav-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;}
+.logo{display:flex;align-items:center;gap:.55rem;font-family:'Fraunces',serif;font-weight:600;font-size:1.18rem;color:var(--ink);}
+.logo-img{height:100px;width:auto;display:block;}
+.logo-img--footer{height:56px;filter:brightness(0) invert(1);}
+.nav-links{display:flex;align-items:center;gap:2rem;}
+.nav-links a{font-size:.94rem;font-weight:500;color:var(--ink);position:relative;padding-bottom:4px;}
+.nav-links a::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:0;background:var(--tide);transition:width .3s var(--ease-flow);}
+.nav-links a:hover::after{width:100%;}
+.nav-right{display:flex;align-items:center;gap:1.2rem;}
+.nav-signin{font-size:.92rem;font-weight:600;color:var(--ink);}
+.nav-toggle{display:none;width:2.75rem;height:2.75rem;align-items:center;justify-content:center;margin-right:-.35rem;}
+.nav-toggle .use-icon{width:1.5rem;height:1.5rem;}
+.nav-toggle .ic-close{display:none;}
+body.nav-open .nav-toggle .ic-menu{display:none;}
+body.nav-open .nav-toggle .ic-close{display:block;}
+
+@media (max-width:840px){
+  .nav-links{
+    position:fixed;inset:64px 0 0 0;background:#fff;
+    flex-direction:column;align-items:flex-start;gap:0;
+    padding:1.4rem clamp(1.25rem,5vw,2rem) 2rem;
+    transform:translateY(-12px);opacity:0;visibility:hidden;
+    transition:opacity .25s,transform .25s,visibility .25s;
+    border-top:1px solid var(--line);
+  }
+  .nav-links a{width:100%;padding:.85rem 0;border-bottom:1px solid var(--line-soft);}
+  body.nav-open .nav-links{transform:translateY(0);opacity:1;visibility:visible;}
+  .nav-right .nav-signin{display:none;}
+  .nav-toggle{display:flex;}
+}
+
+/* ============ AMBIENT CURRENT BLOBS ============ */
+.current-field{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0;}
+.blob{position:absolute;border-radius:48% 52% 58% 42%/52% 46% 54% 48%;filter:blur(70px);will-change:transform;}
+@media (prefers-reduced-motion: no-preference){
+  .blob{animation:blobDrift1 24s ease-in-out infinite;}
+  .blob.b2{animation:blobDrift2 31s ease-in-out infinite;}
+}
+@keyframes blobDrift1{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(40px,-26px) scale(1.08);}}
+@keyframes blobDrift2{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(-46px,30px) scale(.94);}}
+
+/* ============ PAGE HERO ============ */
+.page-hero{position:relative;padding-top:clamp(8.5rem,14vw,11rem);padding-bottom:clamp(3rem,7vw,5rem);background:var(--foam);overflow:hidden;}
+.page-hero .current-field .blob{opacity:.5;}
+.page-hero .b1{width:420px;height:420px;left:-120px;top:60px;background:radial-gradient(circle at 35% 35%,var(--tide-light),var(--tide) 60%,transparent 100%);}
+.page-hero .b2{width:380px;height:380px;right:-100px;top:-60px;background:radial-gradient(circle at 60% 40%,var(--current),var(--abyss-soft) 70%,transparent 100%);opacity:.28;}
+.page-hero .head-row{position:relative;z-index:1;}
+
+/* ============ REVEAL ============ */
+[data-reveal]{opacity:0;transform:translateY(26px);transition:opacity .8s var(--ease-flow),transform .8s var(--ease-flow);}
+[data-reveal].is-visible{opacity:1;transform:translateY(0);}
+@media (prefers-reduced-motion: reduce){[data-reveal]{opacity:1;transform:none;transition:none;}}
+
+/* ============ DOWNLOAD ============ */
+.dl-actions{display:flex;flex-wrap:wrap;gap:.9rem;justify-content:center;margin-top:2rem;}
+.dl-meta{margin-top:1rem;font-family:'IBM Plex Mono',monospace;font-size:.8rem;color:var(--slate-soft);letter-spacing:.04em;}
+.dl-meta a{border-bottom:1px solid rgba(92,112,128,.35);}
+.dl-meta a:hover{color:var(--current);border-color:var(--current);}
+/*
+  Reserved rather than injected. The version line arrives from an API call a
+  moment after paint, and a block that appears from nothing shifts the button
+  the visitor is already reaching for.
+*/
+.dl-meta{min-height:1.4rem;}
+.dl-note{
+  max-width:640px;margin:2.2rem auto 0;
+  background:var(--sand);border:1px solid rgba(255,111,89,.22);
+  border-radius:16px;padding:1.1rem 1.3rem;
+  font-size:.92rem;color:var(--ink);text-align:left;
+  display:flex;gap:.8rem;align-items:flex-start;
+}
+.dl-note .use-icon{width:1.2rem;height:1.2rem;color:var(--coral-deep);flex-shrink:0;margin-top:.15rem;}
+.dl-note strong{font-weight:700;}
+
+/* ============ STEPS ============ */
+.steps{display:grid;gap:1.1rem;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));margin-top:2.6rem;}
+.step{
+  background:#fff;border:1px solid var(--line);border-radius:var(--radius-card);
+  padding:1.6rem 1.4rem;box-shadow:var(--shadow-sm);position:relative;
+}
+.step-num{
+  font-family:'IBM Plex Mono',monospace;font-size:.78rem;font-weight:600;
+  color:var(--current);background:rgba(12,100,120,.08);
+  width:2rem;height:2rem;border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;margin-bottom:.9rem;
+}
+.step h3{margin-bottom:.45rem;}
+.step p{font-size:.93rem;color:var(--slate);}
+
+/* ============ CONTROLS GRID ============ */
+.controls{background:var(--foam);}
+.control-grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));margin-top:2.6rem;}
+.control{background:#fff;border:1px solid var(--line);border-radius:16px;padding:1.3rem;display:flex;gap:.85rem;align-items:flex-start;}
+.control .use-icon{width:1.35rem;height:1.35rem;color:var(--current);flex-shrink:0;margin-top:.1rem;}
+.control h3{font-family:'Plus Jakarta Sans',sans-serif;font-size:.98rem;font-weight:700;margin-bottom:.25rem;}
+.control p{font-size:.88rem;color:var(--slate);line-height:1.5;}
+
+/* ============ FACTS ============ */
+.facts{max-width:720px;margin-inline:auto;margin-top:2.4rem;border-top:1px solid var(--line);}
+.fact{display:flex;gap:1.2rem;padding:1.05rem 0;border-bottom:1px solid var(--line);font-size:.93rem;}
+.fact dt{flex:0 0 190px;font-weight:700;color:var(--ink);}
+.fact dd{color:var(--slate);}
+@media (max-width:600px){
+  .fact{flex-direction:column;gap:.25rem;}
+  .fact dt{flex:none;}
+}
+
+/* ============ FOOTER ============ */
+footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
+.footer-row{display:flex;flex-direction:column;align-items:center;gap:1.1rem;text-align:center;}
+.footer-logo{display:flex;align-items:center;gap:.5rem;color:#fff;font-family:'Fraunces',serif;font-weight:600;font-size:1.05rem;}
+.footer-links{display:flex;gap:1.1rem;font-size:.88rem;flex-wrap:wrap;justify-content:center;}
+.footer-links a{display:inline-flex;align-items:center;min-height:2.75rem;padding:0 .25rem;}
+.footer-links a:hover{color:#fff;}
+.footer-copy{font-size:.8rem;color:rgba(255,255,255,.35);margin-top:.4rem;}
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<header class="nav" id="siteNav">
+  <div class="wrap nav-row">
+    <a href="/landing.html" class="logo"><picture style="display:contents"><source srcset="/logo.webp" type="image/webp"><img src="/logo.png" alt="Parentix" class="logo-img" width="500" height="500"></picture></a>
+    <nav class="nav-links">
+      <a href="/landing.html#features">Features</a>
+      <a href="/landing.html#ai-features">AI Coach</a>
+      <a href="/landing.html#pricing">Pricing</a>
+      <a href="/download">Download</a>
+      <a href="/contact.html">Contact</a>
+    </nav>
+    <div class="nav-right">
+      <a href="/login" class="nav-signin">Sign in</a>
+      <a href="/login" class="btn btn-primary btn-sm">Get Started Free</a>
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false">
+        <svg class="use-icon ic-menu"><use href="#ic-menu"/></svg>
+        <svg class="use-icon ic-close"><use href="#ic-close"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- ============ PAGE HERO ============ -->
+<section class="page-hero">
+  <div class="current-field" aria-hidden="true">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+  </div>
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow"><svg class="use-icon"><use href="#ic-windows"/></svg> For Windows</span>
+      <h1>Parentix for your child&rsquo;s computer</h1>
+      <p class="section-sub">
+        The same protection as the phone app, for a Windows laptop or PC. Install it once and
+        manage websites, apps, screen time and schedules from the Parentix Family App.
+      </p>
+
+      <div class="dl-actions">
+        <!--
+          `aria-disabled` and no href until the API answers. A link that is
+          present-but-not-yet-valid is the version of this that sends somebody to
+          a 404 in the half-second before the manifest arrives, and a 404 on a
+          190 MB file reads as a corrupt download rather than a page that was
+          still loading.
+        -->
+        <a id="dlPrimary" class="btn btn-primary btn-lg" aria-disabled="true" role="button">
+          <svg class="use-icon"><use href="#ic-download"/></svg>
+          <span id="dlPrimaryLabel">Checking for the latest version&hellip;</span>
+        </a>
+        <a href="/login" class="btn btn-secondary btn-lg">Sign in to get a setup code</a>
+      </div>
+
+      <p class="dl-meta" id="dlMeta"></p>
+
+      <div class="dl-note">
+        <svg class="use-icon"><use href="#ic-alertbubble"/></svg>
+        <div>
+          <strong>Install it while signed in to your child&rsquo;s Windows account.</strong>
+          Parentix starts itself when that account signs in, and Windows creates that
+          arrangement for whichever account runs the installer. You will be asked for an
+          administrator password once during setup &mdash; that is what allows Parentix to filter
+          websites.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW IT GOES ============ -->
+<section class="section">
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow">Four steps</span>
+      <h2>What setting it up looks like</h2>
+      <p class="section-sub">About five minutes, and none of it needs any technical knowledge.</p>
+    </div>
+
+    <div class="steps" data-reveal>
+      <div class="step">
+        <span class="step-num">01</span>
+        <h3>Add the computer in Parentix</h3>
+        <p>
+          Sign in, open Children, and choose <em>Link a device</em> &mdash; pick your child and
+          &ldquo;Windows computer&rdquo;. Parentix gives you an eight-character setup code.
+        </p>
+      </div>
+      <div class="step">
+        <span class="step-num">02</span>
+        <h3>Download and install</h3>
+        <p>
+          On your child&rsquo;s computer, download Parentix from this page and run the installer.
+          Enter an administrator password when Windows asks.
+        </p>
+      </div>
+      <div class="step">
+        <span class="step-num">03</span>
+        <h3>Enter the setup code</h3>
+        <p>
+          Parentix opens and asks for the code. Type it in &mdash; or, if you are already signed
+          in to Parentix in a browser on that computer, press <em>Connect this computer</em> and it
+          fills itself in.
+        </p>
+      </div>
+      <div class="step">
+        <span class="step-num">04</span>
+        <h3>You are done</h3>
+        <p>
+          The computer appears under your child straight away, your rules apply within seconds,
+          and Parentix starts on its own every time the computer does.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WHAT YOU CONTROL ============ -->
+<section class="controls section">
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow">From the Family App</span>
+      <h2>What you can do from your phone</h2>
+      <p class="section-sub">
+        Every change reaches the computer in seconds, and holds even when it goes offline.
+      </p>
+    </div>
+
+    <div class="control-grid" data-reveal>
+      <div class="control">
+        <svg class="use-icon"><use href="#ic-ban"/></svg>
+        <div>
+          <h3>Block and allow websites</h3>
+          <p>Block a site by name, or a whole category. Allow one back through that a category
+            blocks. Filtering happens on the computer, so it works in every browser.</p>
+        </div>
+      </div>
+      <div class="control">
+        <svg class="use-icon"><use href="#ic-grid"/></svg>
+        <div>
+          <h3>Block and allow apps</h3>
+          <p>Pick from the programs your child actually opens. A blocked one closes, and says
+            why &mdash; a program that vanished silently would read as a broken computer.</p>
+        </div>
+      </div>
+      <div class="control">
+        <svg class="use-icon"><use href="#ic-clock"/></svg>
+        <div>
+          <h3>Daily screen-time limits</h3>
+          <p>A limit for the whole computer, and per-app limits inside it. Time only counts
+            while somebody is actually there.</p>
+        </div>
+      </div>
+      <div class="control">
+        <svg class="use-icon"><use href="#ic-moon"/></svg>
+        <div>
+          <h3>Schedules and downtime</h3>
+          <p>Bedtime, homework hours, weekdays and weekends. When one starts, the screen locks
+            &mdash; without closing anything your child was in the middle of.</p>
+        </div>
+      </div>
+      <div class="control">
+        <svg class="use-icon"><use href="#ic-lock"/></svg>
+        <div>
+          <h3>Pause it now</h3>
+          <p>Pause one computer without touching your child&rsquo;s other devices, and lift it
+            again the moment you want to.</p>
+        </div>
+      </div>
+      <div class="control">
+        <svg class="use-icon"><use href="#ic-alertbubble"/></svg>
+        <div>
+          <h3>Know what happened</h3>
+          <p>Alerts when a blocked app is opened, when the daily limit is reached, and if
+            Parentix is switched off or interrupted on that computer.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ THE DETAILS ============ -->
+<section class="section section--tight">
+  <div class="wrap">
+    <div class="head-row center" data-reveal>
+      <span class="eyebrow">Before you install</span>
+      <h2>The details</h2>
+    </div>
+
+    <dl class="facts" data-reveal>
+      <div class="fact">
+        <dt>Works on</dt>
+        <dd>Windows 10 and Windows 11, on Intel, AMD and ARM processors.</dd>
+      </div>
+      <div class="fact">
+        <dt>You will need</dt>
+        <dd>
+          An administrator password on that computer, once, during installation. Parentix itself
+          runs without one afterwards.
+        </dd>
+      </div>
+      <div class="fact">
+        <dt>Your child can see it</dt>
+        <dd>
+          Parentix is visible on the computer, not hidden. It shows your child exactly what is
+          being monitored, which rules apply, and how much time is left. That is deliberate.
+        </dd>
+      </div>
+      <div class="fact">
+        <dt>Location</dt>
+        <dd>
+          Not reported from a computer. A laptop has no GPS, and the substitutes would put a
+          marker on your map that looks like a real one and is not.
+        </dd>
+      </div>
+      <div class="fact">
+        <dt>Updates</dt>
+        <dd>Installed automatically in the background. There is nothing to keep up to date.</dd>
+      </div>
+      <div class="fact">
+        <dt>Removing it</dt>
+        <dd>
+          Uninstall from Windows Settings, as with any program &mdash; it needs an administrator
+          password, so your child cannot remove it on their own. Uninstalling puts the
+          computer&rsquo;s network settings back as they were.
+        </dd>
+      </div>
+      <div class="fact">
+        <dt>Mac</dt>
+        <dd id="macFact">A Mac version is in development and is not available to download yet.</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="wrap footer-row">
+    <div class="footer-logo"><picture style="display:contents"><source srcset="/logo.webp" type="image/webp"><img src="/logo.png" alt="Parentix" class="logo-img logo-img--footer" width="500" height="500"></picture></div>
+    <div class="footer-links">
+      <a href="/privacy-policy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+      <a href="/download">Download</a>
+      <a href="/contact.html">Contact</a>
+    </div>
+    <div class="footer-copy">&copy; 2026 Parentix. Parental Control &amp; Digital Safety.</div>
+  </div>
+</footer>
+
+<script>
+// ---- Sticky nav ----
+const nav = document.getElementById('siteNav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('is-scrolled', window.scrollY > 24);
+}, { passive: true });
+
+// ---- Mobile nav toggle ----
+const navToggle = document.getElementById('navToggle');
+navToggle.addEventListener('click', () => {
+  const open = document.body.classList.toggle('nav-open');
+  navToggle.setAttribute('aria-expanded', open);
+});
+document.querySelectorAll('.nav-links a').forEach(a => {
+  a.addEventListener('click', () => document.body.classList.remove('nav-open'));
+});
+
+// ---- Button ripple ----
+document.querySelectorAll('.btn').forEach(btn => {
+  btn.addEventListener('click', function (e) {
+    const rect = this.getBoundingClientRect();
+    const ripple = document.createElement('span');
+    ripple.className = 'btn-ripple';
+    const size = Math.max(rect.width, rect.height) * 1.8;
+    ripple.style.width = ripple.style.height = size + 'px';
+    ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+    ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+    this.appendChild(ripple);
+    ripple.addEventListener('animationend', () => ripple.remove());
+  });
+});
+
+// ---- Scroll reveal ----
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!reduceMotion && 'IntersectionObserver' in window) {
+  const revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('is-visible');
+        revealObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('[data-reveal]').forEach(el => revealObserver.observe(el));
+} else {
+  document.querySelectorAll('[data-reveal]').forEach(el => el.classList.add('is-visible'));
+}
+
+// ---- The download button ----
+/** The API origin for this page; see landing.html. Empty means same-origin. */
+function apiOrigin() {
+  const meta = document.querySelector('meta[name="parentix-api"]');
+  return (meta && meta.content ? meta.content : '').replace(/\/$/, '');
+}
+
+/**
+ * Ask the API what is published, then make the button real.
+ *
+ * The button is not simply pointed at the download endpoint and left there,
+ * even though that endpoint would redirect correctly on its own. The reason is
+ * the failure case: an API with no artifacts configured answers 503, and a
+ * visitor who has already clicked sees a browser error page for a file. Asking
+ * first means the page can say "not available yet" in words, next to a version
+ * number when there is one, which is a page a parent can act on.
+ */
+(function initDownload() {
+  const button = document.getElementById('dlPrimary');
+  const label = document.getElementById('dlPrimaryLabel');
+  const meta = document.getElementById('dlMeta');
+  const macFact = document.getElementById('macFact');
+  const base = apiOrigin() + '/api/downloads/child-desktop';
+
+  const unavailable = (text) => {
+    label.textContent = 'Download unavailable';
+    button.setAttribute('aria-disabled', 'true');
+    button.removeAttribute('href');
+    meta.textContent = text;
+  };
+
+  fetch(base, { headers: { Accept: 'application/json' } })
+    .then((res) => (res.ok ? res.json() : Promise.reject(new Error('unavailable'))))
+    .then((release) => {
+      const win = release && release.platforms && release.platforms.windows;
+      if (!win || !win.available) {
+        unavailable((win && win.reason) || 'The Windows installer has not been published yet.');
+        return;
+      }
+
+      label.textContent = 'Download for Windows';
+      // The endpoint, not `win.url`. Both point at the same file today, and the
+      // endpoint keeps pointing at the current one after the next release —
+      // which matters because this href ends up in bookmarks and support
+      // articles that nobody comes back to edit.
+      button.href = base + '/windows';
+      button.setAttribute('aria-disabled', 'false');
+
+      // The arch-specific builds are half the size, and are offered rather than
+      // chosen: a parent who has to work out whether their child's laptop is ARM
+      // has already been failed by the page.
+      const variants = (win.variants || [])
+        .map((v) => '<a href="' + base + '/windows?arch=' + encodeURIComponent(v.arch) + '">' + v.arch + '</a>')
+        .join(' &middot; ');
+      meta.innerHTML = 'Version ' + win.version + ' &middot; Windows 10 and 11'
+        + (variants ? ' &middot; smaller build for ' + variants : '');
+
+      const mac = release.platforms && release.platforms.mac;
+      if (mac && mac.available && macFact) {
+        macFact.innerHTML = 'Available &mdash; <a href="' + base + '/mac">download Parentix for Mac</a>.';
+      }
+    })
+    .catch(() => {
+      unavailable('The download could not be checked just now. Please try again in a moment.');
+    });
+})();
+</script>
+</body>
+</html>

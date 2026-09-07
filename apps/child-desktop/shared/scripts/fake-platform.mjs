@@ -27,6 +27,26 @@ export const spy = {
   dnsRestored: 0,
 };
 
+/**
+ * Two switches the harness flips to play the part of a tampered-with machine.
+ *
+ * Separate from `spy`, which records what the agent did; these are inputs
+ * rather than observations. They are what makes the tamper checks testable at
+ * all — the real signals are a resolver setting and a scheduled task, neither
+ * of which exists under plain Node.
+ */
+export const machine = {
+  /** False once "the child" has put DNS back to automatic. */
+  dnsStillOurs: true,
+  /** `true` | `false` | `null` — the last being "could not tell", see the contract. */
+  startupIntact: true,
+};
+
+export function resetMachine() {
+  machine.dnsStillOurs = true;
+  machine.startupIntact = true;
+}
+
 let _onSample = null;
 
 /** Push a foreground sample at the agent, as the platform watcher would. */
@@ -85,7 +105,11 @@ export function createFakePlatform({ dataDir = mkdtempSync(path.join(tmpdir(), '
       // The harness's own upstream, which it runs on the loopback. The real
       // implementations read this off the machine before redirecting it.
       upstreams: async () => ['127.0.0.1'],
-      apply: async () => { spy.dnsApplied += 1; return true; },
+      apply: async () => { spy.dnsApplied += 1; machine.dnsStillOurs = true; return true; },
+      // The strict form the real implementations use: every connected interface
+      // has to be resolving through us, because one that is not is a machine
+      // browsing unfiltered while the agent reports filtering as on.
+      isApplied: async () => machine.dnsStillOurs,
       restore: async () => { spy.dnsRestored += 1; return true; },
     },
 
@@ -99,7 +123,14 @@ export function createFakePlatform({ dataDir = mkdtempSync(path.join(tmpdir(), '
     autostart: {
       supported: true,
       enabled: async () => false,
-      set: async () => true,
+      set: async () => { machine.startupIntact = true; return true; },
+      /*
+       * Not `enabled`. On Windows the installer starts the agent from an
+       * elevated scheduled task, so `enabled` is false on a healthy machine and
+       * a tamper check written against it would fire on every install. The
+       * harness models the question the watcher actually asks.
+       */
+      systemIntact: async () => machine.startupIntact,
     },
 
     permissions: {

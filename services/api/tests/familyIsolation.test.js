@@ -154,6 +154,17 @@ describe('a device token is not a parent credential', () => {
     && !path.startsWith('/api/auth')   // public entry points and the session probe
     && !path.startsWith('/api/admin')  // staff-gated, and swept by the staff suites
     && !path.startsWith('/api/tasks')  // Cloud Scheduler, its own shared-secret gate
+    /*
+     * The product download, which is public by design: it is linked from the
+     * marketing site, from support articles and from mail a parent sent
+     * themselves, none of which carry a session. There is nothing behind it to
+     * protect — the artifacts are a product download, and a copy of the agent
+     * does nothing at all until somebody redeems a linking code against a real
+     * account. Excluded here rather than left to fail, because "a device token
+     * can fetch the download page" is not the finding this sweep is for; see
+     * `downloads.test.js`, which pins that these carry no account data.
+     */
+    && !path.startsWith('/api/downloads')
     && !path.includes('/me/')          // the device's own routes — see above
     && path !== '/api/health'
     && path !== '/api/ready';

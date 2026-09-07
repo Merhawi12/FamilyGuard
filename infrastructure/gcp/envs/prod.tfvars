@@ -140,6 +140,24 @@ admin_email = "support@parentix.ca"
 # are unaffected either way.
 login_code_required = false
 
+# ── The Child Desktop download ───────────────────────────────────────────────
+#
+# Where the Windows installer and its update feed are served from. The publish
+# script stages the artifacts under <base>/child-desktop/win/ and deploys them
+# to the Firebase Hosting `downloads` site (see docs/CHILD-DESKTOP.md §9a).
+#
+# `parentix-downloads.web.app` is the site's own hostname and works from the
+# moment the site exists. Switching to a custom `downloads.parentix.ca` means
+# connecting the domain in the Firebase console AND changing `build.publish.url`
+# in apps/child-desktop/*/package.json to match — every already-installed agent
+# looks for updates at whatever that said when it was built, so the old URL has
+# to keep answering until the fleet has moved.
+#
+# Leave empty to switch downloads off: /api/downloads answers 503 and the
+# download page says the installer is not available, which is true rather than
+# broken.
+desktop_download_base_url = "https://parentix-downloads.web.app"
+
 # Where monitoring alerts go. Set this before the first production apply — an
 # unmonitored production service is one where the first report of an outage
 # comes from a customer. A role mailbox beats a personal one.
