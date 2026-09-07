@@ -102,9 +102,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.parentix.child'
+    namespace 'ca.parentix.child'
     defaultConfig {
-        applicationId 'com.parentix.child'
+        applicationId 'ca.parentix.child'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

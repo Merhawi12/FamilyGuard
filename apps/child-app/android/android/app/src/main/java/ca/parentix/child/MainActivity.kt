@@ -1,4 +1,4 @@
-package com.parentix.child
+package ca.parentix.child
 
 import android.os.Build
 import android.os.Bundle

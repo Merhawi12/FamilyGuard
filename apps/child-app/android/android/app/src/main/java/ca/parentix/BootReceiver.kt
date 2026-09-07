@@ -1,4 +1,4 @@
-package com.parentix
+package ca.parentix
 
 import android.content.BroadcastReceiver
 import android.content.Context

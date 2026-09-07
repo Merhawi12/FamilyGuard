@@ -1,4 +1,4 @@
-package com.parentix
+package ca.parentix
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactApplicationContext

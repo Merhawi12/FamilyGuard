@@ -1,4 +1,4 @@
-package com.parentix
+package ca.parentix
 
 import android.content.Context
 import android.content.Intent
@@ -108,7 +108,7 @@ class AppBlockerModule(private val ctx: ReactApplicationContext) : ReactContextB
             ctx.contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
         ) ?: ""
-        val componentName = "${ctx.packageName}/com.parentix.AppMonitorService"
+        val componentName = "${ctx.packageName}/ca.parentix.AppMonitorService"
         val enabled = enabledServices.split(":").any { it.equals(componentName, ignoreCase = true) }
         promise.resolve(enabled)
     }

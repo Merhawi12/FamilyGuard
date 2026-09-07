@@ -26,8 +26,25 @@
  * they are held equal anyway: every support conversation, Firebase app
  * registration and push credential is filed under one of these, and letting
  * them differ buys nothing while making all three ambiguous.
+ *
+ * ── Why `ca.` and not `com.` ─────────────────────────────────────────────────
+ *
+ * This was `com.parentix.child` while the parent app shipped as
+ * `ca.parentix.family` and the desktop agent as `ca.parentix.child-desktop` —
+ * so one product had its three installables split across two vendor prefixes,
+ * and the child's phone and the child's laptop were on opposite ones.
+ *
+ * `ca.parentix` is the correct half of that pair: a package name is reverse-DNS
+ * of a domain the publisher controls, and the domain is parentix.ca. Nobody here
+ * owns parentix.com, so `com.parentix.child` was a claim on someone else's
+ * namespace.
+ *
+ * It was changed while it could still be changed. Google Play and the App Store
+ * both treat this string as the permanent identity of a listing — after the
+ * first upload it cannot be edited, and a different one is a different app with
+ * its own reviews and its own install base.
  */
-const BUNDLE_ID = 'com.parentix.child';
+const BUNDLE_ID = 'ca.parentix.child';
 
 const base = {
   /**

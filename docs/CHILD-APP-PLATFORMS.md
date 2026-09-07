@@ -162,8 +162,14 @@ rules it encodes, each of which was a live bug:
 
 ## 3. Deep links
 
-Scheme: **`com.parentix.child://`**, registered on Android in the manifest's
+Scheme: **`ca.parentix.child://`**, registered on Android in the manifest's
 intent filter and on iOS via `scheme` in `shared/app.config.base.js`.
+
+`com.parentix.child://` — the scheme this app carried before the rename — is
+still registered on Android and still listed in `App.js`'s `prefixes`, so a
+linking link a parent sent before the change keeps working. The live scheme is
+the one declared first; `childAppPlatforms.test.js` asserts that order, and that
+every scheme the manifest claims is one `App.js` can actually resolve.
 
 It was declared on Android from the day the project was scaffolded and consumed
 by nothing — the app opened on whatever screen it would have opened on anyway.
@@ -171,11 +177,11 @@ by nothing — the app opened on whatever screen it would have opened on anyway.
 
 | Link | Goes to |
 | --- | --- |
-| `com.parentix.child://link/ABC12345` | Link screen, code prefilled |
-| `com.parentix.child://home` | My Day |
-| `com.parentix.child://messages` | Messages |
-| `com.parentix.child://settings` | Settings |
-| `com.parentix.child://permissions` | Permissions |
+| `ca.parentix.child://link/ABC12345` | Link screen, code prefilled |
+| `ca.parentix.child://home` | My Day |
+| `ca.parentix.child://messages` | Messages |
+| `ca.parentix.child://settings` | Settings |
+| `ca.parentix.child://permissions` | Permissions |
 
 **Everything except `link` is gated on the device being linked.** The other
 screens assume credentials in the keystore — `Home` reads monitoring state,
@@ -367,17 +373,17 @@ Downloading the artefact and reading the generated `Info.plist` out of
 
 | Key | Built value |
 | --- | --- |
-| `CFBundleIdentifier` | `com.parentix.child` — matches the Android package |
+| `CFBundleIdentifier` | `ca.parentix.child` — matches the Android package |
 | `UIRequiredDeviceCapabilities` | `["arm64"]` — the override held, not Expo's `armv7` |
 | `UISupportedInterfaceOrientations` | `["UIInterfaceOrientationPortrait"]` |
 | `UIBackgroundModes` | `location`, `fetch`, `remote-notification` |
 | `NSAppTransportSecurity` | `NSAllowsArbitraryLoads: false`, `NSAllowsLocalNetworking: true` |
-| `CFBundleURLTypes` | `com.parentix.child` — deep links registered |
+| `CFBundleURLTypes` | `ca.parentix.child` — deep links registered |
 | `ITSAppUsesNonExemptEncryption` | `false` |
 | Usage descriptions | all four, in the child-facing wording |
 
 The shipped `main.jsbundle` carries `https://api.parentix.ca` and
-`com.parentix.child://`, so the API origin and the linking config are really in
+`ca.parentix.child://`, so the API origin and the linking config are really in
 there rather than merely configured.
 
 Two caveats on that artefact:
@@ -398,7 +404,7 @@ Nothing below has been run on real hardware, and none of it can be from Windows.
 - [x] ~~An iOS build of any kind~~ — done, see §8
 - [ ] Push on iOS end to end, after the APNs key is uploaded to EAS
 - [ ] Background location on iOS with `Always` authorisation
-- [ ] Deep links on both platforms (`npx uri-scheme open com.parentix.child://link/ABC12345 --ios`)
+- [ ] Deep links on both platforms (`npx uri-scheme open ca.parentix.child://link/ABC12345 --ios`)
 - [ ] The new launcher icon and launch screen on an Android handset
 - [ ] Everything in [IOS.md §2](IOS.md) that iOS cannot do — confirm the app says
       so honestly rather than showing a permanent "off"

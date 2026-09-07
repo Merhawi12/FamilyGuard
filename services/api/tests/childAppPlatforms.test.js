@@ -116,18 +116,92 @@ describe('child app — deep links', () => {
     const activity = /<activity[^>]*\.MainActivity[\s\S]*?<\/activity>/.exec(manifest);
     expect(activity).not.toBeNull();
 
-    const androidScheme = /<data android:scheme="([^"]+)"\s*\/>/.exec(activity[0]);
-    expect(androidScheme).not.toBeNull();
-    expect(androidConfig.scheme).toBe(androidScheme[1]);
+    const schemes = [...activity[0].matchAll(/<data android:scheme="([^"]+)"\s*\/>/g)]
+      .map((m) => m[1]);
+    expect(schemes.length).toBeGreaterThan(0);
+
+    /**
+     * The *first* one, and the order is the assertion.
+     *
+     * MainActivity registers more than one scheme since the rename from
+     * `com.parentix.child` to `ca.parentix.child`: the old identifier is kept so
+     * a linking link a parent already sent still opens the app. Which is current
+     * has to stay legible from the manifest alone, so the live scheme leads and
+     * anything after it is legacy.
+     */
+    expect(schemes[0]).toBe(androidConfig.scheme);
   });
 
-  test('the app actually consumes the scheme it registers', () => {
+  test('the app actually consumes every scheme it registers', () => {
     // A registered scheme with no linking config is the state this was found in:
     // declared on Android since the project was scaffolded, and wired to nothing.
     // In the shared package, so this covers both platforms at once.
     const app = read(`${CHILD}/shared/App.js`);
     expect(app).toMatch(/prefixes:/);
     expect(app).toContain(`${androidConfig.scheme}://`);
+
+    /**
+     * Including the legacy ones. A scheme the manifest claims and `prefixes`
+     * does not list is worse than not registering it: Android hands the app the
+     * link, React Navigation cannot resolve it against any prefix, and the app
+     * opens on whatever screen it would have opened on anyway — so a parent
+     * watching their child tap a `link/ABC12345` URL sees the app launch to an
+     * empty code box and has no reason to suspect the link at all.
+     */
+    const activity = /<activity[^>]*\.MainActivity[\s\S]*?<\/activity>/.exec(manifest);
+    for (const scheme of [...activity[0].matchAll(/<data android:scheme="([^"]+)"\s*\/>/g)]) {
+      expect(app).toContain(`${scheme[1]}://`);
+    }
+  });
+});
+
+/**
+ * The applicationId, and the three other files that have to be told about it.
+ *
+ * This app was renamed from `com.parentix.child` to `ca.parentix.child` — the
+ * parent app was already `ca.parentix.family` and the desktop agent
+ * `ca.parentix.child-desktop`, so one product had its installables split across
+ * two vendor prefixes and only the reverse-DNS of a domain the publisher owns is
+ * correct. A rename like that touches Gradle, the Expo config and Firebase, and
+ * the failure when one is missed is not a build error.
+ */
+describe('child app — the applicationId is stated once', () => {
+  const buildGradle = read(`${CHILD}/android/android/app/build.gradle`);
+  const applicationId = /applicationId\s+'([^']+)'/.exec(buildGradle)?.[1];
+  const namespace = /namespace\s+'([^']+)'/.exec(buildGradle)?.[1];
+
+  test('Gradle builds the package the Expo config names', () => {
+    expect(applicationId).toBe(androidConfig.android.package);
+  });
+
+  test('the Gradle namespace matches, so `.MainActivity` resolves', () => {
+    // The manifest writes MainActivity relative (`.MainActivity`), which Android
+    // resolves against `namespace`. A namespace that drifts from where the class
+    // actually lives is a ClassNotFoundException on launch — after a clean build.
+    expect(namespace).toBe(applicationId);
+    const main = `${CHILD}/android/android/app/src/main/java/${applicationId.replace(/\./g, '/')}/MainActivity.kt`;
+    expect(fs.existsSync(path.join(REPO, main))).toBe(true);
+    expect(read(main)).toContain(`package ${applicationId}`);
+  });
+
+  /**
+   * The one that cannot fail loudly on its own.
+   *
+   * The Google Services Gradle plugin matches `applicationId` against a client
+   * in `google-services.json` and refuses the build when none matches — which is
+   * the good case, and the reason this file has to be kept in step. What it
+   * cannot check is the reverse: a `package_name` edited by hand to satisfy it
+   * while the `mobilesdk_app_id` beside it still belongs to the old
+   * registration. Then the build succeeds, the APK installs, and every push to a
+   * child device silently fails to arrive.
+   *
+   * So this asserts the pairing exists, and docs/DEPLOYMENT.md carries the
+   * warning about the half of it no test can see.
+   */
+  test('Firebase has a client for this package', () => {
+    const gs = JSON.parse(read(`${CHILD}/android/android/app/google-services.json`));
+    const packages = gs.client.map((c) => c.client_info.android_client_info.package_name);
+    expect(packages).toContain(applicationId);
   });
 });
 

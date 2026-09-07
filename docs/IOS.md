@@ -16,7 +16,7 @@ completely different too. Read §2 before promising anything to a customer.
 | iOS parity | **Full.** Every feature the Android app has | **Partial.** Core monitoring is not possible |
 | Build needs a Mac? | Yes — Xcode. CI covers it | **No.** EAS builds on Expo's Macs |
 | Push | FCM → APNs (`platform: 'fcm'`) | Expo push → APNs (`platform: 'expo'`) |
-| Bundle ID | `ca.parentix.family` | `com.parentix.child` |
+| Bundle ID | `ca.parentix.family` | `ca.parentix.child` |
 
 The Family App is a genuine port: it is a web app in a native shell, the shell
 exists on both platforms, and nothing it does is Android-specific.
@@ -117,7 +117,7 @@ change: every one of its guards already reads a permission that the stubs answer
 
 1. An Apple Developer Program membership (US$99/yr). Required for any device
    install, TestFlight or App Store release. Not required for a Simulator build.
-2. Register both App IDs: `ca.parentix.family` and `com.parentix.child`.
+2. Register both App IDs: `ca.parentix.family` and `ca.parentix.child`.
 3. On `ca.parentix.family`, enable the **Push Notifications** capability.
 4. Create an **APNs auth key** (Keys ▸ ✚ ▸ Apple Push Notifications service).
    Download the `.p8` — Apple allows this **once**. It does not expire. Note the

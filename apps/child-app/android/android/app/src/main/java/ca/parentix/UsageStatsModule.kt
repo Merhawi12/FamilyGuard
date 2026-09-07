@@ -1,4 +1,4 @@
-package com.parentix
+package ca.parentix
 
 import android.app.AppOpsManager
 import android.app.usage.UsageStatsManager

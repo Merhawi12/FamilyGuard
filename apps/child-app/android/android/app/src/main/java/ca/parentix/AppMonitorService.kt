@@ -1,4 +1,4 @@
-package com.parentix
+package ca.parentix
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo

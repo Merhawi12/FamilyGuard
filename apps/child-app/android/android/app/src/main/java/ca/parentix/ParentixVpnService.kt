@@ -1,4 +1,4 @@
-package com.parentix
+package ca.parentix
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -29,8 +29,8 @@ import kotlin.concurrent.thread
 class ParentixVpnService : VpnService() {
 
     companion object {
-        const val ACTION_START = "com.parentix.VPN_START"
-        const val ACTION_STOP  = "com.parentix.VPN_STOP"
+        const val ACTION_START = "ca.parentix.VPN_START"
+        const val ACTION_STOP  = "ca.parentix.VPN_STOP"
         const val EXTRA_DOMAINS = "domains"
         const val CHANNEL_ID = "px_vpn"
         const val NOTIF_ID = 2

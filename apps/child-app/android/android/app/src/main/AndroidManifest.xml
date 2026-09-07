@@ -69,13 +69,18 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="ca.parentix.child"/>
+        <!-- The identifier this app shipped under before the rename. Kept so a
+             linking link a parent already sent still opens the app rather than
+             nothing; see shared/app.config.base.js and shared/App.js, whose
+             `prefixes` array has to list both for the route to resolve. -->
         <data android:scheme="com.parentix.child"/>
       </intent-filter>
     </activity>
     <activity android:name="com.facebook.react.devsupport.DevSettingsActivity" android:exported="false"/>
 
     <service
-      android:name="com.parentix.AppMonitorService"
+      android:name="ca.parentix.AppMonitorService"
       android:exported="true"
       android:label="@string/app_name"
       android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
@@ -88,7 +93,7 @@
     </service>
 
     <service
-      android:name="com.parentix.ParentixVpnService"
+      android:name="ca.parentix.ParentixVpnService"
       android:exported="false"
       android:foregroundServiceType="specialUse"
       android:permission="android.permission.BIND_VPN_SERVICE">
@@ -101,7 +106,7 @@
     </service>
 
     <receiver
-      android:name="com.parentix.BootReceiver"
+      android:name="ca.parentix.BootReceiver"
       android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.BOOT_COMPLETED"/>
