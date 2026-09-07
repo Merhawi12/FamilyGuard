@@ -44,6 +44,27 @@ const instance = {
       })),
     },
   },
+  /**
+   * Resolves by default, for the same reason `checkout.sessions.retrieve` does:
+   * this is on the fulfilment path. The activation receipt looks the invoice up
+   * to put a download link and a renewal date in the email, and a mock that
+   * threw would make every receipt test a test of the degradation branch — which
+   * is precisely how the first payment ended up being the one payment with no
+   * invoice attached.
+   *
+   * Note that the default `sessions.retrieve` above carries no `invoice`, so
+   * this is only reached by a test that puts one there. That is deliberate: a
+   * session with no invoice is a real case (`no_payment_required`) and the
+   * receipt has to read correctly without one.
+   */
+  invoices: {
+    retrieve: jest.fn(async (id) => ({
+      id,
+      hosted_invoice_url: `https://stripe.test/invoice/${id}`,
+      period_end: 1793491200,
+      lines: { data: [{ period: { end: 1793491200 } }] },
+    })),
+  },
   billingPortal: {
     sessions: {
       create: jest.fn(async () => ({ url: 'https://stripe.test/portal' })),

@@ -63,7 +63,11 @@ const billingGaps = () => {
     }
   }
   if (env.stripe.secretKey && !env.stripe.webhookSecret) {
-    gaps.push('STRIPE_WEBHOOK_SECRET (renewals, cancellations and failed cards will never reach this API)');
+    // Named in customer-visible terms as well as internal ones: without this,
+    // `invoice.paid` never arrives, and that is the only thing that tells a
+    // subscriber their monthly payment went through. Nothing polls Stripe for
+    // it, so the receipts simply stop after the first month.
+    gaps.push('STRIPE_WEBHOOK_SECRET (renewals, cancellations, failed cards and every monthly payment receipt will never reach this API)');
   }
   return gaps.concat(env.stripe.problems || []);
 };

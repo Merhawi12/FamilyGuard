@@ -172,6 +172,104 @@ const sendPasswordChangedEmail = ({ name, email, when, viaReset }) =>
     `),
   });
 
+/**
+ * The two money notices: the plan going live, and each month it is paid for.
+ *
+ * Not governed by `notificationPrefs`, for the same reason the two security
+ * notices above are not. That table is about what a parent hears concerning
+ * their *child* — safe zones, screen time, flagged messages — and every entry is
+ * optional because an inbox full of `blocked_app_attempt` is how people learn to
+ * ignore the rest. A charge against a card is not that. It is a financial record
+ * of a recurring payment, it is the only evidence a customer has that the
+ * subscription is doing what they agreed to, and it is how somebody notices a
+ * subscription they meant to cancel is still billing them.
+ *
+ * Both are addressed to the account holder, so both are silent no-ops for a
+ * phone-only account with no address on file — `send` returns false on a missing
+ * recipient, and the in-app notification and the push still land.
+ *
+ * `amountLabel` arrives already formatted (see `utils/billingNotice`), because
+ * the same string appears in the bell and the push and the three must not
+ * disagree about what was charged. It is empty when Stripe reported no amount —
+ * a full-discount coupon, or a completion that carried no total — and the
+ * sentence is written to read correctly without it rather than printing a
+ * confident "$NaN".
+ */
+const PLAN_SETTINGS_URL = () => `${env.clientUrl}/dashboard/settings?section=plan`;
+
+/**
+ * The purchase receipt.
+ *
+ * `receiptUrl` and `renewsOn` were not in this signature at all, so the one
+ * payment a customer is most likely to want a record of was the one with nothing
+ * to download — the monthly renewals linked their invoice and the purchase that
+ * started the subscription did not. Both are optional and the copy is written to
+ * read correctly without either: a `no_payment_required` session (a full
+ * discount, a trial with no card due) has no invoice to link, and that is not a
+ * failure.
+ *
+ * The summary block states what was bought, for how much, and when it happens
+ * again. That last line is the one that stops a monthly subscription being a
+ * surprise thirty days later.
+ */
+const sendSubscriptionActivatedEmail = ({
+  name, email, planLabel, amountLabel, renewsOn, receiptUrl,
+}) =>
+  send({
+    to: email,
+    subject: `Your Parentix ${planLabel} is active`,
+    html: layout(`
+      <h2>Hi ${escapeHtml(name)},</h2>
+      <p>Thank you — your payment ${amountLabel ? `of <strong>${escapeHtml(amountLabel)}</strong> ` : ''}was
+      successful and your <strong>${escapeHtml(planLabel)}</strong> is now active on your account.</p>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#f8fafc;border-radius:8px;padding:4px 0;margin:16px 0;">
+        <tr>
+          <td style="padding:10px 20px;color:#64748b;">Plan</td>
+          <td style="padding:10px 20px;color:#0f172a;font-weight:700;text-align:right;">${escapeHtml(planLabel)}</td>
+        </tr>
+        ${amountLabel ? `
+        <tr>
+          <td style="padding:10px 20px;color:#64748b;">Amount paid</td>
+          <td style="padding:10px 20px;color:#0f172a;font-weight:700;text-align:right;">${escapeHtml(amountLabel)}</td>
+        </tr>` : ''}
+        <tr>
+          <td style="padding:10px 20px;color:#64748b;">Billing</td>
+          <td style="padding:10px 20px;color:#0f172a;font-weight:700;text-align:right;">Monthly</td>
+        </tr>
+        ${renewsOn ? `
+        <tr>
+          <td style="padding:10px 20px;color:#64748b;">Next payment</td>
+          <td style="padding:10px 20px;color:#0f172a;font-weight:700;text-align:right;">${escapeHtml(renewsOn)}</td>
+        </tr>` : ''}
+      </table>
+
+      ${receiptUrl ? `<p><a href="${escapeHtml(receiptUrl)}">View or download your invoice</a></p>` : ''}
+
+      <p>Every Premium feature is available straight away: real-time location, safe zones,
+      website filtering and AI safety checks, across as many devices as you need.</p>
+      <p>This is a <strong>monthly subscription</strong>. We'll email you a receipt each time it
+      renews, and you can change or cancel it at any time from
+      <a href="${escapeHtml(PLAN_SETTINGS_URL())}">Settings &rarr; Plan</a>.</p>
+    `),
+  });
+
+const sendSubscriptionRenewedEmail = ({ name, email, planLabel, amountLabel, renewsOn, receiptUrl }) =>
+  send({
+    to: email,
+    subject: 'Your Parentix payment receipt',
+    html: layout(`
+      <h2>Hi ${escapeHtml(name)},</h2>
+      <p>Your monthly payment ${amountLabel ? `of <strong>${escapeHtml(amountLabel)}</strong> ` : ''}was
+      received and your <strong>${escapeHtml(planLabel)}</strong> stays active.
+      ${renewsOn ? `The next payment is due on <strong>${escapeHtml(renewsOn)}</strong>.` : ''}</p>
+      ${receiptUrl ? `<p><a href="${escapeHtml(receiptUrl)}">View or download your invoice</a></p>` : ''}
+      <p>Nothing to do — this is just so you have a record of it. You can change or cancel your
+      subscription at any time from
+      <a href="${escapeHtml(PLAN_SETTINGS_URL())}">Settings &rarr; Plan</a>.</p>
+    `),
+  });
+
 const ALERT_TYPE_LABELS = {
   left_safe_zone: 'Left Safe Zone',
   entered_safe_zone: 'Arrived at Safe Zone',
@@ -280,5 +378,7 @@ module.exports = {
   sendPasswordResetCodeEmail,
   sendNewSignInEmail,
   sendPasswordChangedEmail,
+  sendSubscriptionActivatedEmail,
+  sendSubscriptionRenewedEmail,
   ALERT_TYPE_LABELS,
 };

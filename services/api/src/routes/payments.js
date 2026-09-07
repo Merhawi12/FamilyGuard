@@ -13,6 +13,9 @@ const { serializeUser } = require('../utils/serializers');
 // The client itself lives in services/billing, because closing an account needs
 // it too and two clients would be two connection pools.
 const { stripe } = require('../services/billing');
+// The receipt: bell, email and push. Never awaited by a handler — see `track`.
+const { notifySubscriptionPayment } = require('../utils/billingNotice');
+const { track } = require('../utils/background');
 
 // Checkout targets, derived from the catalogue so a plan cannot be sellable
 // here and absent there — the mismatch that let `family` outlive its removal
@@ -111,10 +114,19 @@ const RETRY_WILL_NOT_HELP = new Set([
  * unique constraint on `stripeEventId` makes the second a no-op instead of a
  * duplicate row — which would otherwise double-count the sale on the console's
  * Billing screen.
+ *
+ * The return value says whether *this* call was the one that recorded it, and
+ * that is what decides who tells the customer. Both paths report the same
+ * payment and both would otherwise send a receipt, so the customer would be
+ * emailed twice for one charge — and the two are genuinely concurrent, since
+ * Stripe's webhook and the browser's return race each other. Letting the unique
+ * constraint pick the winner is the only version of this that is safe under that
+ * race: whoever inserts the row sends, and the loser learns it lost.
  */
 const recordTransaction = async (data, stripeEventId) => {
   try {
     await Transaction.create({ ...data, stripeEventId });
+    return true;
   } catch (err) {
     // A duplicate surfaces as a SequelizeUniqueConstraintError whose message is
     // just "Validation error" — check the type, not the text, so real failures
@@ -122,6 +134,7 @@ const recordTransaction = async (data, stripeEventId) => {
     if (err.name !== 'SequelizeUniqueConstraintError') {
       logger.error('Failed to record transaction', { error: err.message });
     }
+    return false;
   }
 };
 
@@ -146,7 +159,49 @@ const recordTransaction = async (data, stripeEventId) => {
  * which is unique per delivery and is exactly what this was keyed on before the
  * confirm route existed.
  */
-const applyCheckoutCompletion = async (user, session, fallbackKey) => {
+/**
+ * The invoice behind a completed Checkout session.
+ *
+ * The first payment's receipt used to carry no invoice at all. Only the monthly
+ * `invoice.paid` handler passed a `receiptUrl`, because that event *is* an
+ * invoice — a Checkout session only carries its id, so the activation email
+ * offered nothing to download for the one payment a customer is most likely to
+ * want a record of. The renewals were documented and the purchase was not.
+ *
+ * Three shapes have to be tolerated, and the difference is not cosmetic:
+ *
+ *   - a **string** id, which is what both callers actually see (the webhook's
+ *     event payload and `sessions.retrieve` without an `expand`);
+ *   - an **object**, if a caller ever expands it — returned as-is rather than
+ *     re-fetched, so adding `expand` upstream is a saving and not a bug;
+ *   - **null**, which is legitimate. A `no_payment_required` session — a
+ *     hundred-percent coupon, a trial with no card due — completes and owes
+ *     nothing, so there is no invoice to link and the email is written to read
+ *     correctly without one.
+ *
+ * Never throws. This runs off the back of a settled payment, so a Stripe blip
+ * here must cost the receipt its download link and nothing else — least of all a
+ * 5xx from the webhook, which would put the event back in Stripe's retry
+ * schedule after the transaction row already exists, and the receipt would then
+ * never be sent at all.
+ */
+const invoiceForSession = async (session) => {
+  const ref = session?.invoice;
+  if (!ref) return null;
+  if (typeof ref === 'object') return ref;
+  if (!stripe) return null;
+
+  try {
+    return await stripe.invoices.retrieve(ref);
+  } catch (err) {
+    logger.error('Could not retrieve the invoice for a completed checkout', {
+      invoice: ref, error: err.message,
+    });
+    return null;
+  }
+};
+
+const applyCheckoutCompletion = async (user, session, { fallbackKey, io } = {}) => {
   const plan = session.metadata?.plan || 'premium';
 
   await User.update(
@@ -154,7 +209,7 @@ const applyCheckoutCompletion = async (user, session, fallbackKey) => {
     { where: { id: user.id } }
   );
 
-  await recordTransaction({
+  const firstReport = await recordTransaction({
     userId: user.id,
     type: 'checkout_completed',
     plan,
@@ -162,6 +217,51 @@ const applyCheckoutCompletion = async (user, session, fallbackKey) => {
     amount: session.amount_total,
     currency: session.currency,
   }, session.id ? `checkout:${session.id}` : fallbackKey);
+
+  /**
+   * Telling the customer, exactly once.
+   *
+   * Gated on the transaction insert rather than on which path we are: this
+   * function runs for the webhook *and* for the customer's return from Checkout,
+   * they race, and whichever loses must not send a second receipt for the same
+   * charge. See `recordTransaction`.
+   *
+   * Not awaited. A payment is settled by the time this runs, and neither Stripe
+   * nor a customer watching the plan screen should wait on an SMTP relay —
+   * worse, a mail failure inside the webhook handler would answer 5xx and put
+   * the event back in Stripe's retry schedule, where the transaction row now
+   * exists and the receipt would never be sent again. `track` keeps a handle on
+   * it so a redeploy cannot drop it mid-flight and the tests can await it.
+   */
+  if (firstReport) {
+    /**
+     * The invoice lookup lives inside the tracked work, not before it.
+     *
+     * It is one Stripe round trip and it is only worth making for the caller
+     * that actually sends the receipt: the webhook and the customer's return
+     * genuinely race, `firstReport` is how the loser is told to stay quiet, and
+     * fetching the invoice before that check would spend the call on both. It
+     * also keeps the round trip off the critical path — the webhook has to
+     * answer Stripe promptly, and the customer is watching the plan screen.
+     */
+    track((async () => {
+      const invoice = await invoiceForSession(session);
+      return notifySubscriptionPayment({
+        io,
+        user,
+        kind: 'activated',
+        plan,
+        amount: session.amount_total,
+        currency: session.currency,
+        // The line item's period is the subscription's own, and the invoice's
+        // is the billing window; they agree for a straightforward monthly plan.
+        // Either answers the question the customer actually has — "when does
+        // this happen again" — which the activation email could not say before.
+        periodEnd: invoice?.lines?.data?.[0]?.period?.end ?? invoice?.period_end,
+        receiptUrl: invoice?.hosted_invoice_url || null,
+      });
+    })());
+  }
 
   return plan;
 };
@@ -481,7 +581,7 @@ router.post('/checkout/confirm', authenticate, async (req, res) => {
       });
     }
 
-    const plan = await applyCheckoutCompletion(user, session);
+    const plan = await applyCheckoutCompletion(user, session, { io: req.app.get('io') });
     await user.reload();
 
     logger.info('Checkout confirmed on return from Stripe', { userId: user.id, plan, sessionId });
@@ -575,7 +675,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         // same function, so the two paths cannot come to different conclusions
         // about what a completed session grants. The event id is the key of last
         // resort, for a completion that names no session.
-        await applyCheckoutCompletion(user, session, event.id);
+        await applyCheckoutCompletion(user, session, { fallbackKey: event.id, io: req.app.get('io') });
         break;
       }
 
@@ -604,10 +704,47 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         const invoice = event.data.object;
         const user = await User.findOne({ where: { stripeCustomerId: invoice.customer } });
         if (user) {
-          await record({
+          const firstReport = await record({
             userId: user.id, type: 'invoice_paid', plan: user.plan, status: 'succeeded',
             amount: invoice.amount_paid, currency: invoice.currency,
           });
+
+          /**
+           * The monthly receipt — the half of this that a customer notices most.
+           *
+           * Premium bills every month and nothing told anybody. A recurring
+           * charge that arrives silently is the one people find on a statement
+           * and resent, and it is also how a subscription somebody meant to
+           * cancel keeps taking money unremarked.
+           *
+           * `subscription_create` is skipped because it is the *first* invoice
+           * of a new subscription, and `checkout.session.completed` has already
+           * congratulated them on the same charge moments earlier. Excluding
+           * that one reason rather than accepting only `subscription_cycle` is
+           * deliberate: a proration, a retried charge and a manually issued
+           * invoice are all real payments worth a receipt, and an invoice that
+           * somehow carried no `billing_reason` at all is far better reported
+           * twice than never — the complaint being fixed here is silence.
+           *
+           * Keyed on the event id, so Stripe redelivering the same invoice
+           * (which it does, for days, after any 5xx) sends one receipt.
+           */
+          if (firstReport && invoice.billing_reason !== 'subscription_create') {
+            track(notifySubscriptionPayment({
+              io: req.app.get('io'),
+              user,
+              kind: 'renewed',
+              plan: user.plan,
+              amount: invoice.amount_paid,
+              currency: invoice.currency,
+              // The line item's period is the subscription's own; `period_end`
+              // on the invoice is the billing window and matches it for a
+              // straightforward monthly plan. Either is the date the customer
+              // is asking about — "when does this happen again".
+              periodEnd: invoice.lines?.data?.[0]?.period?.end ?? invoice.period_end,
+              receiptUrl: invoice.hosted_invoice_url || null,
+            }));
+          }
         }
         break;
       }
