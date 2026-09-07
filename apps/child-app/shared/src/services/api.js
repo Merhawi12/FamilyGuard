@@ -68,6 +68,13 @@ api.interceptors.response.use(
   },
 );
 
+/**
+ * Samples per activity request. Mirrors `MAX_SAMPLES_PER_BATCH` in
+ * services/api/src/controllers/deviceController.js, which refuses anything
+ * larger.
+ */
+const MAX_ACTIVITY_BATCH = 200;
+
 // ── Device linking ────────────────────────────────────────────────────────────
 export const device = {
   /**
@@ -90,6 +97,28 @@ export const device = {
   getContacts: () => api.get('/devices/me/contacts'),
   heartbeat: () => api.post('/devices/me/heartbeat'),
   logActivity: (data) => api.post('/devices/me/activity', data),
+  /**
+   * A whole usage sync — every app with time on it today — in one request.
+   *
+   * This is what `syncUsageStats` calls. It used to call `logActivity` once per
+   * app inside an awaited loop, so a phone with forty used apps opened forty
+   * connections every fifteen minutes; see services/monitoring.js.
+   *
+   * Chunked at the server's own ceiling rather than left to fail against it. No
+   * real handset reaches 200 apps with a minute of use in one day, which is
+   * exactly why a device that somehow did would be the one nobody had tested:
+   * the request would 400, the caller would log it, and that phone would report
+   * no usage at all — silently, and for as long as it stayed installed.
+   */
+  logActivityBatch: async (samples) => {
+    let last;
+    for (let i = 0; i < samples.length; i += MAX_ACTIVITY_BATCH) {
+      last = await api.post('/devices/me/activity/batch', {
+        samples: samples.slice(i, i + MAX_ACTIVITY_BATCH),
+      });
+    }
+    return last;
+  },
   logWebHistory: (visits) => api.post('/devices/me/web-history', { visits }),
   registerPushToken: (token, label) => api.post('/devices/me/push-token', { token, label }),
   removePushToken: (token) => api.delete('/devices/me/push-token', { data: { token } }),

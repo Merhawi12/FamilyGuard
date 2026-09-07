@@ -631,6 +631,185 @@ const deviceLogActivity = async (req, res, next) => {
   }
 };
 
+/**
+ * Batch ceiling. A phone reports one sample per app it has been opened in today;
+ * a heavily used handset is a few dozen, and 200 is well clear of any real one
+ * while still bounding what a single request can ask the database to write.
+ */
+const MAX_SAMPLES_PER_BATCH = 200;
+
+/**
+ * POST /api/devices/me/activity/batch — a whole usage sync in one request.
+ *
+ * ── What this replaces ───────────────────────────────────────────────────────
+ *
+ * The child app called `POST /me/activity` once per app, sequentially, awaiting
+ * each before starting the next. A phone with forty used apps therefore spent
+ * forty round trips on every sync — and a sync runs at launch, on every
+ * background-fetch wake (~15 min), and whenever the child returns from Settings.
+ * On a school 4G connection at 300 ms that is a twelve-second burst with the
+ * radio held open, on a battery the product exists to sit quietly on top of, and
+ * it cost the API forty `SELECT`s and forty `UPDATE`s in eighty separate
+ * statements to write what is one screenful of numbers.
+ *
+ * ── What it does instead ─────────────────────────────────────────────────────
+ *
+ * One request, and two queries regardless of how many apps are in it: a single
+ * `SELECT` for every row already recorded against this child in the reported
+ * day, then updates only for the rows whose totals actually moved plus one
+ * `bulkCreate` for the apps seen for the first time today. A sync that reports
+ * the same minutes as the last one now writes nothing at all, which is the
+ * common case — a phone in a pocket reports the same totals every fifteen
+ * minutes until someone picks it up.
+ *
+ * The per-sample semantics are deliberately identical to the single-item handler
+ * above, because both are live: an APK already in the field goes on posting one
+ * at a time, and the two must not disagree about what a day is or which total
+ * wins. `deviceLogActivity` stays exactly as it was for that reason.
+ */
+const deviceLogActivityBatch = async (req, res, next) => {
+  try {
+    const { samples } = req.body;
+    if (!Array.isArray(samples)) {
+      return res.status(400).json({ error: 'samples must be an array' });
+    }
+    if (samples.length > MAX_SAMPLES_PER_BATCH) {
+      return res.status(400).json({ error: `At most ${MAX_SAMPLES_PER_BATCH} samples per request` });
+    }
+    if (samples.length === 0) {
+      await Device.update({ lastSeen: new Date() }, { where: { id: req.deviceId } });
+      return res.status(200).json({ created: 0, updated: 0, unchanged: 0, rejected: 0, received: 0 });
+    }
+
+    /**
+     * The day every sample in this batch belongs to.
+     *
+     * Taken from the first usable `startTime` rather than per sample, because a
+     * sync reports one device's single usage day — `syncUsageStats` stamps every
+     * sample with the same local midnight precisely so the server can file them
+     * together. Deriving one window is what lets the lookup below be a single
+     * query; a per-sample window would put us back to one query per app.
+     *
+     * A batch straddling midnight is the one case this simplification gets
+     * approximately right rather than exactly: the samples land in the window of
+     * whichever day the device stamped them with, which is the day the device
+     * measured them over. That is the same answer the per-item handler gives.
+     */
+    const stamped = samples
+      .map((sample) => new Date(sample?.startTime ?? NaN))
+      .find((date) => !Number.isNaN(date.getTime()));
+    const { start: dayStart, end: dayEnd } = usageDayWindow(stamped || new Date());
+
+    // Malformed entries are dropped and counted rather than failing the batch:
+    // one unparseable package name must not cost the device the rest of its day.
+    const clean = [];
+    let rejected = 0;
+    for (const sample of samples) {
+      const appPackage = typeof sample?.appPackage === 'string' ? sample.appPackage.trim() : '';
+      if (!appPackage) { rejected += 1; continue; }
+      clean.push({
+        appPackage,
+        appName: sample.appName || appPackage,
+        durationMinutes: Number.isFinite(sample.durationMinutes) ? Math.max(0, sample.durationMinutes) : 0,
+        startTime: sample.startTime,
+        endTime: sample.endTime,
+      });
+    }
+
+    // Last one wins if a device somehow reports the same package twice — the
+    // totals are cumulative, so the duplicate carries no extra information and
+    // sending both through would make the write order decide the answer.
+    const byPackage = new Map(clean.map((sample) => [sample.appPackage, sample]));
+
+    // The one lookup. `appPackage` is constrained to what was actually reported
+    // so a child with hundreds of apps on record does not have the whole day
+    // read back to update a handful of them.
+    const existing = await ActivityLog.findAll({
+      where: {
+        childId: req.childId,
+        category: 'app_usage',
+        appPackage: [...byPackage.keys()],
+        startTime: { [Op.gte]: dayStart, [Op.lt]: dayEnd },
+      },
+      order: [['startTime', 'ASC']],
+    });
+
+    const rowFor = new Map();
+    // Ascending, so the first row seen for a package is the one the single-item
+    // handler's `order` would have picked; later duplicates are left alone.
+    for (const row of existing) {
+      if (!rowFor.has(row.appPackage)) rowFor.set(row.appPackage, row);
+    }
+
+    const now = new Date();
+    const updates = [];
+    const inserts = [];
+    let unchanged = 0;
+
+    for (const [appPackage, sample] of byPackage) {
+      const row = rowFor.get(appPackage);
+      if (!row) {
+        inserts.push({
+          deviceId: req.deviceId,
+          childId: req.childId,
+          appName: sample.appName,
+          appPackage,
+          category: 'app_usage',
+          startTime: sample.startTime || now,
+          endTime: sample.endTime || now,
+          durationMinutes: sample.durationMinutes,
+        });
+        continue;
+      }
+
+      // The client sends today's cumulative minutes, so the larger figure wins:
+      // a late or partial sync must never shrink a total that was already
+      // recorded. Same rule as the single-item handler.
+      const minutes = Math.max(row.durationMinutes || 0, sample.durationMinutes);
+      // A phone sitting untouched re-reports identical totals every quarter of
+      // an hour. Recognising that and writing nothing is most of the saving
+      // here — and it keeps `updatedAt` meaning "this figure moved".
+      if (minutes === (row.durationMinutes || 0) && row.deviceId === req.deviceId) {
+        unchanged += 1;
+        continue;
+      }
+      updates.push(row.update({
+        durationMinutes: minutes,
+        endTime: sample.endTime || now,
+        appName: sample.appName || row.appName,
+        deviceId: req.deviceId,
+      }));
+    }
+
+    /**
+     * Written together rather than one after another.
+     *
+     * `individualHooks` is set explicitly and is not decoration. `bulkCreate`
+     * skips a model's `beforeCreate` by default, and ActivityLog's is what
+     * encrypts `url` and derives its blind index. A usage sample carries no url
+     * today, so the default would work — right up until someone adds one here,
+     * at which point rows would be written in plain text and nothing would fail.
+     * Making the batch behave exactly like the loop it replaces is cheaper than
+     * remembering that.
+     */
+    await Promise.all([
+      ...updates,
+      inserts.length ? ActivityLog.bulkCreate(inserts, { individualHooks: true }) : null,
+      Device.update({ lastSeen: new Date() }, { where: { id: req.deviceId } }),
+    ].filter(Boolean));
+
+    return res.status(200).json({
+      created: inserts.length,
+      updated: updates.length,
+      unchanged,
+      rejected,
+      received: samples.length,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 // ── Web history ───────────────────────────────────────────────────────────────
 
 /** Longest gap between two lookups of a domain that still counts as one visit. */
@@ -679,6 +858,40 @@ const deviceLogWebHistory = async (req, res, next) => {
     // same host repeatedly, and one alert should speak for all of them.
     const accepted = [];
 
+    /**
+     * Every row this batch could merge onto, in one query.
+     *
+     * This was a `findOne` per visit, inside the loop below and awaited — so a
+     * full 200-visit batch cost 200 round trips to the database before the
+     * device could clear its queue, and a phone that had been offline for an
+     * afternoon sent the largest batches on the slowest connections. The
+     * candidates are the rows whose `endTime` still falls inside the visit
+     * window, which is the only condition `stillOpen` tests; anything older
+     * cannot be merged onto whatever order it comes back in.
+     *
+     * Scoped by `urlHash` — the blind index — rather than by domain, because
+     * `url` is encrypted with a random IV and is not searchable. See
+     * utils/crypto.js.
+     */
+    const hashes = [...new Set(
+      visits.map((visit) => normalizeDomain(visit?.domain)).filter(Boolean).map(blindIndex),
+    )];
+    const openRows = hashes.length === 0 ? [] : await ActivityLog.findAll({
+      where: {
+        childId: req.childId,
+        category: 'browsing',
+        urlHash: hashes,
+        endTime: { [Op.gte]: windowStart },
+      },
+      order: [['startTime', 'DESC']],
+    });
+    // Newest first, so the first row seen for a hash is the one the per-visit
+    // `order: [['startTime', 'DESC']]` would have returned.
+    const openFor = new Map();
+    for (const row of openRows) {
+      if (!openFor.has(row.urlHash)) openFor.set(row.urlHash, row);
+    }
+
     for (const visit of visits) {
       const domain = normalizeDomain(visit?.domain);
       // A malformed entry is dropped and counted rather than failing the batch —
@@ -691,10 +904,7 @@ const deviceLogWebHistory = async (req, res, next) => {
       const count = Number.isFinite(visit.count) && visit.count > 0 ? Math.floor(visit.count) : 1;
 
       const urlHash = blindIndex(domain);
-      const existing = await ActivityLog.findOne({
-        where: { childId: req.childId, category: 'browsing', urlHash },
-        order: [['startTime', 'DESC']],
-      });
+      const existing = openFor.get(urlHash);
 
       const stillOpen = existing?.endTime && new Date(existing.endTime) >= windowStart;
       if (stillOpen) {
@@ -708,7 +918,7 @@ const deviceLogWebHistory = async (req, res, next) => {
         });
         merged += 1;
       } else {
-        await ActivityLog.create({
+        const row = await ActivityLog.create({
           deviceId: req.deviceId,
           childId: req.childId,
           category: 'browsing',
@@ -723,6 +933,17 @@ const deviceLogWebHistory = async (req, res, next) => {
           blocked: !!visit.blocked,
         });
         created += 1;
+        /**
+         * Offered to the rest of this batch as a merge target.
+         *
+         * The lookup above happens once, before the loop, where the per-visit
+         * `findOne` it replaces happened inside it and therefore saw rows this
+         * loop had just written. Without this line two entries for one domain in
+         * a single batch would stop merging and start appending — which is the
+         * exact behaviour `VISIT_WINDOW_MS` exists to prevent, reintroduced by
+         * the optimisation meant to be invisible.
+         */
+        openFor.set(urlHash, row);
       }
     }
 
@@ -760,4 +981,5 @@ module.exports = {
   getDevices, generateLink, regenerateLink, confirmLink, updateDevice, removeDevice,
   blockDevice, unblockDevice,
   getDeviceRules, getDeviceContacts, deviceHeartbeat, deviceLogActivity, deviceLogWebHistory,
+  deviceLogActivityBatch,
 };

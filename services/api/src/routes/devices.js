@@ -4,7 +4,7 @@ const { authenticate, authenticateDevice } = require('../middleware/auth');
 const {
   getDevices, generateLink, regenerateLink, confirmLink, updateDevice, removeDevice,
   getDeviceRules, getDeviceContacts, deviceHeartbeat, deviceLogActivity, deviceLogWebHistory,
-  blockDevice, unblockDevice,
+  deviceLogActivityBatch, blockDevice, unblockDevice,
 } = require('../controllers/deviceController');
 const { registerDeviceToken, removeDeviceToken } = require('../controllers/pushController');
 
@@ -53,6 +53,12 @@ const reissueLimiter = rateLimit({
 router.get('/me/rules', authenticateDevice, getDeviceRules);
 router.get('/me/contacts', authenticateDevice, getDeviceContacts);
 router.post('/me/heartbeat', authenticateDevice, deviceHeartbeat);
+// A whole usage sync in one request. Declared before `/me/activity` would ever
+// be consulted for it — Express matches exact paths, so the order is not
+// load-bearing, but reading them together is how the pair stays understood as
+// two doors onto one behaviour rather than two features. The single-item route
+// below stays for APKs already in the field; see deviceLogActivityBatch.
+router.post('/me/activity/batch', authenticateDevice, deviceLogActivityBatch);
 router.post('/me/activity', authenticateDevice, deviceLogActivity);
 router.post('/me/web-history', authenticateDevice, deviceLogWebHistory);
 router.post('/me/push-token', authenticateDevice, registerDeviceToken);

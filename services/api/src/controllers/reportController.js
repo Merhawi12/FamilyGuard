@@ -41,8 +41,21 @@ const getDailySummary = async (req, res) => {
   ));
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
 
+  /**
+   * Three columns, not the whole row — and here that is a CPU saving, not just a
+   * bandwidth one.
+   *
+   * `ActivityLog.afterFind` decrypts `url` on every row it returns, and a day's
+   * rows include every domain the child's device resolved. Selecting `*` meant
+   * an AES decrypt per browsing row on every load of this screen, to build three
+   * sums that do not look at the url at all. The weekly report beside it already
+   * projected its columns for the bandwidth; this one had the better reason and
+   * was the one still selecting everything.
+   */
   const logs = await ActivityLog.findAll({
     where: { childId: child.id, startTime: { [Op.between]: [start, end] } },
+    attributes: ['durationMinutes', 'appName', 'category'],
+    raw: true,
   });
 
   const totalMinutes = logs.reduce((s, l) => s + (l.durationMinutes || 0), 0);

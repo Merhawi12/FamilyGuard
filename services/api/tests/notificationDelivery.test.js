@@ -107,3 +107,39 @@ describe('an operator announcement', () => {
     expect(await quiet).toBe(true);
   });
 });
+
+/**
+ * The same delivery, for the platform's own messages rather than an operator's.
+ *
+ * A payment receipt is the one notification whose recipient is provably looking
+ * at the screen when it is written: they have just come back from Stripe onto
+ * the plan page. Filing a row and leaving the bell to find it on its next
+ * minute-long poll is the version of this that reads as "nothing happened",
+ * which is what was reported. `billingNotifications.test.js` covers what is
+ * *sent*; this covers it arriving.
+ */
+describe('a payment receipt', () => {
+  const { flushBackground } = require('../src/utils/background');
+
+  it('reaches the dashboard the customer is already looking at', async () => {
+    const parent = await createUser({ plan: 'free', stripeCustomerId: 'cus_test' });
+    const socket = await connect(tokenFor(parent));
+
+    const delivered = waitForEvent(socket, 'notification:new');
+
+    const res = await request(app)
+      .post('/api/payments/checkout/confirm')
+      .set('Authorization', `Bearer ${tokenFor(parent)}`)
+      .send({ sessionId: 'cs_socket_receipt' });
+    expect(res.status).toBe(200);
+
+    const row = await delivered;
+    expect(row).toMatchObject({ userId: parent.id, type: 'success' });
+    expect(row.title).toMatch(/activated/i);
+    expect(row.id).toBeTruthy();
+
+    // The notice is deliberately not awaited by the route; let the rest of it
+    // (email, push) settle so it cannot leak into another test's assertions.
+    await flushBackground();
+  });
+});
