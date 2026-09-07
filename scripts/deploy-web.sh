@@ -32,7 +32,23 @@ select_workspace
 # missing one, which `login:list` would not: that reads the cached credential
 # file and reports an account that Google has since stopped honouring.
 require_firebase_auth() {
-  firebase projects:list --project "$PROJECT_ID" >/dev/null 2>&1 && return 0
+  # Judged on what the CLI said, not on how it exited.
+  #
+  # On Windows the Firebase CLI regularly prints its answer, flushes it, and
+  # then dies in libuv teardown —
+  #
+  #   Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c
+  #
+  # — so the command does its work and still exits non-zero. Trusting the exit
+  # code alone turns a perfectly good login into "not authenticated" and
+  # refuses to deploy, which is worse than having no check at all: it blocks
+  # the happy path and sends the operator off to fix something that works.
+  local out
+  out="$(firebase projects:list --project "$PROJECT_ID" 2>&1)" && return 0
+  grep -qiE 'Failed to list Firebase projects|Authentication Error|not authenticated' <<<"$out" || {
+    warn "firebase exited non-zero but answered — treating as authenticated."
+    return 0
+  }
   die "firebase is not authenticated (or the token has expired).
 
        In Cloud Shell there is no localhost callback, so:

@@ -227,6 +227,27 @@ const run = (command, commandArgs) => new Promise((resolve, reject) => {
   child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`))));
 });
 
+/**
+ * The same, but the output is echoed *and* returned.
+ *
+ * Needed because the Firebase CLI's exit code is not trustworthy on Windows —
+ * see the long note at the auth preflight. Callers judge success on what the
+ * command said rather than on how it exited, so the output has to be both
+ * visible to the operator and available to the script.
+ */
+const capture = (command, commandArgs, { echo = false } = {}) => new Promise((resolve) => {
+  const child = spawn(command, commandArgs, { shell: process.platform === 'win32' });
+  let out = '';
+  const take = (stream, sink) => stream?.on('data', (d) => {
+    out += d;
+    if (echo) sink.write(d);
+  });
+  take(child.stdout, process.stdout);
+  take(child.stderr, process.stderr);
+  child.on('error', () => resolve({ code: -1, out }));
+  child.on('exit', (code) => resolve({ code, out }));
+});
+
 const target = String(args.target || (bucket ? 'gcs' : 'firebase')).toLowerCase();
 
 if (target === 'firebase') {
@@ -246,16 +267,44 @@ if (target === 'firebase') {
    *
    * Hosting credentials are separate from gcloud's: being logged into gcloud,
    * even as the project owner, does not authenticate this.
+   *
+   * ── Why the exit code is not enough, on Windows ─────────────────────────────
+   *
+   * The Firebase CLI on Windows frequently prints its answer, flushes it, and
+   * *then* dies in libuv teardown:
+   *
+   *   Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c
+   *
+   * The command did its work — the project table is right there in the output —
+   * but the process exits non-zero. Judging auth on the exit code alone turned
+   * a successful login into "not authenticated" and refused to publish, which
+   * is exactly the sort of check that is worse than having none: it blocks the
+   * happy path and tells the operator to fix something that is not broken.
+   *
+   * So a clean exit is trusted, and a dirty one is believed only if the output
+   * does not carry the CLI's own failure sentence. That keeps the check honest
+   * about a real auth failure while tolerating a crash that happens after the
+   * question has already been answered.
    */
-  await run('firebase', ['projects:list']).catch(() => die(
-    'firebase is not authenticated (or the token has expired).\n\n'
-    + '    In Cloud Shell there is no localhost callback, so:\n'
-    + '      firebase login --reauth --no-localhost\n\n'
-    + '    Elsewhere:\n'
-    + '      firebase login --reauth\n\n'
-    + '    Being logged into gcloud does not authenticate Hosting — they are\n'
-    + '    separate credential stores.'
-  ));
+  const probe = await capture('firebase', ['projects:list']);
+  const reallyFailed = probe.code !== 0 && /Failed to list Firebase projects|not authenticated|Authentication Error/i.test(probe.out);
+
+  if (probe.code !== 0 && !reallyFailed) {
+    log('  ! firebase exited non-zero but answered — treating as authenticated.');
+    log('    (Known Windows libuv teardown crash; the command had already run.)');
+  }
+
+  if (reallyFailed || probe.code === -1) {
+    die(
+      'firebase is not authenticated (or the token has expired).\n\n'
+      + '    In Cloud Shell there is no localhost callback, so:\n'
+      + '      firebase login --reauth --no-localhost\n\n'
+      + '    Elsewhere:\n'
+      + '      firebase login --reauth\n\n'
+      + '    Being logged into gcloud does not authenticate Hosting — they are\n'
+      + '    separate credential stores.'
+    );
+  }
 
   /**
    * Staged into the shape the URLs promise, rather than deployed from `dist`.
@@ -283,13 +332,25 @@ if (target === 'firebase') {
   log('');
   log(`  Staged into ${path.relative(ROOT, into)}`);
 
-  await run('firebase', ['deploy', '--only', 'hosting:downloads'])
-    .catch((error) => die(
-      `Deploy failed: ${error.message}\n\n`
+  /**
+   * Judged on "Deploy complete!", not on the exit code — same Windows teardown
+   * crash as the preflight, and here it would be worse: the files would be
+   * live, and the script would report a failure the operator then tries to
+   * "fix" by publishing again.
+   */
+  const deployed = await capture('firebase', ['deploy', '--only', 'hosting:downloads'], { echo: true });
+  if (!/Deploy complete!/i.test(deployed.out)) {
+    die(
+      `Deploy did not report success (exit ${deployed.code}).\n\n`
       + '    If Hosting says the site does not exist, create it once:\n'
       + '      firebase hosting:sites:create parentix-downloads\n'
       + '    The target mapping is already in .firebaserc.'
-    ));
+    );
+  }
+  if (deployed.code !== 0) {
+    log('');
+    log('  ! firebase exited non-zero after reporting success — the deploy landed.');
+  }
 } else if (target === 'gcs') {
   if (!bucket) {
     die('No destination. Pass --bucket=gs://your-bucket or set DESKTOP_DOWNLOAD_BUCKET.');
