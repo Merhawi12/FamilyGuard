@@ -478,17 +478,66 @@ is that the ID token coming back is signed by Google and its `aud` claim is
 checked against this value — which is exactly why an empty value disables the
 feature rather than accepting any audience.
 
-> **The packaged Android app needs a second client.** Google refuses OAuth in an
-> embedded WebView, so the button in the APK cannot use the web flow. That needs
-> an **Android** OAuth client, created against the app's package name
-> (`ca.parentix.family`) and the SHA-1 of its signing key, plus a native plugin
-> to drive it. Its client ID then goes in `google_extra_client_ids`, because its
-> tokens carry a different `aud`. Until that is done the button simply does not
-> appear in the app, and email-and-password sign-in works there as normal.
->
-> ```bash
-> keytool -list -v -keystore apps/child-app/android/android/app/debug.keystore >   -alias androiddebugkey -storepass android | grep SHA1
-> ```
+#### The packaged Android app takes a different route to the same token
+
+Google refuses OAuth in an embedded WebView, so the button in the APK cannot use
+the web flow above — that script does not load there at all. It asks Play
+Services through the app's own Capacitor plugin instead
+(`apps/family-app/android/app/src/main/java/ca/parentix/family/GoogleAuthPlugin.java`,
+registered by `MainActivity`), which produces the same kind of Google-signed ID
+token for the same `POST /api/auth/google`. Nothing on the server is specific to
+either route.
+
+Two OAuth clients are involved and they do different jobs:
+
+| | what it is for | where it is named |
+|---|---|---|
+| **Android** client | lets Play Services vouch for *this app* — package name plus signing certificate | nowhere: it is matched, never quoted |
+| **Web** client | becomes the token's `aud`, which the API verifies | `server_client_id`, else `default_web_client_id` |
+
+**1. Create the Android client.** *APIs & Services → Credentials → Create OAuth
+client ID → Android*, package name `ca.parentix.family`, and the SHA-1 of the
+key the APK is actually signed with. Debug and release are different keys and
+each needs its own client — a release build with only the debug fingerprint
+registered fails on tap with "Developer console is not set up correctly", which
+is Play Services being exactly right and completely opaque:
+
+```bash
+# what `npm run apk:family` signs with until a release keystore exists
+keytool -list -v -keystore "$HOME/.android/debug.keystore" \
+  -alias androiddebugkey -storepass android | grep SHA1
+```
+
+It has no client secret and its ID is never typed anywhere. It exists so that
+Play Services will hand a token to this app and to nothing else.
+
+**2. Make sure the API accepts the audience the app is given.** With no
+override, the plugin asks for a token minted for `default_web_client_id` — the
+web client the google-services Gradle plugin generates from
+`apps/family-app/android/app/google-services.json`, which is the Firebase
+project's own. That is *not* the client in `google_client_id`, so its tokens
+carry a different `aud` and the API refuses them until it is told to expect it:
+
+```hcl
+google_extra_client_ids = ["648085611770-njp5p15nmmqoi67rate3srk9pd5arv1t.apps.googleusercontent.com"]
+```
+
+The alternative is to point the app at the client the API already accepts, by
+adding `server_client_id` to
+`apps/family-app/android/app/src/main/res/values/strings.xml` — the file carries
+the line, commented out. Either is fine; do one. Both clients must live in the
+same Google Cloud project as the Android client.
+
+Until step 1 is done the button still appears, because nothing on the device can
+know ahead of time that a fingerprint is unregistered; it reports that Google
+sign-in is not working in this app and puts Play Services' own words in the log.
+Until step 2 is done the chooser succeeds and the API answers 401. Email and
+password sign-in are unaffected throughout.
+
+The button hides itself only where it genuinely cannot work: no client ID
+compiled into the app, no Google Play Services on the handset, or
+`GET /auth/providers` reporting `google: false`. Nothing extra is needed for the
+iOS build, where it does not appear at all — that plugin is Android-only.
 
 ### 1.10 Point Stripe at the webhook
 
@@ -498,6 +547,23 @@ terraform -chdir=infrastructure/gcp output -raw stripe_webhook_url
 
 Register that endpoint in the Stripe dashboard, then store the signing secret as
 `parentix-<env>-stripe-webhook-secret`.
+
+Subscribe it to at least `checkout.session.completed`,
+`customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`
+and `invoice.payment_failed`.
+
+**Without the secret there are no monthly payment notifications**, and that is
+not a degradation the customer can see. Every delivery fails signature
+verification, so nothing runs — and `invoice.paid` is the only signal this
+service ever gets that a renewal was charged. Nothing polls Stripe for it. The
+*first* payment is still confirmed — the customer's return from Checkout does
+that through `POST /payments/checkout/confirm` — which is exactly what makes the
+gap easy to miss: month one looks correct and every month after it is silent.
+
+The admin console's **Overview → Delivery channels → Payments** tile reports
+this as `degraded` — "can take money, cannot hear back". The secret itself cannot
+be probed from outside: a bogus signature is rejected identically whether the
+configured secret is real or empty.
 
 ---
 
@@ -568,24 +634,98 @@ preview will load and then fail every request.
 ### 2.3 Android apps
 
 ```bash
-npm run apk:child      # the monitored device agent
-npm run apk:family     # the parent app
+npm run apk:child                 # the monitored device agent
+npm run apk:family                # the parent app
+npm run apk:child -- --bundle     # .aab, the only format Play accepts for a new listing
 ```
 
-Both produce a release APK under
-`apps/<app>/android/app/build/outputs/apk/release/`. Neither is built by
-`npm run build`, which only makes the two web bundles — an Android release is a
-separate, explicit step because it needs the SDK, takes minutes, and old
-versions stay installed on real devices long after a web deploy has moved on.
+`assemble` produces a release APK under
+`apps/<app>/android/app/build/outputs/apk/release/`; `--bundle` produces an
+Android App Bundle under `.../outputs/bundle/release/`. An APK is what you
+sideload onto a handset to test, an AAB is what you upload — both come out of
+the same Gradle build and the same signing config, so a tested APK and the AAB
+beside it contain the same code. Neither is built by `npm run build`, which only
+makes the two web bundles: an Android release is a separate, explicit step
+because it needs the SDK, takes minutes, and old versions stay installed on real
+devices long after a web deploy has moved on.
 
 The API hostname is compiled into both, so **a new API hostname means new builds
 and a new Play release**. Installed copies never pick it up.
 
-> **They are signed with the DEBUG key until a keystore exists.** That APK
-> installs fine for testing and Google Play rejects it outright. Generate a real
-> one once, with `apps/child-app/android/android/generate-release-keystore.sh`, and back
-> it up somewhere you will still have in three years: losing it means the listing
-> can never be updated again.
+#### Release signing
+
+> **Builds are signed with the DEBUG key until a keystore exists.** That APK
+> installs fine for testing and Google Play rejects it outright. `build-apk.sh`
+> says so at the end of every build that had no keystore.
+
+The upload key is generated once, by
+`apps/child-app/android/android/generate-release-keystore.sh`, and lands in
+`~/.parentix-signing/Parentix-Child/upload-key.jks` — **outside this repository**.
+`keystore.properties` at the Gradle root is git-ignored and holds only the path
+and the two passwords; the key itself is never inside the working tree, so no
+gitignore edit, `git add -f`, or zip of the project can carry it off the machine.
+
+The current key: JKS, RSA 4096, alias `parentix-child-upload`, certificate valid
+to 2054-01-22 (Play requires validity past 2033-10-22). Store and key passwords
+are distinct, which is why the file is JKS and not PKCS12 — PKCS12 stores one
+password for the whole file and silently ignores a separate `-keypass`.
+
+Confirm a bundle is signed with it rather than the debug key before uploading:
+
+```bash
+jarsigner -verify -certs -verbose:summary app-release.aab   # → CN=Parentix Child, …
+```
+
+> **Losing this key ends the listing.** With Play App Signing enabled (turn it on
+> when the listing is created) a lost *upload* key can be reset through Play
+> Console support. Without it, `ca.parentix.child` can never be updated again.
+> The offline backup package and its recovery instructions are described in
+> `README-SECURITY.txt` inside that package — not in this repository.
+
+#### Before uploading to Play
+
+> **This app targets API 34, and Play now requires 36 for a new listing.** Since
+> 2026-08-31, new apps and updates must target Android 16 (API 36); an upload
+> targeting 34 is rejected at the Play Console, before review. An extension to
+> 2026-11-01 can be requested from Play Console.
+>
+> Raising it is not a one-line change. `targetSdkVersion` lives in
+> `apps/child-app/android/android/build.gradle`, but compiling against SDK 36
+> needs a newer Android Gradle Plugin than React Native 0.73.6 / Expo SDK 50
+> pin, so it pulls an Expo and React Native upgrade behind it. Budget it as its
+> own piece of work, and re-test the four native modules — the accessibility
+> service, the VPN service, usage-stats and the DNS reporter — because API 35
+> and 36 both tightened foreground services and background execution, which is
+> exactly what they rely on.
+
+Verify against the built artifact rather than the source, because these are the
+things that are wrong silently:
+
+```bash
+aapt2 dump badging app-release.apk | grep -E "^package|application-label|targetSdk"
+# package: name='ca.parentix.child' versionCode='1' versionName='1.0.0'
+# application-label:'Parentix Child'
+
+grep -E "google_app_id" \
+  apps/child-app/android/android/app/build/generated/res/processReleaseGoogleServices/values/values.xml
+# must be the ca.parentix.child registration, 1:648085611770:android:68e818b8494820b63ed543
+```
+
+That second one is the trap the 2026-09-04 package rename left behind: the
+Google Services plugin fails loudly on a `package_name` it cannot match and says
+nothing about a `mobilesdk_app_id` belonging to a different registration. That
+build installs, runs, and drops every push notification. It is generated
+per-variant, and an incremental build does not always regenerate it — delete
+`build/generated/res/processReleaseGoogleServices` if in doubt.
+
+To test the bundle itself rather than the APK beside it, `bundletool` builds the
+same split APKs Play would serve and installs them:
+
+```bash
+java -jar bundletool.jar build-apks --bundle app-release.aab --output child.apks \
+  --connected-device --ks <keystore> --ks-key-alias parentix-child-upload
+java -jar bundletool.jar install-apks --apks child.apks
+```
 
 **The Family App is a web app in a Capacitor shell.** `apps/family-app/android`
 is generated by `npx cap add android` and committed, because it holds the signing
@@ -633,11 +773,29 @@ new Play release.
 > hand. `app.config.js`'s `plugins` and `android.permissions` are documentation
 > here; the manifest is what ships.
 >
-> Push to the child device also needs FCM: register `com.parentix.child` in the
+> Push to the child device also needs FCM: register `ca.parentix.child` in the
 > Firebase project, download `google-services.json` into
 > `apps/child-app/android/android/app/`, and upload the FCM credential to the Expo
 > project (`eas credentials`). Expo's relay hands off to FCM for Android
 > delivery, so both halves are required.
+>
+> The child app was renamed from `com.parentix.child` to `ca.parentix.child` (see
+> `apps/child-app/shared/app.config.base.js` for why), and a matching Android app
+> was registered in the `parentix-4be0d` Firebase project on 2026-09-04 —
+> `1:648085611770:android:68e818b8494820b63ed543`. `processDebugGoogleServices`
+> and `processReleaseGoogleServices` both resolve it, so nothing is outstanding.
+>
+> The old `com.parentix.child` registration is still in the project. Leave it
+> until push has been confirmed on a real handset, then delete it.
+>
+> Worth knowing if this ever happens again: the plugin fails loudly on a
+> `package_name` it cannot match, but it says nothing about a `mobilesdk_app_id`
+> that belongs to a different registration. That combination builds, installs,
+> and drops every push — and nothing on the parent's dashboard reports a
+> notification that was never delivered. The check is
+> `build/generated/res/process<Variant>GoogleServices/values/values.xml`: the
+> `google_app_id` in it is what the SDK actually registers with, and a stale
+> generated copy from before a rename will happily survive an incremental build.
 >
 > `android/app/build.gradle` applies the `google-services` plugin only when that
 > file is present, so a build without it succeeds — and then

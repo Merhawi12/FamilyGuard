@@ -7,6 +7,7 @@ import AuthShell from '../components/AuthShell';
 import PasswordField from '../components/PasswordField';
 import PhoneField, { joinPhone } from '../components/PhoneField';
 import { DEFAULT_COUNTRY } from '../countries';
+import googleAuth from '../services/googleAuth';
 
 /**
  * Sign in and sign up, over two identifiers.
@@ -1072,9 +1073,15 @@ export default function Login() {
               One button for both tabs: the API registers on the first Google
               sign-in and signs in on every one after, so there is no separate
               "sign up with Google" for a parent to pick wrongly. It renders
-              nothing at all unless this deployment has an OAuth client. */}
+              nothing at all unless this deployment has an OAuth client.
+
+              `native` is how the same button works in the Android app, where
+              Google refuses to run its browser SDK: the adapter fetches the same
+              ID token from Play Services instead. It is inert in a browser and
+              hides the button on any device that cannot finish the flow. */}
           <GoogleSignInButton
             text={isRegister ? 'signup_with' : 'signin_with'}
+            native={googleAuth}
             onCredential={handleGoogle}
             onError={(err) => setError(errorMessage(err, 'Could not reach Google to sign in.'))}
           />

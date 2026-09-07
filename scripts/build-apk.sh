@@ -193,8 +193,13 @@ else
   # WebView, WebView has no Push API, so FCM is the only way this app is ever
   # notified. Capacitor's android/app/build.gradle applies the google-services
   # plugin only when the file is there, so its absence is silent by default.
+  # Two features hang off this one file here, not just the one the child app
+  # loses. The google-services plugin also generates `default_web_client_id`
+  # from it, which is the audience GoogleAuthPlugin asks Play Services to mint a
+  # token for — so without the file the Google button hides itself as well.
   if [ ! -f "${ANDROID_ROOT}/app/google-services.json" ]; then
-    warn "No google-services.json in apps/family-app/android/app/ — this APK cannot receive push notifications."
+    warn "No google-services.json in apps/family-app/android/app/ — this APK cannot receive push"
+    warn "notifications, and Sign in with Google will not appear (no default_web_client_id)."
     warn "Register ca.parentix.family in the Firebase console and download it. See docs/DEPLOYMENT.md §2.3b."
   fi
 

@@ -68,6 +68,15 @@ dependencies {
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    // Sign in with Google. Credential Manager replaces the deprecated
+    // GoogleSignIn API; `googleid` supplies the Google-specific request option
+    // and the credential it comes back as; `play-services-base` is only used to
+    // ask whether this handset has Play Services at all, which is what lets the
+    // button hide itself on one that does not. See GoogleAuthPlugin.
+    implementation "androidx.credentials:credentials:$androidxCredentialsVersion"
+    implementation "androidx.credentials:credentials-play-services-auth:$androidxCredentialsVersion"
+    implementation "com.google.android.libraries.identity.googleid:googleid:$googleIdVersion"
+    implementation "com.google.android.gms:play-services-base:$playServicesBaseVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

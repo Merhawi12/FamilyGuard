@@ -4,4 +4,16 @@
     <string name="title_activity_main">Parentix Family</string>
     <string name="package_name">ca.parentix.family</string>
     <string name="custom_url_scheme">ca.parentix.family</string>
+
+    <!--
+      Optional. The OAuth *web* client ID that Sign in with Google mints tokens
+      for — the value the API checks the token's `aud` against.
+
+      Left out on purpose: with google-services.json in place, the Gradle plugin
+      generates `default_web_client_id` from it and GoogleAuthPlugin falls back
+      to that, so an app already configured for FCM needs nothing here. Add this
+      only to point the APK at a different client from the Firebase project's:
+
+      <string name="server_client_id" translatable="false">000.apps.googleusercontent.com</string>
+    -->
 </resources>
