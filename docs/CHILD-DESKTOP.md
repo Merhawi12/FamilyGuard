@@ -314,13 +314,81 @@ without either platform touching it.
 
 **Signing is not configured and both installers are unsigned.** On Windows that
 is a SmartScreen warning on first run; on macOS it is Gatekeeper refusing the
-`.pkg` outright. Shipping needs:
+`.pkg` outright.
 
-- Windows: an EV or OV code-signing certificate, and `win.certificateFile` /
-  `certificatePassword` (or an Azure Trusted Signing config).
-- macOS: a Developer ID Application **and** a Developer ID Installer certificate,
-  `hardenedRuntime` (already on), and notarisation — `notarize` in the `mac`
-  block plus `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`.
+### The Windows warning, and what actually removes it
+
+A parent running the current installer gets a full-screen blue wall:
+
+> **Windows protected your PC** — Microsoft Defender SmartScreen prevented an
+> unrecognized app from starting. App: `Parentix-Setup-1.0.0.exe`.
+> Publisher: **Unknown publisher**.
+
+with **Don't run** as the default button. For a product whose whole claim is
+that a non-technical parent can install it, this is the largest obstacle in the
+flow — larger than anything left in the code — and **no code change removes it**.
+It is not a defect in the build: the artifact is valid, and SmartScreen is
+telling the truth. What it needs is a certificate issued against a verified
+legal identity, which is a purchase and a paperwork exercise.
+
+The options are genuinely different, and the difference that matters is *when
+the warning stops*, not the price:
+
+| | Cost | Lead time | Warning stops |
+| --- | --- | --- | --- |
+| **Azure Trusted Signing** | ~$10/month | days, if eligible | quickly — Microsoft's own CA |
+| **EV certificate** | ~$300–600/yr | days–weeks, hardware token posted | **immediately** |
+| **OV certificate** | ~$200–400/yr | days | **not at once** — reputation must accrue |
+
+**The OV trap is worth spelling out.** An OV certificate makes the publisher
+name appear, and SmartScreen keeps warning until that certificate has
+accumulated enough installs to earn reputation — which for a new product with
+few downloads can take weeks and cannot be bought. Paying for OV and expecting
+the wall to disappear on the next build is the mistake to avoid. EV carries
+reputation from the first signature; Azure Trusted Signing chains to a Microsoft
+CA and behaves well in practice.
+
+Azure Trusted Signing is the cheapest credible route, with one gate: the
+organisation normally has to show three years of trading history. A company
+younger than that is pushed back to EV.
+
+**Once a certificate exists, no code changes.** electron-builder picks signing
+up from the environment, so it is a build-time secret and never a committed one:
+
+```bash
+# A .pfx file, or its base64
+CSC_LINK=/path/to/parentix.pfx
+CSC_KEY_PASSWORD=…
+npm run desktop:win
+```
+
+Two things then have to be done, and `scripts/publish-desktop.mjs` checks both:
+
+1. **Set `win.publisherName`** to the certificate's CN. electron-updater
+   compares it before running a downloaded update, and a mismatch does not fail
+   loudly — it refuses every future update, on every installed machine, for
+   ever. The publish script reads the certificate's CN and refuses to publish
+   when the two disagree; it also warns when `publisherName` is missing
+   entirely.
+2. **Never publish an unsigned build once signing is configured.** If a
+   certificate is set up and the artifact comes out unsigned, the signing step
+   failed without failing the build — a clean-looking log that ships a
+   SmartScreen warning to every parent. The publish script treats that as an
+   error, while the current state (no certificate at all) is a loud warning it
+   lets through.
+
+Until then the download page says what is coming, in advance, rather than
+letting a parent meet the wall cold and reasonably conclude they have downloaded
+malware. That block is marked in `download.html` and comes out the day the
+installer is signed.
+
+### macOS
+
+A Developer ID Application **and** a Developer ID Installer certificate,
+`hardenedRuntime` (already on), and notarisation — `notarize` in the `mac` block
+plus `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`. Gatekeeper
+refuses an unsigned `.pkg` outright rather than offering a way through, so
+unlike Windows there is no "click past it" state to ship in the meantime.
 
 The entitlements are deliberately short. The app is **not sandboxed** — that is
 what lets it spawn `lsappinfo` and signal another process, and no entitlement

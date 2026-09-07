@@ -127,6 +127,41 @@ if (!entries.includes(feedFile)) {
   );
 }
 
+// ── Running things ───────────────────────────────────────────────────────────
+
+const run = (command, commandArgs) => new Promise((resolve, reject) => {
+  const child = spawn(command, commandArgs, { stdio: 'inherit', shell: process.platform === 'win32' });
+  child.on('error', reject);
+  child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`))));
+});
+
+/**
+ * The same, but the output is echoed *and* returned.
+ *
+ * Needed twice over: the signature check reads what PowerShell printed, and the
+ * Firebase CLI's exit code is not trustworthy on Windows (see the auth
+ * preflight). Callers judge success on what the command said rather than on how
+ * it exited, so the output has to be both visible to the operator and available
+ * to the script.
+ */
+const capture = (command, commandArgs, { echo = false, shell = process.platform === 'win32' } = {}) => new Promise((resolve) => {
+  // `shell` defaults on for Windows because npm-installed CLIs are `.cmd`
+  // shims that CreateProcess cannot execute directly. It is switched *off* for
+  // anything taking an argument with quotes in it — a shell concatenates rather
+  // than escapes, so a PowerShell script passed that way is at the mercy of its
+  // own punctuation.
+  const child = spawn(command, commandArgs, { shell });
+  let out = '';
+  const take = (stream, sink) => stream?.on('data', (d) => {
+    out += d;
+    if (echo) sink.write(d);
+  });
+  take(child.stdout, process.stdout);
+  take(child.stderr, process.stderr);
+  child.on('error', () => resolve({ code: -1, out }));
+  child.on('exit', (code) => resolve({ code, out }));
+});
+
 // ── 3. The checksum in the feed matches the file beside it ───────────────────
 
 const sha512 = (file) => new Promise((resolve, reject) => {
@@ -161,6 +196,105 @@ if (feedPath && feedSha) {
     );
   }
   log(`  ${feedFile} checksum matches ${feedPath}`);
+}
+
+// ── 3b. Is it signed? ────────────────────────────────────────────────────────
+
+/**
+ * Authenticode, and why this check exists rather than a line in a README.
+ *
+ * An unsigned installer makes Windows show a full-screen SmartScreen wall —
+ * *"Windows protected your PC… Publisher: Unknown publisher"* — with **Don't
+ * run** as the default button. For a product sold on being installable by a
+ * non-technical parent, that is the single largest obstacle in the whole flow,
+ * and it is invisible to every test in this repository because the artifact is
+ * perfectly valid: it is a trust problem, not a build problem.
+ *
+ * Signing is not something code can arrange. It needs a certificate issued to a
+ * verified legal identity, and the private key present at package time. So what
+ * this does is make the state *loud* rather than silent, and — the part that
+ * matters once a certificate exists — turn "the signing step quietly did
+ * nothing" from an unnoticed regression into a refusal to publish.
+ *
+ * The distinction is between *no intent to sign* (today: warn, continue) and
+ * *intent that did not take* (a certificate is configured and the artifact came
+ * out unsigned: stop). The second is the dangerous one, because the build log
+ * looks normal and the artifact looks normal, and the only symptom is a warning
+ * on a parent's screen a week later.
+ */
+const SIGNING_ENV = ['CSC_LINK', 'WIN_CSC_LINK', 'CSC_KEY_PASSWORD', 'AZURE_TENANT_ID'];
+const signingIntended = SIGNING_ENV.some((k) => (process.env[k] || '').trim())
+  || !!projectPkg.build?.win?.certificateFile
+  || !!projectPkg.build?.win?.certificateSubjectName
+  || !!projectPkg.build?.win?.azureSignOptions;
+
+/**
+ * @returns {Promise<{signed: boolean, status: string, subject: string}|null>}
+ *   null when the signature could not be inspected at all — a Linux CI box has
+ *   no `Get-AuthenticodeSignature`, and guessing there would be worse than
+ *   saying so.
+ */
+async function authenticode(file) {
+  if (process.platform !== 'win32') return null;
+  const script = `$ErrorActionPreference='Stop'
+$s = Get-AuthenticodeSignature '${file.replace(/'/g, "''")}'
+Write-Output $s.Status
+Write-Output $(if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { '' })`;
+  const res = await capture('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { shell: false });
+  if (res.code !== 0) return null;
+  const [status = '', subject = ''] = res.out.split(/\r?\n/).map((l) => l.trim());
+  return { signed: status === 'Valid', status, subject };
+}
+
+if (platform === 'windows') {
+  const primary = installers.find((n) => !/-(x64|arm64)\./.test(n)) || installers[0];
+  const sig = await authenticode(path.join(distDir, primary));
+
+  if (sig === null) {
+    log('');
+    log('  ? Signature not checked — this is not Windows, so Authenticode cannot be read here.');
+  } else if (sig.signed) {
+    log('');
+    log(`  Signed: ${sig.subject}`);
+
+    /**
+     * electron-updater compares the *installed* build's publisher against this
+     * string before it will run a downloaded update. A mismatch does not fail
+     * loudly — it refuses the update, for ever, on every machine — so it is
+     * worth saying out loud at publish time.
+     */
+    const declared = projectPkg.build?.win?.publisherName;
+    if (!declared) {
+      log('  ! No `win.publisherName` in package.json. Set it to the CN above, or');
+      log('    electron-updater cannot verify the publisher of future updates.');
+    } else {
+      const names = [].concat(declared);
+      const cn = (sig.subject.match(/CN=([^,]+)/) || [])[1]?.trim();
+      if (cn && !names.includes(cn)) {
+        die(
+          `publisherName does not match the signing certificate.\n\n`
+          + `    package.json says  ${names.join(', ')}\n`
+          + `    the certificate is CN=${cn}\n\n`
+          + '    electron-updater checks this before running a downloaded update, so\n'
+          + '    every installed copy would refuse every future update, silently.'
+        );
+      }
+    }
+  } else if (signingIntended) {
+    die(
+      `The installer is not signed, but signing is configured (${sig.status}).\n\n`
+      + '    A certificate is set up and the artifact came out unsigned, which means\n'
+      + '    the signing step failed without failing the build. Publishing now ships\n'
+      + '    a SmartScreen warning to every parent while the build log looks clean.\n\n'
+      + '    Check the electron-builder output for a signing error, then rebuild.'
+    );
+  } else {
+    log('');
+    log('  ! NOT SIGNED — Windows will show "Windows protected your PC" on first run,');
+    log('    naming an "Unknown publisher", with Don\'t run as the default button.');
+    log('    Parents can still install via More info → Run anyway.');
+    log('    Fixing it needs a code-signing certificate: docs/CHILD-DESKTOP.md §9.');
+  }
 }
 
 // ── 4. What will be uploaded ─────────────────────────────────────────────────
@@ -220,33 +354,6 @@ if (dryRun) {
 }
 
 // ── 5. Publish ───────────────────────────────────────────────────────────────
-
-const run = (command, commandArgs) => new Promise((resolve, reject) => {
-  const child = spawn(command, commandArgs, { stdio: 'inherit', shell: process.platform === 'win32' });
-  child.on('error', reject);
-  child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`))));
-});
-
-/**
- * The same, but the output is echoed *and* returned.
- *
- * Needed because the Firebase CLI's exit code is not trustworthy on Windows —
- * see the long note at the auth preflight. Callers judge success on what the
- * command said rather than on how it exited, so the output has to be both
- * visible to the operator and available to the script.
- */
-const capture = (command, commandArgs, { echo = false } = {}) => new Promise((resolve) => {
-  const child = spawn(command, commandArgs, { shell: process.platform === 'win32' });
-  let out = '';
-  const take = (stream, sink) => stream?.on('data', (d) => {
-    out += d;
-    if (echo) sink.write(d);
-  });
-  take(child.stdout, process.stdout);
-  take(child.stderr, process.stderr);
-  child.on('error', () => resolve({ code: -1, out }));
-  child.on('exit', (code) => resolve({ code, out }));
-});
 
 const target = String(args.target || (bucket ? 'gcs' : 'firebase')).toLowerCase();
 

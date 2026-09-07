@@ -236,6 +236,12 @@ body.nav-open .nav-toggle .ic-close{display:block;}
 }
 .dl-note .use-icon{width:1.2rem;height:1.2rem;color:var(--coral-deep);flex-shrink:0;margin-top:.15rem;}
 .dl-note strong{font-weight:700;}
+/* The SmartScreen note is information, not a caution — it is describing a
+   warning rather than issuing one, and giving it the same coral alarm as the
+   note above would read as two problems stacked on top of each other. */
+.dl-note--smartscreen{background:var(--foam);border-color:var(--line);margin-top:1rem;}
+.dl-note--smartscreen .use-icon{color:var(--current);}
+.dl-note-sub{display:block;margin-top:.5rem;font-size:.84rem;color:var(--slate);}
 
 /* ============ STEPS ============ */
 .steps{display:grid;gap:1.1rem;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));margin-top:2.6rem;}
@@ -348,6 +354,34 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
           websites.
         </div>
       </div>
+
+      <!--
+        Said here, before it happens, rather than left as a surprise.
+
+        The installer is not yet code-signed, so SmartScreen shows a full-screen
+        "Windows protected your PC" wall naming an unknown publisher, with
+        "Don't run" as the default button. A parent who meets that with no
+        warning reasonably concludes they have downloaded malware and stops —
+        and they are right to be careful, which is exactly why the honest move
+        is to describe it in advance rather than to hope they click through.
+
+        This block comes out the day the installer is signed. Nothing else on
+        the page changes.
+      -->
+      <div class="dl-note dl-note--smartscreen">
+        <svg class="use-icon"><use href="#ic-shieldwarn"/></svg>
+        <div>
+          <strong>Windows will show a blue warning the first time you run it.</strong>
+          It says &ldquo;Windows protected your PC&rdquo; and lists the publisher as unknown.
+          That is because our installer is not yet certified with Microsoft &mdash; not because
+          anything is wrong with the file. Click <strong>More info</strong>, then
+          <strong>Run anyway</strong>.
+          <span class="dl-note-sub">
+            Only do this for a file you downloaded from parentix.ca. We are in the process of
+            certifying the installer, after which the warning stops appearing.
+          </span>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -375,7 +409,8 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
         <h3>Download and install</h3>
         <p>
           On your child&rsquo;s computer, download Parentix from this page and run the installer.
-          Enter an administrator password when Windows asks.
+          Windows shows a blue warning first &mdash; see below. Then enter an administrator
+          password when it asks.
         </p>
       </div>
       <div class="step">
