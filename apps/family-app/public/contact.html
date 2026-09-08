@@ -57,7 +57,10 @@ html{scroll-behavior:smooth;}
 body{
   font-family:'Plus Jakarta Sans',system-ui,sans-serif;
   color:var(--ink);
-  background:var(--white);
+  /* One wash for the whole page rather than a background per section — see the
+     note on `.contact`. Fixed so a short page and a tall one look the same
+     instead of the gradient compressing to fit the viewport. */
+  background:linear-gradient(180deg,#f3fafb 0%,#eef5f8 52%,#f8fbfc 100%) fixed;
   line-height:1.6;
   -webkit-font-smoothing:antialiased;
   overflow-x:hidden;
@@ -174,10 +177,7 @@ body.nav-open .nav-toggle .ic-close{display:block;}
 @keyframes blobDrift3{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(28px,34px) scale(1.05);}}
 
 /* ============ PAGE HERO ============ */
-.page-hero{position:relative;padding-top:clamp(8.5rem,14vw,11rem);padding-bottom:clamp(3rem,7vw,5rem);background:var(--foam);overflow:hidden;}
-.page-hero .current-field .blob{opacity:.5;}
-.page-hero .b1{width:420px;height:420px;left:-120px;top:60px;background:radial-gradient(circle at 35% 35%,var(--tide-light),var(--tide) 60%,transparent 100%);}
-.page-hero .b2{width:380px;height:380px;right:-100px;top:-60px;background:radial-gradient(circle at 60% 40%,var(--current),var(--abyss-soft) 70%,transparent 100%);opacity:.28;}
+.page-hero{position:relative;padding-top:clamp(8.5rem,14vw,11rem);padding-bottom:clamp(1.5rem,4vw,2.5rem);overflow:hidden;}
 .page-hero .head-row{position:relative;z-index:1;}
 
 /* ============ REVEAL ============ */
@@ -186,8 +186,23 @@ body.nav-open .nav-toggle .ic-close{display:block;}
 @media (prefers-reduced-motion: reduce){[data-reveal]{opacity:1;transform:none;transition:none;}}
 
 /* ============ CONTACT ============ */
-.contact{background:#fff;}
-.contact-wrap{max-width:600px;margin-inline:auto;}
+/* Both sections are transparent so the wash on `body` runs the full height of
+   the page. They used to be `--foam` above and `#fff` below, which drew a hard
+   horizontal seam across the middle of a page that is only a heading and a
+   form — the card is meant to be the only edge on it. */
+.page-hero,.contact{background:transparent;}
+.contact{padding-top:clamp(1rem,3vw,2rem);}
+.contact-wrap{max-width:560px;margin-inline:auto;margin-top:clamp(1.5rem,4vw,2.6rem);}
+/* The card. Same radius, border and shadow as the one on landing.html, on
+   purpose: someone arriving here from "Visit our Contact page" should find the
+   same object, not a second design for one form. */
+.contact-card{
+  background:#fff;
+  border:1px solid var(--line-soft);
+  border-radius:var(--radius-card);
+  padding:clamp(1.5rem,5vw,2.5rem);
+  box-shadow:var(--shadow-md);
+}
 .form-field{margin-bottom:1.1rem;}
 .form-field label{display:block;font-size:.85rem;font-weight:600;color:var(--ink);margin-bottom:.4rem;}
 .form-field input,.form-field textarea{
@@ -195,6 +210,9 @@ body.nav-open .nav-toggle .ic-close{display:block;}
   font-family:inherit;font-size:.95rem;color:var(--ink);background:#fff;
   transition:border-color .25s,box-shadow .25s;
 }
+/* A placeholder that is too dark reads as a filled-in value, and someone skips
+   the field. Kept clearly lighter than the real text colour above it. */
+.form-field input::placeholder,.form-field textarea::placeholder{color:#9DB4BC;opacity:1;}
 .form-field input:focus,.form-field textarea:focus{
   outline:none;border-color:var(--tide);box-shadow:0 0 0 3px rgba(21,184,201,.15);
 }
@@ -246,10 +264,13 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
 
 <!-- ============ PAGE HERO ============ -->
 <section class="page-hero">
-  <div class="current-field" aria-hidden="true">
-    <div class="blob b1"></div>
-    <div class="blob b2"></div>
-  </div>
+  <!--
+    The two drifting blobs are gone. They were tinted for a `--foam` hero, and
+    against the page-wide wash the dark one read as a grey smudge in the top
+    corner rather than as depth — and because the hero clips its overflow, both
+    ended at a hard horizontal line across the middle of the page. On a page
+    that is a heading and a form, the card should be the only edge on it.
+  -->
   <div class="wrap">
     <div class="head-row center" data-reveal>
       <span class="eyebrow">Contact Us</span>
@@ -263,18 +284,25 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
 <section class="contact section">
   <div class="wrap">
     <div class="contact-wrap" data-reveal>
-      <form id="contactForm" novalidate>
+      <!-- The form is the page, so it gets the card. See the same block in
+           landing.html — both contact surfaces share this treatment, because a
+           visitor who follows "Visit our Contact page" should arrive somewhere
+           that plainly is the same form. -->
+      <form id="contactForm" class="contact-card" novalidate>
         <div class="form-field">
           <label for="cf-name">Your name</label>
-          <input id="cf-name" name="name" type="text" required>
+          <!-- Placeholders are examples, not labels. Every field keeps its own
+               visible <label>, because a placeholder disappears the moment
+               someone types and takes the field's name with it. -->
+          <input id="cf-name" name="name" type="text" placeholder="e.g. Jane Doe" required>
         </div>
         <div class="form-field">
           <label for="cf-email">Your email</label>
-          <input id="cf-email" name="email" type="email" required>
+          <input id="cf-email" name="email" type="email" placeholder="jane@example.com" required>
         </div>
         <div class="form-field">
           <label for="cf-message">Your message</label>
-          <textarea id="cf-message" name="message" required></textarea>
+          <textarea id="cf-message" name="message" placeholder="How can we assist you today?" required></textarea>
         </div>
         <!--
           The honeypot. Hidden from sight, from the tab order and from screen
