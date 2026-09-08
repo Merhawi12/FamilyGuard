@@ -209,12 +209,44 @@ assert_api_origin_stamped() {
   log "Static page API origin: ${API_URL}"
 }
 
+# The Google button is compiled in, and a build that lost it looks perfect.
+#
+# `VITE_GOOGLE_CLIENT_ID` is baked into the bundle at build time, so a build run
+# without it produces an app that is entirely healthy and simply has no "Sign in
+# with Google" — no error, nothing in any log, and the API still answering
+# `providers.google: true`, because *it* is configured independently. The only
+# symptom is a button a parent cannot find.
+#
+# That is not hypothetical: it shipped. Deploying by calling `firebase deploy`
+# directly — which is what you reach for when gcloud or Terraform is not to hand
+# — skips every export in build(), and the button disappeared from production
+# without a single check failing.
+#
+# So the built bundle is searched for the value that was meant to go into it.
+assert_google_client_baked() {
+  local dist="$1"
+  [ -n "$VITE_GOOGLE_CLIENT_ID" ] || return 0
+
+  grep -rqF "$VITE_GOOGLE_CLIENT_ID" "${dist}/assets" 2>/dev/null \
+    || die "The Google client ID is not in the built bundle.
+
+       Configured : ${VITE_GOOGLE_CLIENT_ID}
+       Searched   : ${dist}/assets
+
+       The build ran without VITE_GOOGLE_CLIENT_ID reaching vite, so the app
+       renders no 'Sign in with Google' button while the API goes on
+       advertising it. Nothing else about the deploy would look wrong."
+
+  log "Google sign-in: compiled in"
+}
+
 TARGETS=()
 
 if [ "$TARGET" = "all" ] || [ "$TARGET" = "family" ]; then
   build family family-app "Family App"
   assert_family_layout "$DIST"
   assert_api_origin_stamped "$DIST"
+  assert_google_client_baked "$DIST"
   TARGETS+=(family)
 fi
 
