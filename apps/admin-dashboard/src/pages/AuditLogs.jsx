@@ -73,7 +73,7 @@ const levelOf = (log) => LEVELS[log.level] || LEVELS.info;
  * action — a made-up display name ("auth-api") would not match what the row
  * beneath it says, and the row is the thing an operator greps for.
  */
-const SERVICES = ['auth', 'admin', 'device', 'staff', 'safezone', 'upload'];
+const SERVICES = ['auth', 'admin', 'billing', 'device', 'staff', 'safezone', 'upload'];
 
 /** The window the stream is read through. `minutes: null` is the whole history. */
 const RANGES = [

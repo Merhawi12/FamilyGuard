@@ -142,6 +142,30 @@ describe('database migrations', () => {
   });
 
   /**
+   * The same deploy path for `notifications.link`, added by 0020.
+   *
+   * `sync()` will not add a column to a table that already exists, so on every
+   * database that is not brand new the column arrives from the migration or not
+   * at all — and if it does not, every notification the platform writes fails on
+   * an unknown attribute. That includes the payment notice a finance operator is
+   * waiting for.
+   *
+   * No index is declared on it, deliberately, which is what keeps this clear of
+   * the trap the test above documents.
+   */
+  it('boots against a database that predates the notification link', async () => {
+    await initializeDatabase();
+    const qi = sequelize.getQueryInterface();
+
+    await qi.removeColumn('notifications', 'link');
+    await sequelize.query("DELETE FROM migrations WHERE name = '0020-notification-link.js'");
+    expect(await qi.describeTable('notifications')).not.toHaveProperty('link');
+
+    await expect(initializeDatabase()).resolves.not.toThrow();
+    expect(await qi.describeTable('notifications')).toHaveProperty('link');
+  });
+
+  /**
    * 0009 retires the `family` tier. Getting this wrong is not cosmetic: an
    * account left on `family` looks up an entitlement list that no longer exists,
    * resolves to `[]`, and loses GPS, geofencing, filtering and AI safety while

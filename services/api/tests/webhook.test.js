@@ -14,6 +14,17 @@ function postWebhook() {
     .send(JSON.stringify({ any: 'payload' }));
 }
 
+/**
+ * A Checkout session as Stripe reports one that has been paid for.
+ *
+ * The two fields are not decoration. `checkout.session.completed` fires for a
+ * delayed payment method as well — a bank debit, a voucher — and that one
+ * arrives `complete` and `unpaid`, hours or days before the money does. The
+ * handler distinguishes them, so a fixture that omits the fields is testing a
+ * session Stripe never sends.
+ */
+const PAID = (session) => ({ status: 'complete', payment_status: 'paid', ...session });
+
 describe('Stripe webhook', () => {
   it('returns 400 when signature verification fails', async () => {
     constructEvent.mockImplementationOnce(() => { throw new Error('bad signature'); });
@@ -26,7 +37,7 @@ describe('Stripe webhook', () => {
     const event = {
       id: 'evt_checkout_1',
       type: 'checkout.session.completed',
-      data: { object: { metadata: { userId: user.id, plan: 'premium' }, subscription: 'sub_123', amount_total: 999, currency: 'usd' } },
+      data: { object: PAID({ metadata: { userId: user.id, plan: 'premium' }, subscription: 'sub_123', amount_total: 999, currency: 'usd' }) },
     };
 
     constructEvent.mockReturnValueOnce(event);
@@ -79,7 +90,7 @@ describe('Stripe webhook', () => {
     constructEvent.mockReturnValueOnce({
       id: 'evt_retry_1',
       type: 'checkout.session.completed',
-      data: { object: { metadata: { userId: user.id, plan: 'premium' }, subscription: 'sub_retry', amount_total: 999, currency: 'usd' } },
+      data: { object: PAID({ metadata: { userId: user.id, plan: 'premium' }, subscription: 'sub_retry', amount_total: 999, currency: 'usd' }) },
     });
 
     const res = await postWebhook();
@@ -102,7 +113,7 @@ describe('Stripe webhook', () => {
       constructEvent.mockReturnValueOnce({
         id: 'evt_link_1',
         type: 'checkout.session.completed',
-        data: { object: { customer: 'cus_link_1', subscription: 'sub_link_1', amount_total: 999, currency: 'usd' } },
+        data: { object: PAID({ customer: 'cus_link_1', subscription: 'sub_link_1', amount_total: 999, currency: 'usd' }) },
       });
 
       expect((await postWebhook()).status).toBe(200);
@@ -119,7 +130,7 @@ describe('Stripe webhook', () => {
       constructEvent.mockReturnValueOnce({
         id: 'evt_link_2',
         type: 'checkout.session.completed',
-        data: { object: { customer: 'cus_link_2', subscription: 'sub_link_2', amount_total: 1499, currency: 'usd' } },
+        data: { object: PAID({ customer: 'cus_link_2', subscription: 'sub_link_2', amount_total: 1499, currency: 'usd' }) },
       });
       expect((await postWebhook()).status).toBe(200);
 
@@ -134,14 +145,14 @@ describe('Stripe webhook', () => {
       constructEvent.mockReturnValueOnce({
         id: 'evt_link_orphan',
         type: 'checkout.session.completed',
-        data: { object: { customer: 'cus_nobody', subscription: 'sub_x', amount_total: 999, currency: 'usd' } },
+        data: { object: PAID({ customer: 'cus_nobody', subscription: 'sub_x', amount_total: 999, currency: 'usd' }) },
       });
       expect((await postWebhook()).status).toBe(200);
 
       constructEvent.mockReturnValueOnce({
         id: 'evt_link_empty',
         type: 'checkout.session.completed',
-        data: { object: { metadata: {}, subscription: 'sub_y', amount_total: 999, currency: 'usd' } },
+        data: { object: PAID({ metadata: {}, subscription: 'sub_y', amount_total: 999, currency: 'usd' }) },
       });
       expect((await postWebhook()).status).toBe(200);
     });
@@ -152,7 +163,7 @@ describe('Stripe webhook', () => {
     const event = {
       id: 'evt_retry_2',
       type: 'checkout.session.completed',
-      data: { object: { metadata: { userId: user.id, plan: 'premium' }, subscription: 'sub_retry_2', amount_total: 999, currency: 'usd' } },
+      data: { object: PAID({ metadata: { userId: user.id, plan: 'premium' }, subscription: 'sub_retry_2', amount_total: 999, currency: 'usd' }) },
     };
 
     const failing = jest.spyOn(User, 'update').mockRejectedValueOnce(new Error('database is unreachable'));

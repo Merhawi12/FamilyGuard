@@ -23,7 +23,7 @@
  */
 const request = require('supertest');
 const { app } = require('../src/app');
-const { Notification, Transaction } = require('../src/models');
+const { Notification, Transaction, User } = require('../src/models');
 const { createUser, tokenFor } = require('./helpers');
 const Stripe = require('stripe'); // the manual mock in __mocks__/stripe.js
 
@@ -357,20 +357,107 @@ describe('every month after that', () => {
     expect(pushService.sendToUser).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * The first invoice of a subscription and the Checkout session that produced
+   * it are the same money, reported twice. The customer must hear about it once
+   * — and be charged for it once on the console's Billing screen.
+   *
+   * This used to be tested by posting the invoice on its own and asserting
+   * silence, on the reasoning that `checkout.session.completed` had already
+   * spoken. That reasoning holds only when the checkout really did arrive first.
+   * The two events race, so the case worth pinning is the pair, in both orders.
+   */
   it('the subscription\'s first invoice does not congratulate anybody twice', async () => {
     const customer = uniqueCustomer();
-    const user = await createUser({ plan: 'premium', stripeCustomerId: customer });
+    const user = await createUser({ plan: 'free', stripeCustomerId: customer });
 
-    // What Stripe sends moments after checkout.session.completed, for the same
-    // money — the activation notice has already gone out.
-    await postWebhook(invoiceEvent('evt_create_1', customer, { billing_reason: 'subscription_create' }));
+    // The sale, and then the invoice Stripe raises for the same money.
+    await postWebhook({
+      id: 'evt_pair_checkout',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: 'cs_pair',
+          status: 'complete',
+          payment_status: 'paid',
+          customer,
+          invoice: 'in_pair',
+          subscription: 'sub_pair',
+          amount_total: 999,
+          currency: 'cad',
+          metadata: { userId: user.id, plan: 'premium' },
+        },
+      },
+    });
+    await postWebhook(invoiceEvent('evt_create_1', customer, {
+      id: 'in_pair', billing_reason: 'subscription_create',
+    }));
     await settle();
 
-    expect(await bellFor(user)).toHaveLength(0);
-    expect(mailsTo(user.email)).toHaveLength(0);
-    expect(pushService.sendToUser).not.toHaveBeenCalled();
-    // The sale is still recorded; only the notice is suppressed.
-    expect(await Transaction.count({ where: { userId: user.id, type: 'invoice_paid' } })).toBe(1);
+    // One notice, and it is the activation rather than a renewal receipt.
+    const bell = await bellFor(user);
+    expect(bell).toHaveLength(1);
+    expect(bell[0].title).toMatch(/activated/i);
+    expect(mailsTo(user.email)).toHaveLength(1);
+    expect(pushService.sendToUser).toHaveBeenCalledTimes(1);
+
+    // And one payment, keyed on the invoice both events name.
+    const rows = await Transaction.findAll({ where: { userId: user.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].stripeEventId).toBe('invoice:in_pair');
+    expect(rows[0].type).toBe('checkout_completed');
+  });
+
+  /**
+   * The same pair, in the order that used to leave the customer with nothing.
+   *
+   * When `invoice.paid` won the race, the old handler suppressed its notice —
+   * because a `subscription_create` invoice was assumed to be following an
+   * activation notice that had, in this order, not been sent yet — and the
+   * checkout completion that arrived afterwards found the row already there and
+   * stayed quiet too. A customer who had just paid heard nothing at all.
+   */
+  it('tells the customer even when the invoice arrives before the checkout', async () => {
+    const customer = uniqueCustomer();
+    const user = await createUser({ plan: 'free', stripeCustomerId: customer });
+
+    await postWebhook(invoiceEvent('evt_race_invoice', customer, {
+      id: 'in_race_order', billing_reason: 'subscription_create', subscription: 'sub_race',
+    }));
+    await postWebhook({
+      id: 'evt_race_checkout',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: 'cs_race',
+          status: 'complete',
+          payment_status: 'paid',
+          customer,
+          invoice: 'in_race_order',
+          subscription: 'sub_race',
+          amount_total: 999,
+          currency: 'cad',
+          metadata: { userId: user.id, plan: 'premium' },
+        },
+      },
+    });
+    await settle();
+
+    const bell = await bellFor(user);
+    expect(bell).toHaveLength(1);
+    expect(bell[0].title).toMatch(/activated/i);
+    expect(mailsTo(user.email)).toHaveLength(1);
+
+    const rows = await Transaction.findAll({ where: { userId: user.id } });
+    expect(rows).toHaveLength(1);
+    // Premium, resolved from the price on the invoice — the account was still
+    // on `free` when this arrived, so reading `user.plan` recorded the sale
+    // under the free tier and lost it from every paid-plan figure.
+    expect(rows[0].plan).toBe('premium');
+
+    const stored = await User.findByPk(user.id);
+    expect(stored.plan).toBe('premium');
+    expect(stored.stripeSubscriptionId).toBe('sub_race');
   });
 
   it('a redelivered invoice does not send a second receipt', async () => {

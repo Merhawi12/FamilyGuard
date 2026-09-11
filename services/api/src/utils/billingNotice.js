@@ -136,7 +136,15 @@ const notifySubscriptionPayment = async ({
      * distinguished from the platform's own messages — a receipt for every
      * customer's monthly payment would bury the announcements it exists to show.
      */
-    const row = await Notification.create({ userId: user.id, title, message, type: 'success' });
+    const row = await Notification.create({
+      userId: user.id,
+      title,
+      message,
+      type: 'success',
+      // The same destination the push already carried. The bell had none, so a
+      // receipt read in the dashboard could not reach the plan it was about.
+      link: BILLING_DESTINATION,
+    });
     written = true;
 
     // Best effort, and after the write: a socket layer that is unavailable must

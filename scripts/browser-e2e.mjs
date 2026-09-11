@@ -1296,6 +1296,95 @@ try {
   }
 
   /*
+   * Moving between screens does not re-fetch the family every time.
+   *
+   * Eleven screens open by listing the children, because each builds its child
+   * tabs from that list — so a parent moving through four of them made four
+   * identical requests inside a few seconds, each costing a round trip before
+   * the tabs could appear. `packages/shared/src/api/familyCache.js` collapses
+   * them.
+   *
+   * Counted at the network rather than asserted in a unit test, because the two
+   * things that can undo this are both invisible from inside the module: a
+   * screen bypassing the binding, and a navigation that remounts the whole app
+   * (which would discard the module state along with the cache). Only a browser
+   * following real links can tell.
+   */
+  step('Family app — navigating between screens does not re-list the family');
+  {
+    const page = await browser.newPage();
+    await page.goto(`${FAMILY}/login`);
+    await page.evaluate((t) => localStorage.setItem('fg_token', t), parentToken);
+    const w = watch(page, 'family-cache');
+
+    let childListCalls = 0;
+    page.on('request', (req) => {
+      // The exact path, so `/children/<id>` and the admin routes do not count.
+      if (/\/api\/children(\?|$)/.test(req.url())) childListCalls += 1;
+    });
+
+    await page.goto(`${FAMILY}/dashboard`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(800);
+    const afterLanding = childListCalls;
+    check('the dashboard lists the family once on arrival', afterLanding === 1, String(afterLanding));
+
+    // Client-side navigation, the way a parent moves: the sidebar links, not a
+    // reload. Four screens that each open by listing the children.
+    for (const to of ['/dashboard/screen-time', '/dashboard/blocking', '/dashboard/reports', '/dashboard/activity']) {
+      await page.locator(`nav[aria-label="Sections"] a[href="${to}"]`).first().click();
+      await page.waitForURL(`**${to}`, { timeout: 10000 });
+      await page.waitForTimeout(600);
+    }
+
+    /*
+     * The screens were served from the cache and *knew about the family* — this
+     * is the check that would fail if the cache resolved empty. "No child
+     * profiles yet" is precisely the wrong thing to draw for a parent who has
+     * one, and it is what an empty cached list would produce.
+     *
+     * The child tabs themselves cannot be asserted here: `ChildTabs` hides
+     * itself below two children, and this account has one until the form below
+     * adds another.
+     */
+    check('the last screen knew about the family without asking for it',
+      (await page.locator('text=No child profiles yet').count()) === 0);
+    check('and none of the four re-listed the family',
+      childListCalls === afterLanding, `${childListCalls} calls, expected ${afterLanding}`);
+
+    // The Children screen manages the family, so it asks rather than reusing —
+    // `list({ fresh: true })`. Without that, a device that finished linking
+    // would be missing from the list under its own confirmation.
+    await page.locator('nav[aria-label="Sections"] a[href="/dashboard/children"]').first().click();
+    await page.waitForURL('**/dashboard/children', { timeout: 10000 });
+    await page.waitForTimeout(800);
+    check('the Children screen asks for the family rather than reusing the copy',
+      childListCalls > afterLanding, `${childListCalls} vs ${afterLanding}`);
+
+    /*
+     * The half that matters more than the saving: an edit is not hidden by it.
+     *
+     * Added through the app's own form, so the path under test is the real one —
+     * `children.create` dropping the cache. If it did not, this child would be
+     * absent from every other screen's tabs for the next thirty seconds, which
+     * is a family app that cannot be edited.
+     */
+    const added = `Cache Kid ${Date.now().toString().slice(-4)}`;
+    await page.locator('button:has-text("Add child")').first().click();
+    await page.locator('input[placeholder="e.g. Sarah"]').fill(added);
+    await page.locator('button[type="submit"]:has-text("Add child")').click();
+    await page.waitForTimeout(1200);
+
+    await page.locator('nav[aria-label="Sections"] a[href="/dashboard/screen-time"]').first().click();
+    await page.waitForURL('**/dashboard/screen-time', { timeout: 10000 });
+    await page.waitForTimeout(900);
+    check('a child added through the app appears on the next screen at once',
+      (await page.locator(`button:has-text("${added}")`).count()) > 0, added);
+
+    check('the navigation is clean', w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
+    await page.close();
+  }
+
+  /*
    * The other half: a visitor with no session must still be offered a way in.
    * Making the shell session-aware could easily have shown "Back to dashboard"
    * to someone with no dashboard to go back to.
@@ -3384,7 +3473,97 @@ try {
     await page.waitForTimeout(900);
     check('the payment log is searchable', /No payments match/i.test(await page.locator('body').innerText()));
 
+    /**
+     * The screen says whether it can be believed.
+     *
+     * Every figure above is derived from transaction rows, and those rows only
+     * exist because Stripe's webhook told the API about a payment. With the
+     * signing secret missing every delivery fails verification, the rows never
+     * arrive, and the screen goes on reporting confidently from an incomplete
+     * table — which is exactly the complaint this was built for ("the payment
+     * completed and it is not in the dashboard"). This harness runs with
+     * `STRIPE_SECRET_KEY: ''`, so the broken state is the state under test.
+     */
+    check('an unconfigured Stripe is declared on the screen the numbers are read from',
+      /not fully configured/i.test(body) && /STRIPE_SECRET_KEY/.test(body),
+      body.slice(0, 200));
+
+    // The recovery for that failure. On this deployment there is nothing to
+    // reconcile against, and saying so is the honest answer — an empty report
+    // reading "nothing was missing" would be a lie about a broken deployment.
+    await page.locator('button:has-text("Sync from Stripe")').click();
+    await page.waitForTimeout(900);
+    const syncDialog = page.locator('div[role="dialog"]');
+    check('Sync from Stripe answers, and does not claim a clean result it cannot know',
+      (await syncDialog.count()) === 1
+        && /not configured on this deployment/i.test(await syncDialog.innerText()),
+      (await syncDialog.count()) ? (await syncDialog.innerText()).slice(0, 120) : 'no dialog');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+
     check('Billing is clean', w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
+    await page.close();
+  }
+
+  /**
+   * The console's bell is an inbox.
+   *
+   * It was a link to the screen where staff *compose* notifications — so the one
+   * control shaped like an inbox opened an outbox, and everything the platform
+   * writes to its own operators (a subscription bought, a card declined) was
+   * filed where nothing could read it. The row is seeded in SQL for the same
+   * reason the payments above are: what is under test is the console surface,
+   * and the writing of it is covered against the real webhook in Jest.
+   */
+  step('Admin console — a payment notification reaches staff and opens the payment');
+  {
+    const token = await adminPage.evaluate(() => localStorage.getItem('px_admin_token'));
+    await db.query(
+      // By role rather than by address: this account signed up as
+      // `Parent.Case…@Example.COM` and is stored lower-cased, so matching the
+      // constant would find nothing and insert a NULL `user_id`.
+      `INSERT INTO notifications (id, user_id, title, message, type, is_read, link, created_at)
+       VALUES (:id, (SELECT id FROM users WHERE role = 'super_admin' LIMIT 1), :title, :message,
+               'success', ${FALSE}, '/billing', ${NOW})`,
+      {
+        replacements: {
+          id: randomUUID(),
+          title: 'New Premium subscription',
+          message: `paged0.${stamp}@example.com subscribed to Premium Plan ($9.99).`,
+        },
+      },
+    );
+
+    const page = await browser.newPage();
+    await page.goto(`${ADMIN}/login`);
+    await page.evaluate(([k, t]) => { localStorage.setItem(k, t); localStorage.setItem('fg_token', t); },
+      ['px_admin_token', token]);
+    const w = watch(page, 'console bell');
+    await page.goto(`${ADMIN}/overview`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(900);
+
+    const bell = page.locator('button[aria-label^="Notifications"]');
+    check('the bell counts what is unread', /unread/.test(await bell.getAttribute('aria-label')),
+      await bell.getAttribute('aria-label'));
+
+    await bell.click();
+    await page.waitForTimeout(400);
+    if (process.env.BROWSER_E2E_SHOTS) {
+      mkdirSync(path.join(process.env.BROWSER_E2E_SHOTS, 'desktop-admin'), { recursive: true });
+      await page.screenshot({
+        path: path.join(process.env.BROWSER_E2E_SHOTS, 'desktop-admin', 'notifications-bell.png'),
+      });
+    }
+    const panel = await page.locator('body').innerText();
+    check('the payment is in the panel, with the customer and the amount',
+      /New Premium subscription/.test(panel) && /\$9\.99/.test(panel), panel.slice(0, 200));
+
+    // A notice a finance operator cannot open the payment log from is a dead end.
+    await page.locator('button:has-text("New Premium subscription")').first().click();
+    await page.waitForTimeout(900);
+    check('reading it opens the screen it is about', page.url().endsWith('/billing'), page.url());
+
+    check('the console bell is clean', w.problems.length === 0, w.problems.slice(0, 2).join(' | '));
     await page.close();
   }
 

@@ -172,7 +172,13 @@ describe('a parent subscribes to Premium', () => {
 
     const rows = await Transaction.findAll({ where: { userId: parent.id } });
     expect(rows).toHaveLength(1);
-    expect(rows[0].stripeEventId).toBe(`checkout:${sessionId}`);
+    // Keyed on the *invoice*, not on the session. Stripe reports this one
+    // payment through three channels — this confirmation, `checkout.session.
+    // completed`, and `invoice.paid` with `billing_reason: subscription_create`
+    // — and the invoice is the only identifier all three carry. Keyed on the
+    // session, the third of them wrote a second `succeeded` row and every
+    // revenue figure on the console counted the first month twice.
+    expect(rows[0].stripeEventId).toBe('invoice:in_premium_flow');
     expect(rows[0].currency).toBe('cad');
   });
 });

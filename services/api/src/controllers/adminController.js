@@ -27,12 +27,33 @@ const findParentAccount = (id) =>
 
 const USER_ATTRS = ['id', 'name', 'email', 'plan', 'role', 'permissions', 'isActive', 'emailVerified', 'mfaEnabled', 'trialEndsAt', 'lastLoginAt', 'createdAt'];
 
+/**
+ * GET /admin/clients — the customer list, newest first.
+ *
+ * Bounded, which it was not. This selected **every** customer row on the
+ * platform with no limit and no offset, so the cost of one request grew with the
+ * customer base for ever: at a hundred thousand accounts it is a hundred
+ * thousand rows materialised into one JSON array, held in the instance's memory
+ * and pushed down a socket. Nothing in either web app calls it — the console's
+ * directory is the paginated `/admin/users` below — which is exactly why it was
+ * never noticed, and also why it is the cheapest thing on the service to point
+ * at with a script.
+ *
+ * Kept rather than deleted: it is a documented route with its own permission
+ * (`docs/API.md`), and the sibling `/admin/clients/:id/…` actions the console
+ * *does* use share its prefix. It simply pages now, on the same
+ * `limit`/`offset` contract as every other list endpoint. A caller that sends
+ * neither gets the first 50, which is what a bare `GET` of a list should mean.
+ */
 const listClients = async (req, res, next) => {
   try {
+    const { limit, offset } = parsePagination(req.query, { max: 200, defaultLimit: 50 });
     const clients = await User.findAll({
       where: { role: { [Op.notIn]: STAFF_ROLES } },
       attributes: ['id', 'name', 'email', 'plan', 'role', 'isActive', 'trialEndsAt', 'createdAt'],
       order: [['createdAt', 'DESC']],
+      limit,
+      offset,
     });
     res.json(clients);
   } catch (err) {

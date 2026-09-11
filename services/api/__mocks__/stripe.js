@@ -64,6 +64,14 @@ const instance = {
       period_end: 1793491200,
       lines: { data: [{ period: { end: 1793491200 } }] },
     })),
+    /**
+     * Empty by default — the opposite choice from `retrieve` above, and for a
+     * reason: this one drives the console's reconciliation, whose *correct*
+     * answer on a healthy deployment is "nothing was missing". A mock that
+     * returned invoices by default would make every unrelated suite quietly
+     * backfill payments into its fixtures.
+     */
+    list: jest.fn(async () => ({ data: [], has_more: false })),
   },
   billingPortal: {
     sessions: {

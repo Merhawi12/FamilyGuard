@@ -4,8 +4,11 @@ const { parsePagination } = require('../utils/pagination');
 const { likeOperator } = require('../utils/queryOperators');
 const { countGrouped } = require('../utils/aggregate');
 const { isUuid } = require('../utils/ids');
+const { auditLog } = require('../utils/auditLogger');
 const { STAFF_ROLES } = require('../config/roles');
 const { PLANS, PLAN_KEYS, PAID_PLAN_KEYS, SUSPENDED_PLAN, planLabel } = require('../config/plans');
+const { canSell, billingGaps } = require('../services/billing');
+const { reconcileStripePayments } = require('../services/billingReconcile');
 
 /**
  * The console's billing screen: what the platform earns, and every payment
@@ -108,7 +111,7 @@ const billingSummary = async () => {
     // Subscriptions won and lost over the two windows the deltas compare.
     Transaction.findAll({
       where: {
-        type: ['checkout_completed', 'subscription_cancelled', 'invoice_failed'],
+        type: ['checkout_completed', 'subscription_cancelled', 'invoice_failed', 'checkout_failed'],
         createdAt: { [Op.gte]: twoMonthsAgo },
       },
       attributes: ['type', 'createdAt'],
@@ -177,7 +180,10 @@ const billingSummary = async () => {
   const lost = inWindow('subscription_cancelled', monthStart);
   const wonBefore = inWindow('checkout_completed', previousStart, monthStart);
   const lostBefore = inWindow('subscription_cancelled', previousStart, monthStart);
-  const failedPayments = inWindow('invoice_failed', monthStart);
+  // Both ways a charge can fail. `checkout_failed` is a delayed payment method
+  // that never settled; counting only the invoice failures understated this by
+  // however many customers pay that way.
+  const failedPayments = inWindow('invoice_failed', monthStart) + inWindow('checkout_failed', monthStart);
 
   // Where the subscriber count stood at the start of each window, walked back
   // from today through what was won and lost. Approximate by nature — a plan
@@ -215,6 +221,25 @@ const billingSummary = async () => {
       week: bucketize(fixedEdges(12, 7, now), payments),
       month: bucketize(monthEdges(12, now), payments),
     },
+    /**
+     * Whether this screen can be believed.
+     *
+     * Every figure above is derived from transaction rows, and every transaction
+     * row arrives because Stripe's webhook told this API about a payment. With
+     * `STRIPE_WEBHOOK_SECRET` missing or stale, that delivery fails signature
+     * verification and the rows simply never appear — so the screen goes on
+     * reporting confidently from an incomplete table, and the operator's first
+     * clue is a customer saying they paid.
+     *
+     * It is reported here, on the screen the numbers are read from, rather than
+     * only on the Overview. A finance operator looking at revenue is exactly who
+     * needs to know the source is broken, and `billingGaps()` already names the
+     * missing value in words they can act on.
+     */
+    configuration: {
+      canSell: canSell(),
+      gaps: billingGaps(),
+    },
   };
 };
 
@@ -242,7 +267,15 @@ const listTransactions = async (req, res, next) => {
 
     const { rows, count } = await Transaction.findAndCountAll({
       where: and.length ? { [Op.and]: and } : {},
-      include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email', 'plan'] }],
+      // `subscriptionStatus` rides along so a payment can be read against where
+      // the account stands *now* — a charge that succeeded on an account since
+      // gone `past_due` is a different story from the same charge on a live
+      // subscription, and the row alone cannot tell them apart.
+      include: [{
+        model: User,
+        as: 'user',
+        attributes: ['id', 'name', 'email', 'plan', 'subscriptionStatus'],
+      }],
       order: [['createdAt', 'DESC']],
       limit,
       offset,
@@ -277,4 +310,42 @@ const listUserTransactions = async (req, res, next) => {
   }
 };
 
-module.exports = { listTransactions, listUserTransactions };
+/**
+ * POST /admin/billing/sync — reconcile this database against Stripe.
+ *
+ * The recovery path for the failure the `configuration` block above reports: a
+ * webhook that was not delivering, so payments Stripe took never reached the
+ * console. It walks Stripe's own paid invoices and records the ones missing
+ * here, through the same function the webhook uses — so nothing is recorded
+ * twice and nothing is recorded differently.
+ *
+ * Audited, because it writes payment rows and changes subscription statuses on
+ * customer accounts. That is staff acting on the platform's money, and it
+ * belongs in the trail beside the plan changes and the refunds.
+ */
+const syncFromStripe = async (req, res, next) => {
+  try {
+    const report = await reconcileStripePayments({
+      days: req.body?.days,
+      io: req.app.get('io'),
+    });
+
+    auditLog(req, {
+      userId: req.user.id,
+      action: 'billing.reconciled',
+      entity: 'Transaction',
+      metadata: {
+        days: report.days,
+        scanned: report.scanned,
+        recorded: report.recorded,
+        unattributed: report.unattributed,
+      },
+    });
+
+    res.json(report);
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { listTransactions, listUserTransactions, syncFromStripe };

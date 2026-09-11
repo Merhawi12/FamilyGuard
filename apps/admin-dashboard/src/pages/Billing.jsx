@@ -27,6 +27,12 @@ const STATUS = {
   active: { label: 'Active', badge: 'badge-green', dot: 'bg-success' },
   past_due: { label: 'Past due', badge: 'badge-amber', dot: 'bg-warning' },
   cancelled: { label: 'Cancelled', badge: 'badge-gray', dot: 'bg-gray-400' },
+  // Account-level states, which this map also labels now that a payment's dialog
+  // shows where the subscription behind it currently stands.
+  trial: { label: 'Trial', badge: 'badge-blue', dot: 'bg-primary-500' },
+  manual: { label: 'Set by staff', badge: 'badge-blue', dot: 'bg-primary-500' },
+  unpaid: { label: 'Unpaid', badge: 'badge-red', dot: 'bg-danger' },
+  paused: { label: 'Paused', badge: 'badge-gray', dot: 'bg-gray-400' },
 };
 
 const statusOf = (key) => STATUS[key] || { label: key, badge: 'badge-gray', dot: 'bg-gray-400' };
@@ -36,6 +42,10 @@ const TYPE_LABELS = {
   checkout_completed: 'New subscription',
   invoice_paid: 'Renewal',
   invoice_failed: 'Payment failed',
+  // A delayed payment method — a bank debit, a voucher — that completed checkout
+  // and then never settled. Distinct from a failed invoice: nothing was ever
+  // charged, so there is no subscription to be past due on.
+  checkout_failed: 'Checkout not paid',
   subscription_updated: 'Plan changed',
   subscription_cancelled: 'Cancelled',
 };
@@ -293,6 +303,8 @@ export default function AdminBilling() {
   const [exporting, setExporting] = useState(false);
   const [range, setRange] = useState('month');
   const [detail, setDetail] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncReport, setSyncReport] = useState(null);
 
   // As on the directory and the fleet: `search` is what is typed, `appliedSearch`
   // is what the last submit asked for, so a keystroke never fires a request.
@@ -373,6 +385,30 @@ export default function AdminBilling() {
       setError(errorMessage(e, 'Failed to export the payment log'));
     } finally {
       setExporting(false);
+    }
+  };
+
+  /**
+   * Ask Stripe what this database is missing, and record it.
+   *
+   * The recovery for the one failure this screen cannot otherwise show: a
+   * webhook that was not being delivered, so payments Stripe took never became
+   * rows here. Idempotent by construction — every invoice is keyed the same way
+   * the webhook keys it — so pressing it twice is safe, and pressing it on a
+   * healthy deployment correctly reports that nothing was missing.
+   */
+  const syncFromStripe = async () => {
+    setError('');
+    setSyncing(true);
+    try {
+      const { data } = await adminApi.syncBilling();
+      setSyncReport(data);
+      // Only worth re-reading the screen if something actually changed.
+      if (data.recorded > 0) await load();
+    } catch (e) {
+      setError(errorMessage(e, 'Could not reconcile payments against Stripe'));
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -533,12 +569,54 @@ export default function AdminBilling() {
             <Icon name="refresh" size={15} />
             Refresh
           </button>
+          <button
+            type="button"
+            onClick={syncFromStripe}
+            disabled={syncing || loading}
+            title="Record any payment Stripe has taken that is missing from this log"
+            className="btn-secondary btn-sm"
+          >
+            <Icon name="refresh" size={15} />
+            {syncing ? 'Syncing…' : 'Sync from Stripe'}
+          </button>
           <button type="button" onClick={exportCsv} disabled={exporting || loading} className="btn-primary btn-sm">
             <Icon name="download" size={15} />
             {exporting ? 'Exporting…' : 'Export report'}
           </button>
         </div>
       </div>
+
+      {/*
+        Whether the numbers below can be believed.
+
+        Every figure on this screen comes from transaction rows, and those rows
+        arrive because Stripe's webhook told the API about a payment. With the
+        signing secret missing or stale that delivery fails silently, and the
+        screen goes on reporting confidently from an incomplete table — the
+        operator's first clue being a customer insisting they paid. This is the
+        one thing a revenue screen must say about itself when it is true.
+      */}
+      {summary?.configuration?.gaps?.length > 0 && (
+        <div className="notice-warning block">
+          <p className="flex items-start gap-2">
+            <Icon name="warning" size={16} className="mt-0.5 shrink-0" />
+            <span>
+              <strong className="font-semibold">Stripe is not fully configured on this deployment.</strong>{' '}
+              {summary.configuration.canSell
+                ? 'Customers can pay, but this log may be missing payments the API was never told about.'
+                : 'Customers cannot complete a purchase at all.'}
+            </span>
+          </p>
+          <ul className="mt-2 ml-6 space-y-1 list-disc text-xs">
+            {summary.configuration.gaps.map((gap) => (
+              <li key={gap}>{gap}</li>
+            ))}
+          </ul>
+          <p className="mt-2 ml-6 text-xs">
+            Once it is fixed, <strong>Sync from Stripe</strong> records the payments that were missed.
+          </p>
+        </div>
+      )}
 
       {error && (
         <p className="notice-error">
@@ -661,6 +739,20 @@ export default function AdminBilling() {
             <Field label="Recorded">
               {detail.createdAt ? new Date(detail.createdAt).toLocaleString() : '—'}
             </Field>
+            {/* Where the account stands now, which the payment row alone cannot
+                say: a charge that succeeded on a subscription since gone past
+                due is a different story from the same charge on a live one. */}
+            <Field label="Subscription now">
+              {detail.user?.subscriptionStatus ? (
+                <span className={`${statusOf(detail.user.subscriptionStatus).badge} gap-1.5`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${statusOf(detail.user.subscriptionStatus).dot}`} />
+                  {statusOf(detail.user.subscriptionStatus).label}
+                </span>
+              ) : '—'}
+            </Field>
+            <Field label="Plan now">
+              <span className="capitalize">{detail.user?.plan || '—'}</span>
+            </Field>
             <div className="col-span-2">
               <Field label="Transaction ID">
                 <span className="font-mono text-xs">{detail.id}</span>
@@ -679,6 +771,73 @@ export default function AdminBilling() {
             </p>
           </dl>
         )}
+      </Modal>
+
+      {/* ── What the reconciliation found ──────────────────────────────────── */}
+      <Modal
+        open={!!syncReport}
+        onClose={() => setSyncReport(null)}
+        title="Reconciled with Stripe"
+        description={syncReport?.available
+          ? `Stripe's paid invoices over the last ${syncReport.days} days, compared with this log.`
+          : undefined}
+      >
+        {syncReport && (syncReport.available ? (
+          <div className="space-y-4">
+            <dl className="grid grid-cols-3 gap-3 text-center">
+              {[
+                { label: 'Checked', value: syncReport.scanned },
+                { label: 'Recovered', value: syncReport.recorded },
+                { label: 'Already had', value: syncReport.alreadyRecorded },
+              ].map((tile) => (
+                <div key={tile.label} className="rounded-xl bg-gray-50 px-3 py-4">
+                  <p className="text-2xl font-bold tabular-nums text-gray-900">{tile.value.toLocaleString()}</p>
+                  <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">
+                    {tile.label}
+                  </p>
+                </div>
+              ))}
+            </dl>
+
+            <p className="text-sm text-gray-600">
+              {syncReport.recorded > 0
+                ? `${syncReport.recorded} payment${syncReport.recorded === 1 ? '' : 's'} Stripe had taken ${syncReport.recorded === 1 ? 'was' : 'were'} missing from this log and ${syncReport.recorded === 1 ? 'has' : 'have'} now been recorded. The affected subscriptions are marked active.`
+                : 'Nothing was missing — every payment Stripe reported over this window was already recorded here.'}
+            </p>
+
+            {/* Money Stripe took that no account here matches. Worth surfacing:
+                the commonest cause is a key pointed at a different Stripe
+                account, which means the whole comparison was against the wrong
+                books. */}
+            {syncReport.unattributed > 0 && (
+              <div className="notice-warning block">
+                <p className="flex items-start gap-2">
+                  <Icon name="warning" size={16} className="mt-0.5 shrink-0" />
+                  <span>
+                    {syncReport.unattributed} paid invoice{syncReport.unattributed === 1 ? '' : 's'} could not be
+                    matched to an account here. Check them in Stripe — if none of them match, this deployment's
+                    key may belong to a different Stripe account.
+                  </span>
+                </p>
+                {syncReport.unattributedInvoices?.length > 0 && (
+                  <ul className="mt-2 ml-6 space-y-0.5 font-mono text-[11px] list-disc">
+                    {syncReport.unattributedInvoices.map((row) => (
+                      <li key={row.invoice}>{row.invoice}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {syncReport.truncated && (
+              <p className="text-xs text-gray-500">
+                Stripe had more invoices in this window than one sync covers. Run it again to continue.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-600">{syncReport.reason}</p>
+        ))}
       </Modal>
     </div>
   );

@@ -80,7 +80,7 @@ const LEVELS = [...LEVEL_RULES.map((rule) => rule.level), 'info'];
  * A prefix that is not on this list still classifies and still lists — the list
  * is what the filter row offers, not what the reader accepts.
  */
-const SERVICES = ['auth', 'admin', 'device', 'staff', 'safezone', 'upload'];
+const SERVICES = ['auth', 'admin', 'billing', 'device', 'staff', 'safezone', 'upload'];
 
 /**
  * A suffix as a pattern, read the way SQL reads it.

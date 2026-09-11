@@ -2,7 +2,7 @@ const express = require('express');
 const { env } = require('../config/env');
 const logger = require('../utils/logger');
 const router = express.Router();
-const { User, Transaction } = require('../models');
+const { User } = require('../models');
 const { authenticate } = require('../middleware/auth');
 const { PLANS: PLAN_CATALOGUE, PAID_PLAN_KEYS } = require('../config/plans');
 // The confirm route hands the refreshed account straight back, so the plan
@@ -13,8 +13,22 @@ const { serializeUser } = require('../utils/serializers');
 // The client itself lives in services/billing, because closing an account needs
 // it too and two clients would be two connection pools.
 const { stripe } = require('../services/billing');
-// The receipt: bell, email and push. Never awaited by a handler — see `track`.
-const { notifySubscriptionPayment } = require('../utils/billingNotice');
+/**
+ * What a payment *means* lives in services/paymentLedger — this file is
+ * transport. Four paths report the same money (this webhook, the customer's
+ * return from Checkout, the first invoice of a subscription, and the console's
+ * reconciliation), and every rule about recording it, granting the plan and
+ * telling somebody has to be the same rule for all four or they drift. The last
+ * time they drifted, every new subscription was recorded twice.
+ */
+const {
+  idOf, priceIdFor, planForPrice, priceOfLine, planForInvoice,
+  sessionIsPaid, accountFor, recordTransaction,
+  applyCheckoutCompletion, applyInvoicePayment,
+} = require('../services/paymentLedger');
+// Told to the platform's own staff: the audit stream and the console's bell.
+// Never awaited — see `track`.
+const { notifyStaffOfBillingEvent } = require('../utils/billingAdminNotice');
 const { track } = require('../utils/background');
 
 // Checkout targets, derived from the catalogue so a plan cannot be sellable
@@ -27,41 +41,6 @@ const CHECKOUT_PLANS = Object.fromEntries(
   }])
 );
 
-/**
- * The Stripe price a plan sells at, read when it is needed rather than copied
- * into the map above at import.
- *
- * The map used to carry it, which made the price this file believed in a
- * snapshot of the configuration as it stood when the module was first required.
- * Nothing in production changes it afterwards, so that was harmless there and
- * quietly awkward everywhere else: it is why the "plan with no price" branch
- * could not be reached without resetting the module graph, and the same reason
- * `billingAvailability.test.js` can vary `env.stripe` and this could not.
- * Reading it here costs one property lookup on a path that is about to make an
- * HTTPS request to Stripe.
- */
-const priceIdFor = (key) => env.stripe[PLAN_CATALOGUE[key].priceEnv];
-
-/**
- * Which plan a Stripe price grants.
- *
- * Premium is the only tier sold, so any live subscription entitles the account
- * to it — including the retired $14.99 Family Plus price, which grandfathered
- * customers still bill against. Their entitlements come from Premium (it
- * absorbed every Family Plus feature); only the amount they pay is legacy.
- *
- * An unrecognised price still resolves to Premium, because a subscription
- * exists and refusing to name a plan would leave a paying customer with none —
- * but it is logged, since it means a Stripe price nobody configured here.
- */
-const planForPrice = (priceId) => {
-  const known = PAID_PLAN_KEYS.find((key) => priceId && priceIdFor(key) === priceId);
-  if (known) return known;
-  if (priceId && priceId !== env.stripe.legacyFamilyPriceId) {
-    logger.warn('Stripe subscription on an unrecognised price — defaulting to premium', { priceId });
-  }
-  return 'premium';
-};
 
 /**
  * Turns a Stripe exception into a status and a message worth reading.
@@ -104,178 +83,6 @@ const RETRY_WILL_NOT_HELP = new Set([
   'StripeInvalidRequestError',
   'StripeIdempotencyError',
 ]);
-
-/**
- * Records a transaction unless one with this key already exists.
- *
- * The key is the caller's, not the event's, because one payment can now be
- * reported twice: by `checkout.session.completed` and by the customer coming
- * back from Checkout. Both name the completion `checkout:<session id>`, so the
- * unique constraint on `stripeEventId` makes the second a no-op instead of a
- * duplicate row — which would otherwise double-count the sale on the console's
- * Billing screen.
- *
- * The return value says whether *this* call was the one that recorded it, and
- * that is what decides who tells the customer. Both paths report the same
- * payment and both would otherwise send a receipt, so the customer would be
- * emailed twice for one charge — and the two are genuinely concurrent, since
- * Stripe's webhook and the browser's return race each other. Letting the unique
- * constraint pick the winner is the only version of this that is safe under that
- * race: whoever inserts the row sends, and the loser learns it lost.
- */
-const recordTransaction = async (data, stripeEventId) => {
-  try {
-    await Transaction.create({ ...data, stripeEventId });
-    return true;
-  } catch (err) {
-    // A duplicate surfaces as a SequelizeUniqueConstraintError whose message is
-    // just "Validation error" — check the type, not the text, so real failures
-    // still get logged.
-    if (err.name !== 'SequelizeUniqueConstraintError') {
-      logger.error('Failed to record transaction', { error: err.message });
-    }
-    return false;
-  }
-};
-
-/**
- * Everything a completed Checkout session does to an account, in one place.
- *
- * Two paths reach it — the webhook, and the customer returning with a session
- * id — and they must not be able to disagree about what "paid" means. The write
- * is absolute rather than incremental (`plan` set, not bumped), so running it
- * twice leaves the same account state; only the transaction row needs guarding,
- * and it is keyed on the session so both paths collapse onto one.
- *
- * Premium is the only tier sold, so a session that names no plan is a Premium
- * one. `customer.subscription.updated` follows within moments and resolves the
- * plan from the price actually billed if it ever differs.
- *
- * `fallbackKey` is what the sale is recorded under when the session carries no
- * id of its own. Stripe always sends one in practice, but keying on
- * `checkout:undefined` would be a landmine rather than a safeguard: every
- * id-less completion the deployment ever saw would collapse onto a single row
- * and only the first sale would be recorded. The webhook passes its event id,
- * which is unique per delivery and is exactly what this was keyed on before the
- * confirm route existed.
- */
-/**
- * The invoice behind a completed Checkout session.
- *
- * The first payment's receipt used to carry no invoice at all. Only the monthly
- * `invoice.paid` handler passed a `receiptUrl`, because that event *is* an
- * invoice — a Checkout session only carries its id, so the activation email
- * offered nothing to download for the one payment a customer is most likely to
- * want a record of. The renewals were documented and the purchase was not.
- *
- * Three shapes have to be tolerated, and the difference is not cosmetic:
- *
- *   - a **string** id, which is what both callers actually see (the webhook's
- *     event payload and `sessions.retrieve` without an `expand`);
- *   - an **object**, if a caller ever expands it — returned as-is rather than
- *     re-fetched, so adding `expand` upstream is a saving and not a bug;
- *   - **null**, which is legitimate. A `no_payment_required` session — a
- *     hundred-percent coupon, a trial with no card due — completes and owes
- *     nothing, so there is no invoice to link and the email is written to read
- *     correctly without one.
- *
- * Never throws. This runs off the back of a settled payment, so a Stripe blip
- * here must cost the receipt its download link and nothing else — least of all a
- * 5xx from the webhook, which would put the event back in Stripe's retry
- * schedule after the transaction row already exists, and the receipt would then
- * never be sent at all.
- */
-const invoiceForSession = async (session) => {
-  const ref = session?.invoice;
-  if (!ref) return null;
-  if (typeof ref === 'object') return ref;
-  if (!stripe) return null;
-
-  try {
-    return await stripe.invoices.retrieve(ref);
-  } catch (err) {
-    logger.error('Could not retrieve the invoice for a completed checkout', {
-      invoice: ref, error: err.message,
-    });
-    return null;
-  }
-};
-
-const applyCheckoutCompletion = async (user, session, { fallbackKey, io } = {}) => {
-  const plan = session.metadata?.plan || 'premium';
-
-  await User.update(
-    { plan, stripeSubscriptionId: session.subscription || null, subscriptionStatus: 'active' },
-    { where: { id: user.id } }
-  );
-
-  const firstReport = await recordTransaction({
-    userId: user.id,
-    type: 'checkout_completed',
-    plan,
-    status: 'succeeded',
-    amount: session.amount_total,
-    currency: session.currency,
-  }, session.id ? `checkout:${session.id}` : fallbackKey);
-
-  /**
-   * Telling the customer, exactly once.
-   *
-   * Gated on the transaction insert rather than on which path we are: this
-   * function runs for the webhook *and* for the customer's return from Checkout,
-   * they race, and whichever loses must not send a second receipt for the same
-   * charge. See `recordTransaction`.
-   *
-   * Not awaited. A payment is settled by the time this runs, and neither Stripe
-   * nor a customer watching the plan screen should wait on an SMTP relay —
-   * worse, a mail failure inside the webhook handler would answer 5xx and put
-   * the event back in Stripe's retry schedule, where the transaction row now
-   * exists and the receipt would never be sent again. `track` keeps a handle on
-   * it so a redeploy cannot drop it mid-flight and the tests can await it.
-   */
-  if (firstReport) {
-    /**
-     * The invoice lookup lives inside the tracked work, not before it.
-     *
-     * It is one Stripe round trip and it is only worth making for the caller
-     * that actually sends the receipt: the webhook and the customer's return
-     * genuinely race, `firstReport` is how the loser is told to stay quiet, and
-     * fetching the invoice before that check would spend the call on both. It
-     * also keeps the round trip off the critical path — the webhook has to
-     * answer Stripe promptly, and the customer is watching the plan screen.
-     */
-    track((async () => {
-      const invoice = await invoiceForSession(session);
-      return notifySubscriptionPayment({
-        io,
-        user,
-        kind: 'activated',
-        plan,
-        amount: session.amount_total,
-        currency: session.currency,
-        // The line item's period is the subscription's own, and the invoice's
-        // is the billing window; they agree for a straightforward monthly plan.
-        // Either answers the question the customer actually has — "when does
-        // this happen again" — which the activation email could not say before.
-        periodEnd: invoice?.lines?.data?.[0]?.period?.end ?? invoice?.period_end,
-        receiptUrl: invoice?.hosted_invoice_url || null,
-      });
-    })());
-  }
-
-  return plan;
-};
-
-/**
- * Whether a retrieved session represents money actually taken.
- *
- * `no_payment_required` is included deliberately: a full-discount coupon or a
- * trial with no card due completes the session and owes nothing, and refusing
- * to grant the plan in that case would be refusing a sale the business made.
- */
-const sessionIsPaid = (session) =>
-  session?.status === 'complete'
-  && ['paid', 'no_payment_required'].includes(session.payment_status);
 
 /**
  * A stored Stripe customer that Stripe does not have.
@@ -581,7 +388,7 @@ router.post('/checkout/confirm', authenticate, async (req, res) => {
       });
     }
 
-    const plan = await applyCheckoutCompletion(user, session, { io: req.app.get('io') });
+    const { plan } = await applyCheckoutCompletion(user, session, { io: req.app.get('io') });
     await user.reload();
 
     logger.info('Checkout confirmed on return from Stripe', { userId: user.id, plan, sessionId });
@@ -626,47 +433,67 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // Everything except the checkout completion is keyed on the event, which is
-  // what makes a redelivery a no-op. The completion is keyed on its session
-  // instead — see `applyCheckoutCompletion` — because the customer's own return
-  // from Stripe reports the same sale and the two must collapse onto one row.
+  // A status change is keyed on the event, which is what makes a redelivery a
+  // no-op. Anything carrying money is keyed on its invoice instead — see
+  // `paymentKeyFor` — because Stripe reports one payment through more than one
+  // event, and the customer's own return from Checkout reports it a third time.
   const record = (data) => recordTransaction(data, event.id);
+  const io = req.app.get('io');
 
   try {
     switch (event.type) {
-      case 'checkout.session.completed': {
+      /**
+       * A completed Checkout session, and the delayed settlement of one.
+       *
+       * `checkout.session.async_payment_succeeded` is the same sale arriving
+       * late: a bank debit or another delayed payment method completes the
+       * session immediately with `payment_status: 'unpaid'`, and Stripe sends
+       * this once the money actually lands. It was not handled at all, so every
+       * customer who paid by such a method either never got their plan or — see
+       * the settlement check below — got it before paying.
+       */
+      case 'checkout.session.completed':
+      case 'checkout.session.async_payment_succeeded': {
         const session = event.data.object;
-        // Only the attribution is read here now; the plan is resolved inside
-        // `applyCheckoutCompletion`, which both this and the customer's own
-        // return from Checkout go through.
         const { userId } = session.metadata || {};
 
-        /**
-         * Attribution, by metadata first and by Stripe customer second.
-         *
-         * `create-checkout-session` always sets the metadata, but it is not the
-         * only way a subscription starts: a Stripe payment link, the Buy Button
-         * and a subscription started from the dashboard all produce this event
-         * with no metadata at all. That used to destructure to `undefined`, and
-         * `where: { id: undefined }` throws in Sequelize — so the handler 500'd,
-         * Stripe redelivered the event for three days, and a customer who had
-         * genuinely paid stayed on the free plan throughout.
-         *
-         * The customer id belongs to us either way, so it is enough to find the
-         * account.
-         */
-        const user = userId
-          ? await User.findByPk(userId)
-          : session.customer
-            ? await User.findOne({ where: { stripeCustomerId: session.customer } })
-            : null;
+        const user = await accountFor({ userId, customer: session.customer });
 
         if (!user) {
           // Nothing to retry: no later delivery of this event will carry an
           // attribution it does not have. Acknowledge so Stripe stops, and log
           // it as the operator's problem to reconcile.
-          logger.error('checkout.session.completed could not be attributed to an account', {
-            eventId: event.id, customer: session.customer, metadataUserId: userId,
+          logger.error('A completed checkout could not be attributed to an account', {
+            eventId: event.id, type: event.type, customer: idOf(session.customer), metadataUserId: userId,
+          });
+          break;
+        }
+
+        /**
+         * Completed is not the same as paid, and this handler used to treat them
+         * as the same thing.
+         *
+         * A delayed payment method — a bank debit, a voucher, some wallets —
+         * completes the session and settles hours or days later, so this event
+         * arrives with `payment_status: 'unpaid'`. Granting on it recorded a
+         * `succeeded` transaction for money that had not moved, activated
+         * Premium, congratulated the customer and told finance a sale had
+         * landed — and if the payment then failed, the row keyed on that invoice
+         * was already there, so nothing later could correct it.
+         *
+         * The customer's own return from Checkout has always made this
+         * distinction (`sessionIsPaid`, used by `/checkout/confirm`, which
+         * answers `pending` rather than granting). The webhook now applies the
+         * same rule, so the two paths cannot disagree about what "paid" means.
+         * `async_payment_succeeded` or `async_payment_failed` follows and is
+         * where this session is settled either way.
+         */
+        if (!sessionIsPaid(session)) {
+          logger.info('Checkout completed but payment has not settled — waiting for it', {
+            eventId: event.id,
+            sessionId: session.id,
+            status: session.status,
+            paymentStatus: session.payment_status,
           });
           break;
         }
@@ -674,16 +501,47 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         // The same write the customer's return from Checkout performs, from the
         // same function, so the two paths cannot come to different conclusions
         // about what a completed session grants. The event id is the key of last
-        // resort, for a completion that names no session.
-        await applyCheckoutCompletion(user, session, { fallbackKey: event.id, io: req.app.get('io') });
+        // resort, for a completion that names neither invoice nor session.
+        await applyCheckoutCompletion(user, session, { fallbackKey: event.id, io });
+        break;
+      }
+
+      /**
+       * A delayed payment that did not settle.
+       *
+       * Recorded as a failure rather than dropped, because the alternative is
+       * silence: the customer reached Checkout, the session completed, and
+       * nothing in the console would ever show that the money did not arrive.
+       */
+      case 'checkout.session.async_payment_failed': {
+        const session = event.data.object;
+        const user = await accountFor({ userId: session.metadata?.userId, customer: session.customer });
+        if (!user) break;
+
+        const plan = session.metadata?.plan || user.plan;
+        const firstReport = await record({
+          userId: user.id,
+          type: 'checkout_failed',
+          plan,
+          status: 'failed',
+          amount: session.amount_total,
+          currency: session.currency,
+        });
+
+        if (firstReport) {
+          track(notifyStaffOfBillingEvent({
+            io, user, kind: 'failed', plan,
+            amount: session.amount_total, currency: session.currency, reference: event.id,
+          }));
+        }
         break;
       }
 
       case 'customer.subscription.updated': {
         const sub = event.data.object;
-        const user = await User.findOne({ where: { stripeCustomerId: sub.customer } });
+        const user = await accountFor({ customer: sub.customer });
         if (user) {
-          const plan = planForPrice(sub.items.data[0]?.price?.id);
+          const plan = planForPrice(priceOfLine(sub.items?.data?.[0]));
           await user.update({ subscriptionStatus: sub.status, plan });
           await record({ userId: user.id, type: 'subscription_updated', plan, status: sub.status });
         }
@@ -692,72 +550,81 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 
       case 'customer.subscription.deleted': {
         const sub = event.data.object;
-        const user = await User.findOne({ where: { stripeCustomerId: sub.customer } });
+        const user = await accountFor({ customer: sub.customer });
         if (user) {
+          // Read before the write, so the notice names the tier that was lost
+          // rather than the free plan the account has just been dropped to.
+          const lostPlan = user.plan && user.plan !== 'free' ? user.plan : 'premium';
+
           await user.update({ plan: 'free', stripeSubscriptionId: null, subscriptionStatus: 'cancelled' });
-          await record({ userId: user.id, type: 'subscription_cancelled', plan: 'free', status: 'cancelled' });
-        }
-        break;
-      }
-
-      case 'invoice.paid': {
-        const invoice = event.data.object;
-        const user = await User.findOne({ where: { stripeCustomerId: invoice.customer } });
-        if (user) {
           const firstReport = await record({
-            userId: user.id, type: 'invoice_paid', plan: user.plan, status: 'succeeded',
-            amount: invoice.amount_paid, currency: invoice.currency,
+            userId: user.id, type: 'subscription_cancelled', plan: 'free', status: 'cancelled',
           });
-
-          /**
-           * The monthly receipt — the half of this that a customer notices most.
-           *
-           * Premium bills every month and nothing told anybody. A recurring
-           * charge that arrives silently is the one people find on a statement
-           * and resent, and it is also how a subscription somebody meant to
-           * cancel keeps taking money unremarked.
-           *
-           * `subscription_create` is skipped because it is the *first* invoice
-           * of a new subscription, and `checkout.session.completed` has already
-           * congratulated them on the same charge moments earlier. Excluding
-           * that one reason rather than accepting only `subscription_cycle` is
-           * deliberate: a proration, a retried charge and a manually issued
-           * invoice are all real payments worth a receipt, and an invoice that
-           * somehow carried no `billing_reason` at all is far better reported
-           * twice than never — the complaint being fixed here is silence.
-           *
-           * Keyed on the event id, so Stripe redelivering the same invoice
-           * (which it does, for days, after any 5xx) sends one receipt.
-           */
-          if (firstReport && invoice.billing_reason !== 'subscription_create') {
-            track(notifySubscriptionPayment({
-              io: req.app.get('io'),
-              user,
-              kind: 'renewed',
-              plan: user.plan,
-              amount: invoice.amount_paid,
-              currency: invoice.currency,
-              // The line item's period is the subscription's own; `period_end`
-              // on the invoice is the billing window and matches it for a
-              // straightforward monthly plan. Either is the date the customer
-              // is asking about — "when does this happen again".
-              periodEnd: invoice.lines?.data?.[0]?.period?.end ?? invoice.period_end,
-              receiptUrl: invoice.hosted_invoice_url || null,
+          // Lost revenue is finance's business as much as won revenue is, and it
+          // is the half nobody goes looking for.
+          if (firstReport) {
+            track(notifyStaffOfBillingEvent({
+              io, user, kind: 'cancelled', plan: lostPlan, reference: event.id,
             }));
           }
         }
         break;
       }
 
+      /**
+       * Money that landed: the first charge of a subscription, and every
+       * renewal after it.
+       *
+       * This is the only signal the service gets that a recurring payment went
+       * through — nothing polls Stripe — so with `STRIPE_WEBHOOK_SECRET` unset
+       * or wrong, every month after the first is invisible here and to the
+       * customer. `billingGaps()` says so on the console's Overview, and
+       * `POST /admin/billing/sync` is how the missed ones are recovered.
+       */
+      case 'invoice.paid': {
+        const invoice = event.data.object;
+        const user = await accountFor({ customer: invoice.customer });
+        if (!user) {
+          // Same reasoning as an unattributable checkout: a redelivery cannot
+          // supply an account this invoice's customer does not match, so 200 is
+          // the only answer that terminates. Logged as an error because it is
+          // money the platform took and cannot credit to anybody.
+          logger.error('invoice.paid could not be attributed to an account', {
+            eventId: event.id, customer: idOf(invoice.customer), invoice: invoice.id,
+          });
+          break;
+        }
+
+        // The same write the reconciliation performs, from the same function —
+        // so a payment recovered by hand and a payment delivered by webhook are
+        // recorded identically. The event id is the key of last resort, for an
+        // invoice with no id of its own.
+        await applyInvoicePayment({ invoice, user, io, fallbackKey: event.id });
+        break;
+      }
+
       case 'invoice.payment_failed': {
         const invoice = event.data.object;
-        const user = await User.findOne({ where: { stripeCustomerId: invoice.customer } });
+        const user = await accountFor({ customer: invoice.customer });
         if (user) {
+          const plan = planForInvoice(invoice, user);
           await user.update({ subscriptionStatus: 'past_due' });
-          await record({
-            userId: user.id, type: 'invoice_failed', plan: user.plan, status: 'failed',
+          // Keyed on the event: each retry Stripe makes is its own attempt and
+          // its own failure, and collapsing them onto the invoice would hide all
+          // but the first from the console.
+          const firstReport = await record({
+            userId: user.id, type: 'invoice_failed', plan, status: 'failed',
             amount: invoice.amount_due, currency: invoice.currency,
           });
+
+          // Money the platform expected and did not get. The Billing screen
+          // already calls out the count; this is what makes one arrive.
+          if (firstReport) {
+            track(notifyStaffOfBillingEvent({
+              io, user, kind: 'failed', plan,
+              amount: invoice.amount_due, currency: invoice.currency, reference: event.id,
+            }));
+          }
         }
         break;
       }

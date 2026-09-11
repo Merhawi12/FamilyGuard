@@ -116,9 +116,21 @@ export default function NotificationsBell() {
   const unreadUpdates = updates.filter((n) => !n.isRead).length;
   const unread = unreadAlerts + unreadUpdates;
 
-  const markUpdateRead = (id) => {
-    setUpdates((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
-    notificationsApi.markRead(id).catch(() => {});
+  /**
+   * Read it, and go where it points.
+   *
+   * `link` is null for an announcement — a maintenance notice is about nothing
+   * you can open — and set for the platform's automatic notices. A payment
+   * receipt that could not reach the plan it was about was a dead end, and the
+   * push notification for the same payment has always carried the destination.
+   */
+  const markUpdateRead = (row) => {
+    setUpdates((prev) => prev.map((n) => (n.id === row.id ? { ...n, isRead: true } : n)));
+    notificationsApi.markRead(row.id).catch(() => {});
+    if (row.link) {
+      setOpen(false);
+      navigate(row.link);
+    }
   };
 
   const markAllRead = () => {
@@ -215,7 +227,7 @@ export default function NotificationsBell() {
               updates.map((n) => (
                 <button
                   key={n.id}
-                  onClick={() => markUpdateRead(n.id)}
+                  onClick={() => markUpdateRead(n)}
                   className={`w-full text-left flex gap-3 px-4 py-3 border-b border-gray-50 last:border-0 transition hover:bg-gray-50 ${
                     !n.isRead ? 'bg-primary-50/60' : ''
                   }`}

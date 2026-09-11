@@ -9,6 +9,21 @@ const Notification = sequelize.define('Notification', {
   type: { type: DataTypes.STRING, defaultValue: 'info' },
   isRead: { type: DataTypes.BOOLEAN, defaultValue: false },
   createdBy: { type: DataTypes.UUID },
+  /**
+   * Where reading this notification should take you, as an in-app path.
+   *
+   * Nullable, and null is what every announcement has: a maintenance notice is
+   * about nothing in particular and the bell is where it ends. It is the
+   * platform's *automatic* notices that have somewhere to go — a payment notice
+   * that cannot take a finance operator to the payment is a dead end, and so is
+   * a receipt that cannot take a parent to their plan.
+   *
+   * Deliberately a path and not a URL. It is rendered by whichever app the
+   * reader is in, and a stored absolute URL would be this deployment's host
+   * frozen into a database row — wrong the moment the console moves, and an open
+   * redirect if anything ever writes one from user input.
+   */
+  link: { type: DataTypes.STRING },
 }, {
   underscored: true,
   updatedAt: false,

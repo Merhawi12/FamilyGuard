@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import {
-  Icon, Modal, useAuth, hasPermission, PERMISSIONS,
-} from '@parentix/shared';
+import { useLocation } from 'react-router-dom';
+import { Icon, Modal } from '@parentix/shared';
 import { titleForPath } from '../navigation';
 import ConsoleSearch from './ConsoleSearch.jsx';
 import AccountMenu from './AccountMenu.jsx';
+import NotificationsBell from './NotificationsBell.jsx';
 
 /**
  * The console header: where you are on the left, what you can do about it on
@@ -17,7 +16,6 @@ import AccountMenu from './AccountMenu.jsx';
  * `md` it folds into a button that opens the same search as a sheet.
  */
 export default function Topbar({ menuOpen, onOpenMenu, menuButtonRef }) {
-  const { user } = useAuth();
   const { pathname } = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
   const title = titleForPath(pathname);
@@ -74,15 +72,15 @@ export default function Topbar({ menuOpen, onOpenMenu, menuButtonRef }) {
             <Icon name="search" size={20} />
           </button>
 
-          {hasPermission(user, PERMISSIONS.SEND_NOTIFICATIONS) && (
-            <NavLink
-              to="/notifications"
-              className={({ isActive }) => `icon-btn ${isActive ? 'bg-primary-50 text-primary-600' : ''}`}
-              aria-label="Notifications"
-            >
-              <Icon name="bell" size={20} />
-            </NavLink>
-          )}
+          {/* An inbox, not an outbox.
+              This was a link to the screen where staff *compose* notifications,
+              gated on being allowed to compose them — so the control shaped like
+              a bell opened a send form, and the notices the platform writes to
+              its own operators (a subscription bought, a card declined) had
+              nowhere to arrive. Every staff account can receive one, so every
+              staff account gets the bell; the send screen is a footer link
+              inside it for the accounts that can use it. */}
+          <NotificationsBell />
 
           <AccountMenu />
         </div>

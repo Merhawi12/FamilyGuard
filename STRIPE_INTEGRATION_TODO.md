@@ -123,9 +123,17 @@ What the `type` means:
    https://api.parentix.ca/api/payments/webhook
    ```
 
-   with exactly the five events the handler implements:
-   `checkout.session.completed`, `customer.subscription.updated`,
+   with exactly the seven events the handler implements:
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed`, `customer.subscription.updated`,
    `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`.
+
+   The two `async_payment_*` events are not optional decoration. A delayed
+   payment method — a bank debit, a voucher, some wallets — completes the
+   Checkout session **unpaid** and settles later, so `checkout.session.completed`
+   arrives with `payment_status: 'unpaid'` and the handler deliberately grants
+   nothing on it. Without the follow-up events subscribed, those customers pay
+   and are never upgraded.
 
 3. For production, the same three values go into Secret Manager, not `.env`:
 
@@ -152,6 +160,30 @@ What the `type` means:
    and close the tab; `checkout.session.completed` is what grants Premium. A
    wrong signing secret means every event is rejected 400 and no one is ever
    upgraded, while checkout itself looks perfect.
+
+## When the webhook was not delivering
+
+A missing or stale `STRIPE_WEBHOOK_SECRET` fails silently and invisibly: every
+delivery is rejected 400 at the signature check, Stripe retries for three days
+and gives up, and the only symptom is that the console's Billing screen is
+missing payments nobody knows to look for.
+
+Two things exist for that now:
+
+- **The Billing screen declares it.** `billingGaps()` is returned in the
+  transactions summary and rendered as a banner above the tiles, so a finance
+  operator reading revenue is told when the source of those numbers is broken.
+- **`POST /admin/billing/sync`** (the *Sync from Stripe* button, `manage_billing`)
+  walks Stripe's own paid invoices over a window — 30 days by default, a year at
+  most — and records everything missing, granting the plan and marking the
+  subscription active as the webhook would have. It goes through the same
+  `applyInvoicePayment` the webhook uses and is keyed on `invoice:<id>`, so it
+  cannot double-record and is safe to press twice. Invoices matching no account
+  here are reported rather than dropped — usually a sign the key belongs to a
+  different Stripe account than this database.
+
+Customers are *not* emailed receipts for a backfill; staff are notified, which is
+the point of it.
 
 ## Testing
 

@@ -11,7 +11,9 @@ const {
 const {
   listActiveSessions, listUserSessions, forceLogoutSession, forceLogoutUser,
 } = require('../controllers/adminSessionController');
-const { listTransactions, listUserTransactions } = require('../controllers/adminBillingController');
+const {
+  listTransactions, listUserTransactions, syncFromStripe,
+} = require('../controllers/adminBillingController');
 const { listDevices } = require('../controllers/adminDeviceController');
 const { getSettings, updateSettings } = require('../controllers/settingsController');
 const { getContentFiltering, updateContentFiltering } = require('../controllers/adminContentController');
@@ -74,6 +76,10 @@ router.get('/devices', requirePermission('manage_users'), listDevices);
 // Billing
 router.get('/transactions', requirePermission('manage_billing'), listTransactions);
 router.get('/users/:id/transactions', requirePermission('manage_billing'), listUserTransactions);
+// Recovering payments a broken webhook never delivered. Writes payment rows and
+// customer subscription statuses, so it is a POST and it is audited — but it is
+// still billing work, gated by the permission that opens the screen it repairs.
+router.post('/billing/sync', requirePermission('manage_billing'), syncFromStripe);
 
 // Settings
 router.get('/settings', requirePermission('manage_settings'), getSettings);
