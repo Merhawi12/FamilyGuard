@@ -77,7 +77,8 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Parentix",
       "include": "build/installer.nsh",
-      "deleteAppDataOnUninstall": true
+      "deleteAppDataOnUninstall": true,
+      "runAfterFinish": false
     }
   }
 }

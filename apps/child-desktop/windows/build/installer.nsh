@@ -27,8 +27,40 @@
 ; agent through the ordinary login item; it just runs unelevated, and says so.
 
 !macro customInstall
-  DetailPrint "Registering the Parentix agent to start at sign-in…"
-  nsExec::ExecToLog 'schtasks /Create /F /RL HIGHEST /SC ONLOGON /RU "%USERDOMAIN%\%USERNAME%" /TN "Parentix Child Agent" /TR "$\"$INSTDIR\Parentix.exe$\" --parentix-autostart"'
+  ; ── Whose logon? ───────────────────────────────────────────────────────────
+  ;
+  ; The account the task belongs to is **the person at the keyboard**, and that
+  ; is not the account this installer is running as. Under over-the-shoulder
+  ; elevation — a child who is a standard user, a parent typing their own
+  ; administrator password at the UAC prompt — the installer's process is *the
+  ; parent*, so every obvious source names the wrong person and the task fires
+  ; on a logon that never happens on this computer.
+  ;
+  ; A cmd.exe-style environment reference is not one of those sources at all:
+  ; nsExec runs a command through CreateProcess rather than through a shell, so
+  ; the percent-delimited name this line used to carry was handed to schtasks as
+  ; those literal characters and the task was never created on any machine. It
+  ; looked like it worked, because everything here is best-effort and the agent
+  ; still starts by hand.
+  ;
+  ; `Win32_ComputerSystem.UserName` is the interactively signed-in account
+  ; whichever token asks, which is the question. Written with no trailing
+  ; newline so the value can be used as-is.
+  nsExec::ExecToStack `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$u = (Get-CimInstance -ClassName Win32_ComputerSystem).UserName; if ($$u) { [Console]::Out.Write($$u) }"`
+  Pop $0
+  Pop $1
+
+  ${If} $0 != 0
+  ${OrIf} $1 == ""
+    ; The agent asks the same question on its first run and can create these
+    ; itself behind one prompt, so this is a degraded install rather than a
+    ; broken one — but it is the difference between "no prompt ever" and "one".
+    DetailPrint "Could not tell which account is signed in; Parentix will finish this itself on first run."
+    Goto parentix_tasks_done
+  ${EndIf}
+
+  DetailPrint "Registering the Parentix agent to start at sign-in for $1…"
+  nsExec::ExecToLog 'schtasks /Create /F /RL HIGHEST /IT /SC ONLOGON /RU "$1" /TN "Parentix Child Agent" /TR "$\"$INSTDIR\Parentix.exe$\" --parentix-autostart"'
   Pop $0
   ${If} $0 != 0
     DetailPrint "Could not register the sign-in task (code $0). Parentix will still run, without website filtering."
@@ -56,10 +88,34 @@
   ; without elevation comes back unable to filter websites, which is the quieter
   ; half of what killing it achieved.
   DetailPrint "Registering the Parentix watchdog…"
-  nsExec::ExecToLog 'schtasks /Create /F /RL HIGHEST /SC MINUTE /MO 5 /RU "%USERDOMAIN%\%USERNAME%" /TN "Parentix Child Agent Watchdog" /TR "$\"$INSTDIR\Parentix.exe$\" --parentix-autostart"'
+  nsExec::ExecToLog 'schtasks /Create /F /RL HIGHEST /IT /SC MINUTE /MO 5 /RU "$1" /TN "Parentix Child Agent Watchdog" /TR "$\"$INSTDIR\Parentix.exe$\" --parentix-autostart"'
   Pop $0
   ${If} $0 != 0
     DetailPrint "Could not register the watchdog task (code $0). Parentix will still run."
+  ${EndIf}
+
+  parentix_tasks_done:
+
+  ; ── Start it, as the child, elevated ───────────────────────────────────────
+  ;
+  ; This is what makes "install, and it is set up" true rather than aspirational,
+  ; and it is why `runAfterFinish` is off in package.json.
+  ;
+  ; electron-builder's own finish-page launch deliberately drops privileges, so
+  ; the first run would be unelevated — and under over-the-shoulder elevation an
+  ; `Exec` from here would be worse: the agent would run as the *parent*, and
+  ; `userData` would be the parent's profile, so the credential, the rules cache
+  ; and the setup record would all land in an account nobody signs in to.
+  ;
+  ; Running the task avoids both. It starts the agent as the account the task
+  ; belongs to, with that account's highest privileges, in its own profile —
+  ; which is exactly the state every subsequent sign-in will start it in, so the
+  ; first run is not a special case that only ever happens once.
+  DetailPrint "Starting Parentix…"
+  nsExec::ExecToLog 'schtasks /Run /TN "Parentix Child Agent"'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "Parentix will start the next time this computer is signed in to."
   ${EndIf}
 !macroend
 

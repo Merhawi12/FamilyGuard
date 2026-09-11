@@ -24,6 +24,7 @@ export function setPlatform(impl) {
     lockScreen: { ...UNSUPPORTED.lockScreen, ...impl?.lockScreen },
     autostart: { ...UNSUPPORTED.autostart, ...impl?.autostart },
     permissions: { ...UNSUPPORTED.permissions, ...impl?.permissions },
+    setup: { ...UNSUPPORTED.setup, ...impl?.setup },
   };
   return _platform;
 }

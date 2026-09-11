@@ -3,6 +3,7 @@ import { foreground } from './foreground.js';
 import { apps } from './processes.js';
 import { dns, configureDnsBackup } from './dns.js';
 import { permissions } from './permissions.js';
+import { setup } from './setup.js';
 
 /**
  * The macOS half of the platform contract.
@@ -37,5 +38,12 @@ export function createMacosPlatform({ dataDir }) {
     apps,
     dns,
     permissions,
+    /**
+     * The once-per-installation half. Unprivileged here, unlike Windows: the
+     * login item and the state directory are the app's own, and the one thing
+     * that does need root — the resolver helper — arrives with the installer
+     * package and is reported rather than installed. See `setup.js`.
+     */
+    setup,
   };
 }

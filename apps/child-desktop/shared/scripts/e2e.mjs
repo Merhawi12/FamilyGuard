@@ -28,7 +28,7 @@
 import { register } from 'node:module';
 import { spawn } from 'node:child_process';
 import dgram from 'node:dgram';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, promises as fsp, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -215,6 +215,157 @@ const run = async () => {
   const { setPlatform } = await import(src('platform/index.js'));
   const fake = await import('./fake-platform.mjs');
   setPlatform(fake.createFakePlatform({ dataDir: path.join(dataDir, 'agent') }));
+
+  // ── First run ──────────────────────────────────────────────────────────────
+  /*
+   * Setting the computer up, before anything else has happened to it — which is
+   * where it happens in the product, and the only point at which "first run"
+   * means anything.
+   *
+   * The assertions worth having here are not that the steps run. They are the
+   * four that decide whether a family ends up with a computer that believes it
+   * is monitored and is not: that a failure leaves `setupCompleted` false, that
+   * a second launch does not repeat the work, that an interrupted run comes back
+   * and finishes, and that nothing a support call would read out loud contains a
+   * credential.
+   */
+  step('The computer sets itself up, once');
+  const setupSvc = await import(src('services/setup.js'));
+  const setupState = () => setupSvc.getSetupState();
+
+  const neverRun = await setupState();
+  check('a computer that has never run reports a first run',
+    neverRun.needed === true && neverRun.reason === 'first-run', JSON.stringify(neverRun.record));
+
+  /*
+   * No administrator permission, and none asked for. This is the case the
+   * specification is most explicit about: it must not fail silently, and it must
+   * not record the installation as complete.
+   */
+  fake.machine.elevated = false;
+  const refused = await setupSvc.runSetup({ exePath: 'C:\\Parentix.exe', packaged: true, elevate: false });
+  check('setup without administrator permission does not finish', refused.ok === false);
+  check('it stops on the security step, and says which', refused.failed === 'security', String(refused.failed));
+  check('it is reported as a permission request, not a fault', refused.needsPermission === true);
+  check('the installation is NOT marked complete',
+    (await setupSvc.readSetupRecord()).setupCompleted === false);
+  check('the steps that needed no permission were still done',
+    ['components', 'device', 'connect'].every((key) => refused.record.steps[key]?.ok === true),
+    JSON.stringify(refused.record.steps));
+  check('nothing was registered to start this computer',
+    fake.machine.startupRegistered === false);
+
+  /* A prompt that is dismissed is the same answer, and must read the same way. */
+  fake.machine.elevationAnswer = 'refuse';
+  const cancelled = await setupSvc.runSetup({ exePath: 'C:\\Parentix.exe', packaged: true, elevate: true });
+  check('a refused permission prompt does not finish setup either', cancelled.ok === false);
+  check('and still leaves the installation incomplete',
+    (await setupSvc.readSetupRecord()).setupCompleted === false);
+
+  /* Granted. Everything from the top — recovery is a re-run, not a resume. */
+  fake.machine.elevationAnswer = 'grant';
+  const progress = [];
+  const done = await setupSvc.runSetup({
+    exePath: 'C:\\Parentix.exe',
+    packaged: true,
+    elevate: true,
+    appVersion: '1.0.0',
+    onProgress: (event) => progress.push(`${event.key}:${event.state}`),
+  });
+  check('with permission, setup finishes', done.ok === true, done.error || '');
+  check('every step is reported to the screen, in order',
+    setupSvc.SETUP_STEPS.every(({ key }) => progress.includes(`${key}:running`) && progress.includes(`${key}:done`)),
+    progress.join(' '));
+  check('the computer is registered to start on its own', fake.machine.startupRegistered === true);
+  check('the folder holding the credential is locked down', fake.machine.stateDirSecured === true);
+
+  const completed = await setupSvc.readSetupRecord();
+  check('the installation is marked complete, with a time', completed.setupCompleted === true && !!completed.completedAt);
+  check('it has an installation identifier, and keeps it',
+    /^[0-9a-f-]{36}$/i.test(completed.installId || ''), String(completed.installId));
+  check('the identifier survived the failed attempts before it',
+    completed.installId === refused.record.installId);
+  check('a configuration file was written', existsSync(setupSvc.__testing.configPath()));
+
+  const secondLaunch = await setupState();
+  check('the next launch skips setup', secondLaunch.needed === false && secondLaunch.reason === null);
+
+  /*
+   * Interrupted: a restart in the middle of a run. The record is the only thing
+   * a next launch has to go on, and this is the shape it is left in — a version
+   * written, steps recorded, and `setupCompleted` false because it is cleared
+   * before the first step rather than after the last.
+   */
+  const interrupted = { ...completed, setupCompleted: false, completedAt: null, attempts: 9 };
+  await fsp.writeFile(setupSvc.__testing.recordPath(), JSON.stringify(interrupted), 'utf8');
+  const resumedState = await setupState();
+  check('an interrupted run is detected as unfinished, not as a first run',
+    resumedState.needed === true && resumedState.reason === 'incomplete', resumedState.reason);
+  const resumed = await setupSvc.runSetup({ exePath: 'C:\\Parentix.exe', packaged: true, elevate: false });
+  check('and finishes on the next launch with no prompt, because permission is now held',
+    resumed.ok === true, resumed.error || '');
+  check('the identifier is still the same computer', resumed.record.installId === completed.installId);
+
+  /*
+   * An update that raises SETUP_VERSION, and one that does not.
+   *
+   * The second is the case that matters: an ordinary release must not put a
+   * setup screen in front of a child for work that was done months ago.
+   */
+  await fsp.writeFile(
+    setupSvc.__testing.recordPath(),
+    JSON.stringify({ ...resumed.record, version: setupSvc.SETUP_VERSION + 1 }),
+    'utf8',
+  );
+  check('a version this build does not recognise re-runs setup',
+    (await setupState()).reason === 'update');
+  await fsp.writeFile(
+    setupSvc.__testing.recordPath(),
+    JSON.stringify({ ...resumed.record, appVersion: '9.9.9' }),
+    'utf8',
+  );
+  check('an ordinary update does not', (await setupState()).needed === false);
+
+  /*
+   * Running as somebody other than the person signed in.
+   *
+   * A parent typing their own administrator password at a prompt on the child's
+   * desktop. Everything would appear to work and would be written into the
+   * parent's profile — so it is refused, by name, in a sentence that says what
+   * to do instead.
+   */
+  await setupSvc.resetSetupState();
+  fake.machine.currentUser = 'HOUSE\\parent';
+  const wrongAccount = await setupSvc.runSetup({ exePath: 'C:\\Parentix.exe', packaged: true, elevate: true });
+  check('setting up as the wrong account is refused', wrongAccount.ok === false && wrongAccount.failed === 'security');
+  check('and the refusal names both accounts',
+    wrongAccount.error.includes('HOUSE\\parent') && wrongAccount.error.includes('HOUSE\\ada'), wrongAccount.error);
+  fake.machine.currentUser = fake.machine.consoleUser;
+
+  /*
+   * The laptop that is not on the network yet is *not* checked here, and it is
+   * worth saying why rather than leaving a gap: `api.js` reads
+   * `PARENTIX_API_URL` once, at import, so there is no way to take the backend
+   * away from a module graph that has already loaded without a test-only seam in
+   * shipping code. It is covered by launching the real application against an
+   * unreachable address instead — see §10 of docs/CHILD-DESKTOP.md.
+   */
+
+  /* Back to a finished installation, so the rest of the harness starts clean. */
+  await setupSvc.runSetup({ exePath: 'C:\\Parentix.exe', packaged: true, elevate: true });
+
+  /*
+   * The log is read out over the phone and pasted into tickets. A credential in
+   * it would be a credential in a support inbox, so the redaction is asserted
+   * against the shapes that actually turn up: a bearer header and a JWT.
+   */
+  const setupLog = await fsp.readFile(setupSvc.__testing.logPath(), 'utf8');
+  check('the setup log records the attempts', setupLog.includes('setup completed'));
+  check('and carries nothing that looks like a credential',
+    !/Bearer\s+\S+|eyJ[\w-]+\.[\w-]+\.[\w-]+/.test(setupLog));
+  const sample = setupSvc.redact('failed: Bearer abc.def-ghi at https://x/y?token=zzzz and eyJhbG.ciOi.JIUz');
+  check('redaction covers a header, a query string and a JWT',
+    !sample.includes('abc.def-ghi') && !sample.includes('zzzz') && !sample.includes('eyJhbG.ciOi.JIUz'), sample);
 
   // ── Parent-side fixture ────────────────────────────────────────────────────
   step('Parent sets up a child, rules and a computer');

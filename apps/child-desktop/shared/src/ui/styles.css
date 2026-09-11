@@ -13,6 +13,19 @@
 
 * { box-sizing: border-box; }
 
+/*
+ * `hidden` means hidden, including for the elements this file gives a `display`.
+ *
+ * The browser's own `[hidden] { display: none }` lives in the user-agent
+ * stylesheet, so any author rule setting `display` beats it — and `.nav` sets
+ * `display: flex`. The navigation was therefore on screen on the link screen,
+ * where nothing behind it exists yet, for as long as that screen has existed:
+ * three items a child could click that lead to a view with no data in it. It is
+ * not the sort of thing a test notices, and it is the first thing a screenshot
+ * shows.
+ */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   margin: 0;
@@ -81,6 +94,7 @@ input, .thread { user-select: text; cursor: auto; }
 
 .view { display: none; max-width: 860px; margin: 0 auto; }
 .app[data-view="loading"] .view[data-view="loading"],
+.app[data-view="setup"] .view[data-view="setup"],
 .app[data-view="link"] .view[data-view="link"],
 .app[data-view="home"] .view[data-view="home"],
 .app[data-view="messages"] .view[data-view="messages"],
@@ -145,6 +159,31 @@ h2 { margin: 0 0 var(--space-lg); font-size: 15px; font-weight: 800; color: var(
 .pill[data-tone="blocked"] { background: var(--danger-soft); color: var(--danger); }
 
 .empty { margin: 0; font-size: 14px; color: var(--muted); }
+
+/* ── Setting up ───────────────────────────────────────────────────────────────
+ *
+ * The mark in front of each line carries the state, and it is drawn rather than
+ * animated: a spinner on a five-second screen is decoration, and one of these
+ * steps waits on a UAC prompt that a person may take a minute to answer. A
+ * steady "Working…" that does not move is more honest than a spinner that says
+ * the same thing while implying progress nobody is making.
+ */
+.steps .row { gap: var(--space-md); }
+.step-mark {
+  flex: none;
+  width: 20px; height: 20px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  font-size: 12px; font-weight: 800; line-height: 1;
+  background: var(--line); color: var(--muted);
+}
+.step-mark[data-state="running"] { background: var(--teal-100); color: var(--teal-800); }
+.step-mark[data-state="done"] { background: var(--success-soft); color: var(--success); }
+.step-mark[data-state="failed"] { background: var(--danger-soft); color: var(--danger); }
+.steps .row[data-state="pending"] .row-title { color: var(--muted); }
+
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-md); margin-top: var(--space-xl); }
+.actions button { flex: 1 1 auto; }
 
 .facts { margin: 0 0 var(--space-lg); display: grid; grid-template-columns: max-content 1fr; gap: var(--space-sm) var(--space-xl); }
 .facts dt { font-size: 12px; font-weight: 700; color: var(--muted); }

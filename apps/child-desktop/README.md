@@ -106,6 +106,27 @@ Parentix in a browser on the computer they are setting up, with one click on
 **Connect this computer**, which fires `parentix://link/<CODE>` at the freshly
 installed agent.
 
+**Install, and it is set up.** The installer is elevated, so it creates the two
+scheduled tasks and then *starts the agent through the logon task* — which means
+the first run happens as the child, elevated, in the child's own profile, the
+same state every sign-in afterwards starts in. The agent's own first run does the
+rest: directories, the credential store, the installation identifier, a
+connectivity check, the tasks and the folder permissions, and then reads every
+one of them back off the machine before recording the installation as complete.
+Five lines on a screen, no questions, once.
+
+It is only complete when all five have been *verified*, so a run that was cut
+short comes back as unfinished and simply runs again — every step is idempotent,
+so recovery is a re-run with no partial state to reason about. Without
+administrator permission it stops on **Applying security settings**, says so, and
+offers a single button that runs a short elevated helper; the agent itself is
+never relaunched elevated, because under over-the-shoulder UAC that would move
+the whole of `userData` into the parent's profile. A machine that has been
+updated keeps its setup; one that has been uninstalled and reinstalled does not.
+
+Detail, and the account trap that decides whose logon the tasks fire on:
+[docs/CHILD-DESKTOP.md](../../docs/CHILD-DESKTOP.md) §6a.
+
 Updates install themselves in the background and are never offered to the child:
 an update dialog on a monitored computer is a dialog with a Cancel button on the
 software doing the monitoring.
@@ -146,11 +167,22 @@ as an administrator"* and the monitor reads Off.
 sign-in, and Windows will not auto-start an elevated application from the Run key
 at all. The installer — which is already elevated — instead registers a
 **scheduled task** that runs the agent at logon with the highest privileges the
-account has. See [`windows/build/installer.nsh`](windows/build/installer.nsh).
+account has. See [`windows/build/installer.nsh`](windows/build/installer.nsh),
+and [`windows/src/platform/setup.js`](windows/src/platform/setup.js) for the
+agent's own copy of that work, which runs on first start and repairs the machines
+where the installer's attempt did not take.
 
-> **Install as the child.** The task is created for the account running the
-> installer. Sign in as the child, run the installer, and enter the
-> administrator password at the UAC prompt.
+> **Install as the child.** The task belongs to an account, and it has to be the
+> one at the keyboard — which is *not* the account an elevated installer runs as
+> when a parent types their own password at the prompt. Both the installer and
+> the agent ask Windows who is interactively signed in rather than who they are,
+> and the agent refuses to finish setting up when the two disagree: everything it
+> stores would otherwise land in the parent's profile.
+
+`/RL HIGHEST` gives that account its *own* highest privileges. One household
+account that is an administrator gets a full token and filtering works; a child
+who is a standard user does not, and no scheduled task changes that. It is
+reported rather than shown as a filter that is quietly off.
 
 **macOS.** The GUI agent is not root and should not be. A fourteen-line shell
 script runs as root under launchd, and the agent asks it by writing a request
@@ -197,7 +229,7 @@ DESKTOP_DOWNLOAD_BASE_URL=https://parentix-downloads.web.app npm run desktop:pub
 
 # Tests
 npm run lint
-npm run test:e2e:desktop   # 123 checks against a real API and a real resolver
+npm run test:e2e:desktop   # 151 checks against a real API and a real resolver
 npm run assets             # regenerate build/icon.png and build/tray.png
 ```
 

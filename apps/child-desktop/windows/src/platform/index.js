@@ -4,6 +4,7 @@ import { apps } from './processes.js';
 import { autostart } from './autostart.js';
 import { dns, configureDnsBackup } from './dns.js';
 import { permissions } from './permissions.js';
+import { setup } from './setup.js';
 
 /**
  * The Windows half of the platform contract.
@@ -41,6 +42,13 @@ export function createWindowsPlatform({ dataDir }) {
     apps,
     dns,
     permissions,
+    /**
+     * The once-per-installation half: the elevated logon task, the watchdog, and
+     * the ACL on the folder holding the credential. Windows is the platform
+     * where this genuinely needs permission the agent does not start with, so it
+     * is also the one that can ask for it.
+     */
+    setup,
     /**
      * Partial on purpose: the host owns `enabled` and `set` (Electron's login
      * item works the same on both platforms), and this contributes only the one

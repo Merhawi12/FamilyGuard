@@ -37,6 +37,12 @@ const BACKUP_KEY = 'fg_dns_backup';
 const PORT = Number(process.env.PARENTIX_DNS_PORT || 53);
 
 /**
+ * Exported so first-run setup can probe the same port this will later try to
+ * bind, rather than re-deriving it from the environment and drifting.
+ */
+export const LOCAL_DNS_PORT = PORT;
+
+/**
  * Where allowed lookups go. Also 53 in production — it is the port every
  * resolver in the world listens on — and settable only so the harness can run a
  * real upstream of its own on the loopback rather than reaching the internet.

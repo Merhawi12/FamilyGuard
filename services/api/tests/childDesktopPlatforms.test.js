@@ -202,6 +202,89 @@ describe('Child Desktop — the installer can be found and updated', () => {
   });
 });
 
+/**
+ * First-run setup: the agent sets the machine up once and records that it did.
+ *
+ * The pieces are spread across an NSIS script, two platform modules and a
+ * package.json, and every disagreement between them fails the same silent way —
+ * an installation that looks finished and monitors nothing. None of it can be
+ * covered by running anything: there is no Windows scheduled task and no UAC
+ * prompt inside a test runner. What can be checked is that the files agree.
+ */
+describe('Child Desktop — first-run setup', () => {
+  const nsh = read(`${DESKTOP}/windows/build/installer.nsh`);
+  const winSetup = read(`${DESKTOP}/windows/src/platform/setup.js`);
+  const winAutostart = read(`${DESKTOP}/windows/src/platform/autostart.js`);
+
+  it.each([['windows'], ['macos']])('%s implements the setup half of the contract', (name) => {
+    expect(fs.existsSync(path.join(REPO, DESKTOP, name, 'src/platform/setup.js'))).toBe(true);
+    // Reaching the agent is what matters: a module nothing imports is a module
+    // that does nothing, and the failure would be a setup screen that passes by
+    // falling through to the contract's "cannot" defaults.
+    expect(read(`${DESKTOP}/${name}/src/platform/index.js`)).toMatch(/from '\.\/setup\.js'/);
+    expect(read(`${DESKTOP}/${name}/src/platform/index.js`)).toMatch(/^\s+setup,$/m);
+  });
+
+  /*
+   * Three files name these two tasks and none of them can see the others: the
+   * installer creates them, `setup.js` re-creates and verifies them, and
+   * `autostart.js` queries the logon one to decide whether to raise a tamper
+   * alert. A rename in one place is a watchdog that never runs, or an alert at
+   * every parent about a task that is present under another name.
+   */
+  it('the installer, the setup module and the tamper check agree on the task names', () => {
+    for (const task of ['Parentix Child Agent', 'Parentix Child Agent Watchdog']) {
+      expect(nsh).toContain(`/TN "${task}"`);
+      expect(winSetup).toContain(`'${task}'`);
+    }
+    expect(winAutostart).toContain("const LOGON_TASK = 'Parentix Child Agent'");
+  });
+
+  /*
+   * `nsExec` runs a command through CreateProcess, not through cmd.exe, so
+   * `%USERNAME%` is passed to schtasks as those nine literal characters and the
+   * task is never created. It shipped that way and nothing went red, because
+   * every line in that file is best-effort and the agent still starts by hand.
+   */
+  it('the installer does not rely on environment expansion it will not get', () => {
+    expect(nsh).not.toMatch(/%USERNAME%|%USERDOMAIN%/);
+    expect(nsh).toContain('Win32_ComputerSystem');
+  });
+
+  /*
+   * electron-builder's finish-page launch deliberately drops privileges, so a
+   * first run started that way is unelevated — and under over-the-shoulder
+   * elevation an `Exec` from the installer would be worse, running the agent as
+   * the parent and putting the whole of `userData` in their profile. Running the
+   * task instead starts it as the right account, elevated, in its own profile.
+   */
+  it('the installer starts the agent through the task rather than directly', () => {
+    expect(windows.build.nsis.runAfterFinish).toBe(false);
+    expect(nsh).toContain('schtasks /Run /TN "Parentix Child Agent"');
+  });
+
+  /*
+   * The setup record lives in `userData`, so this flag is the whole of what
+   * makes "uninstall and reinstall starts over" true — and electron-builder
+   * guards it with its own `isUpdated`, which is what makes "an update keeps the
+   * setup" true at the same time.
+   */
+  it('an uninstall takes the setup record with it', () => {
+    expect(windows.build.nsis.deleteAppDataOnUninstall).toBe(true);
+  });
+
+  /*
+   * The version the record is compared against. It is deliberately not the app's
+   * version: an ordinary release has nothing to set up, and re-running setup on
+   * every update would put a progress screen in front of a child for no reason.
+   */
+  it('the setup version is a constant of its own, not the release number', () => {
+    const setupService = read(`${DESKTOP}/shared/src/services/setup.js`);
+    expect(setupService).toMatch(/export const SETUP_VERSION = \d+;/);
+    expect(setupService).not.toMatch(/SETUP_VERSION = .*version/);
+  });
+});
+
 describe('Child Desktop — the device types line up end to end', () => {
   const controller = read('services/api/src/controllers/deviceController.js');
   const childrenPage = read('apps/family-app/src/pages/Children.jsx');

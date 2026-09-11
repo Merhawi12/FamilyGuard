@@ -59,6 +59,24 @@ contextBridge.exposeInMainWorld('parentix', {
     ipcRenderer.on('setup:error', (_event, message) => handler(message));
   },
 
+  /**
+   * First-run setup.
+   *
+   * `run` is the only call on this bridge that can raise an operating-system
+   * permission prompt, and it is deliberately not something the page can do on
+   * its own schedule: the main process runs the first attempt without a prompt
+   * and only tells this window to offer the button when a prompt is genuinely
+   * what is missing. What arrives here is a person pressing it.
+   */
+  setup: {
+    status: () => call('setup:status'),
+    run: (options) => call('setup:run', options || {}),
+    dismiss: () => call('setup:dismiss'),
+    onProgress: (handler) => {
+      ipcRenderer.on('setup:progress', (_event, view) => handler(view));
+    },
+  },
+
   /** Which build this is, and whether a newer one is waiting — "This computer". */
   update: {
     status: () => call('update:status'),

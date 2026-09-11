@@ -59,6 +59,16 @@ api.interceptors.response.use(
  */
 const MAX_ACTIVITY_BATCH = 200;
 
+/**
+ * Is the backend reachable from this machine at all?
+ *
+ * Unauthenticated on purpose — it is asked during first-run setup, before this
+ * computer has a credential, and its whole job is to separate "the network is
+ * not working" from "that code was not recognised". Those two produce the same
+ * screen otherwise, and only one of them is fixed by plugging in a cable.
+ */
+export const health = () => api.get('/health');
+
 // ── Device linking ────────────────────────────────────────────────────────────
 export const device = {
   /**

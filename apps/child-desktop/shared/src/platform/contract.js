@@ -69,6 +69,50 @@
  * @property {() => Promise<PermissionState[]>} permissions.list
  * @property {(key: string) => Promise<void>} permissions.open  open the settings pane
  *
+ * @property {object} setup                  the once-per-installation half
+ * @property {boolean} setup.supported
+ * @property {() => Promise<boolean>} setup.isElevated   can this process change
+ *   machine-wide settings *right now*? On Windows that is a UAC token; on macOS
+ *   it is whether the root launchd helper the .pkg installs is in place.
+ * @property {string} setup.elevationHint    one sentence telling a family how to
+ *   get that permission on this platform, shown when it is missing.
+ * @property {boolean} setup.canRequestElevation  is `applyPrivileged({elevate})`
+ *   able to ask the OS for permission, or does it have to be granted outside the
+ *   app? True on Windows (a UAC prompt), false on macOS (the installer's helper).
+ * @property {() => Promise<SessionOwner|null>} setup.sessionOwner  who is at the
+ *   keyboard versus who this process is running as. `null` when it cannot be
+ *   told — and nothing acts on `null`, because not knowing is not evidence.
+ * @property {(o: PrivilegedSetup) => Promise<PrivilegedResult>} setup.applyPrivileged
+ * @property {(o: {stateDir: string}) => Promise<PrivilegedResult>} setup.verifyPrivileged
+ *   read back what `applyPrivileged` should have done, from the machine rather
+ *   than from anything we remember writing.
+ *
+ * @typedef {object} SessionOwner
+ * @property {string} console   the interactively signed-in account, `DOMAIN\name`
+ * @property {string} current   the account this process is running as
+ * @property {boolean} matches  whether the agent is running as the person using
+ *   the computer. False is the over-the-shoulder UAC case — a parent typed their
+ *   own administrator password, so `userData` is *their* profile and everything
+ *   the agent stores would land in the wrong account.
+ *
+ * @typedef {object} PrivilegedSetup
+ * @property {string} stateDir   the directory holding the device credential
+ * @property {string} exePath    what a startup entry should launch
+ * @property {string} user       the account a startup entry belongs to
+ * @property {boolean} elevate   may this ask the OS for permission (a UAC
+ *   prompt)? Only ever true when a person just pressed a button.
+ *
+ * @typedef {object} PrivilegedResult
+ * @property {StartupResult|null} startup  null means this platform has no
+ *   privileged startup mechanism, and the caller should use the login item.
+ * @property {boolean} stateDirSecured
+ * @property {string[]} problems  human sentences, already safe to log
+ *
+ * @typedef {object} StartupResult
+ * @property {boolean} registered
+ * @property {string} mechanism  e.g. `'scheduled-task'`
+ * @property {string} [detail]
+ *
  * @typedef {object} ForegroundSample
  * @property {string} appId    the identifier a parent's rule is written against —
  *                             `chrome.exe` on Windows, `com.google.Chrome` on macOS
@@ -135,6 +179,32 @@ export const UNSUPPORTED = Object.freeze({
     systemIntact: async () => null,
   },
   permissions: { list: async () => [], open: async () => {} },
+
+  /**
+   * First-run setup, on a platform that cannot do the privileged half.
+   *
+   * `isElevated` is false rather than true, and that is the safe direction: a
+   * setup that believed it had permission would create nothing, verify nothing,
+   * and write `setupCompleted: true` over a machine where the resolver can never
+   * be redirected. False makes it say so instead.
+   */
+  setup: {
+    supported: false,
+    isElevated: async () => false,
+    elevationHint: 'This computer cannot complete the Parentix setup.',
+    canRequestElevation: false,
+    sessionOwner: async () => null,
+    applyPrivileged: async () => ({
+      startup: null,
+      stateDirSecured: false,
+      problems: ['This computer cannot apply the Parentix security settings.'],
+    }),
+    verifyPrivileged: async () => ({
+      startup: null,
+      stateDirSecured: false,
+      problems: [],
+    }),
+  },
 });
 
 /**

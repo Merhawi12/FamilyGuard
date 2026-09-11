@@ -38,6 +38,33 @@
           <p class="muted">Starting Parentix…</p>
         </section>
 
+        <!--
+          Setting up.
+
+          Five lines and no questions. Everything on this screen is a statement
+          about what the computer is doing, except at most two buttons, and
+          neither of them appears unless it is the thing that would actually
+          help. The specification this was built to is explicit about the anti-
+          pattern: no Next, no Next, no technical options.
+        -->
+        <section class="view" data-view="setup">
+          <div class="hero">
+            <p class="eyebrow" id="setup-eyebrow">Setting up</p>
+            <h1 id="setup-title">Setting up Parentix…</h1>
+            <p class="lead" id="setup-lead">This happens once. You do not need to do anything.</p>
+          </div>
+          <div class="card">
+            <ul class="list steps" id="setup-steps"></ul>
+            <p class="error" id="setup-error" role="alert" hidden></p>
+            <p class="empty" id="setup-notes" hidden></p>
+            <div class="actions">
+              <button class="btn-primary" type="button" id="setup-action" hidden></button>
+              <button class="btn-quiet" type="button" id="setup-dismiss" hidden>Continue without it</button>
+            </div>
+            <p class="fineprint" id="setup-foot"></p>
+          </div>
+        </section>
+
         <!-- Link this computer -->
         <section class="view" data-view="link">
           <div class="hero">

@@ -206,14 +206,117 @@ filtering it.
 would put a UAC prompt in front of the child at every sign-in, **and Windows will
 not auto-start an elevated app from the Run key at all** — the agent would simply
 never start on its own. `build/installer.nsh` registers
-`schtasks /Create /RL HIGHEST /SC ONLOGON` instead.
+`schtasks /Create /RL HIGHEST /IT /SC ONLOGON` instead, and
+`windows/src/platform/setup.js` re-creates and verifies the same two tasks on
+first run (§6a) for the machines where the installer's attempt did not take.
 
-> **Install while signed in as the child.** The task is created for the account
-> running the installer, because that is the logon it has to trigger on.
+> **Install while signed in as the child**, and note *why*: the task belongs to
+> an account, and the account it must belong to is the one at the keyboard. That
+> is **not** the account the installer is running as. Under over-the-shoulder
+> elevation — a child who is a standard user, a parent typing their own
+> administrator password — the installer process is the parent, so every obvious
+> source of "the current user" names the wrong person and the task fires on a
+> logon that never happens on this computer.
+>
+> Both the installer and the agent therefore ask
+> `Win32_ComputerSystem.UserName`, which is the interactively signed-in account
+> whichever token is asking. The agent goes further and **refuses to finish
+> setup** when that disagrees with the account it is running as, because
+> everything it would write — the credential, the rules cache, the setup record
+> — goes to `userData`, and `userData` would be the parent's profile.
 
-Electron's own login item is still set by the app, so a machine where the task
-could not be created still gets a running agent — unelevated, with filtering off,
+`/RL HIGHEST` gives the account *its own* highest privileges. For the common
+household case — one account, which is an administrator — that is a full token
+and filtering works. **For a child who is a standard user it is still a standard
+token**, and no scheduled task changes that: filtering there would need a service
+running as SYSTEM, which is a different product with an uninstall story attached.
+The agent reports that state rather than showing a filter that is silently off.
+
+Electron's own login item is still set by the app when no task could be created,
+so such a machine still gets a running agent — unelevated, with filtering off,
 and saying so.
+
+## 6a. First run
+
+`shared/src/services/setup.js`, with the screen in `shared/src/host/firstRun.js`.
+
+Everything the agent needs on a machine used to happen implicitly: directories
+were created the first time something was written to them, the resolver was
+redirected the first time a filter started, the scheduled task came from the
+installer and was never checked. That is fine until one of them silently does
+not happen, because they all fail in the same shape — the app comes up, links,
+shows a dashboard, and monitors nothing.
+
+So the same work runs **once, in the open, in a stated order, and verified**.
+Five steps, in the words the screen uses:
+
+| Step | What it does | Can it fail the setup? |
+| --- | --- | --- |
+| Installing Parentix components | creates `state/` and `logs/`, round-trips a probe through the OS-encrypted store | yes — a machine that cannot seal a credential can never link |
+| Configuring device | generates the installation id, writes `config.json` | yes |
+| Connecting to Parentix | `GET /api/health`, and a heartbeat when this machine already holds a credential | yes, and it retries itself every 30s |
+| Applying security settings | the two scheduled tasks, the ACL on `state/`, a bind probe of the resolver port | yes, for permission or the wrong account — **not** for the port |
+| Finalizing setup | re-reads the config, the store and the machine's own task list | yes |
+
+Four properties are the point of it:
+
+- **`setupCompleted` is written last, from evidence.** Not from "no exception was
+  thrown" — `finalize` asks the operating system. A half-finished setup comes
+  back as unfinished on the next launch.
+- **Recovery is a re-run, not a resume.** Every step is idempotent, and the flag
+  is cleared *before* the first step rather than after the last, so a crash, a
+  flat battery or a cancelled prompt leaves a record that says "not done" for the
+  whole of the time the machine is being changed. There is no partial state to
+  reason about.
+- **The record holds no secrets.** `userData/setup-state.json` and `config.json`
+  are deliberately plain and readable — the files a support call reads out, the
+  same reasoning as `dns-backup.json`. The credential stays in the encrypted
+  store. `logs/setup.log` records step names and error messages, through a
+  redactor for bearer headers, JWTs and token query strings.
+- **An update is not a first run.** `deleteAppDataOnUninstall` is guarded by
+  electron-builder's own `isUpdated`, so an uninstall clears the record and an
+  update keeps it. A new build re-runs the list only when it raises
+  `SETUP_VERSION`, which is a constant of its own and not the release number.
+
+### Elevation, and why the app is not relaunched
+
+The privileged half runs one of two ways, and **never by restarting the agent
+elevated**. That looks like the obvious move and it is the wrong one: under
+over-the-shoulder elevation the relaunched copy runs as the parent, and
+`userData` moves with it.
+
+1. **Already elevated** — the ordinary path. The installer starts the agent
+   through the logon task it has just created (`runAfterFinish` is off precisely
+   so that is the only launch), so the first run is elevated, as the child, in
+   the child's profile — the same state every subsequent sign-in starts in.
+2. **Not elevated** — the screen offers one button, which runs a short-lived
+   elevated PowerShell helper doing named work for a named account and exits.
+   The agent stays unelevated; filtering begins at the next sign-in. Same shape
+   as the launchd helper on the Mac, for the same reason.
+
+A refused prompt, a machine with no network, a failed step: the agent still
+starts behind the screen. Everything except website filtering works without any
+of the privileged half, and a laptop that shows a child an error instead of their
+day is a product a family uninstalls. What it does not do is go quiet — the
+record still says the machine is not set up, every launch tries again, and
+"This computer" carries a **Set up** line saying so.
+
+### The bugs this found
+
+- The installer's `schtasks` lines used a cmd-style `%USERNAME%`, and nsExec
+  runs a command through `CreateProcess` rather than a shell. Those characters
+  were handed to `schtasks` literally, so **neither task was ever created on any
+  machine**. Nothing went red, because every line in that file is best-effort and
+  the agent still starts by hand.
+- The tasks are now registered with `Register-ScheduledTask` rather than
+  `schtasks.exe`: it takes an interactive principal, so no password is asked for
+  or stored, and it exposes the battery settings. A task created with the
+  defaults **stops when the machine goes on battery and will not start on
+  battery** — on a child's laptop, a parental control that switches itself off
+  when it is unplugged.
+- `.nav { display: flex }` beat the browser's `[hidden] { display: none }`, so
+  the navigation rail was on screen on the link screen, where nothing behind it
+  exists. Invisible to every test and the first thing a screenshot shows.
 
 ### macOS
 
@@ -597,9 +700,10 @@ Windows Settings.
 
 ## 10. What has been verified, and what has not
 
-**Verified by running it, on Windows, 2026-08-17 (and extended 2026-09-06):**
+**Verified by running it, on Windows, 2026-08-17 (extended 2026-09-06 and
+2026-09-11):**
 
-- `npm run test:e2e:desktop` — **123 checks** against a real API, driving the
+- `npm run test:e2e:desktop` — **151 checks** against a real API, driving the
   shipping service layer. The DNS proxy is the real one, on a high port, with a
   real upstream on the loopback: blocked, allowed, canary and DoH lookups are
   actual packets and the response codes are read off the wire. A parent socket
@@ -631,7 +735,38 @@ Windows Settings.
   matter most: an unconfigured deployment answering 503 rather than redirecting
   into nowhere, and `no-store` so a browser never pins one release's file.
 
+**First-run setup (§6a), 2026-09-11:**
+
+- **28 harness checks** on the engine: a machine that has never run reporting a
+  first run; setup without permission stopping on the security step, marked as a
+  request rather than a fault, with the unprivileged steps still done and
+  **nothing recorded as complete**; a refused prompt reading the same way; a
+  granted one finishing and registering the startup entry; the installation id
+  surviving the failed attempts before it; the next launch skipping; an
+  interrupted record detected as unfinished rather than as a first run and
+  finishing on the next launch; a raised `SETUP_VERSION` re-running and an
+  ordinary release not; setting up as the wrong account refused by name; and the
+  log carrying nothing that looks like a credential.
+- **The real Electron application, first run, on this machine.** A clean
+  `userData`: three steps green, *"Applying security settings"* red with
+  *"Parentix needs administrator permission once"*, `setup-state.json` on disk
+  with `setupCompleted: false` and the failing step named, `config.json` written,
+  `logs/setup.log` clean. *Connecting to Parentix* genuinely reached
+  `api.parentix.ca`. "Continue without it" handed the machine to the link screen;
+  a second launch with a completed record skipped setup entirely.
+- **The privileged PowerShell, parsed and half-run.** The script
+  `applyPrivileged` builds was handed to `[Parser]::ParseInput` — clean — every
+  cmdlet it depends on was confirmed present on Windows 11 26200, and the two
+  read-only calls (`sessionOwner`, `verifyPrivileged`) were run for real and
+  answered correctly: matching accounts, unelevated, no tasks registered.
+
 **Not verified, and each needs a machine:**
+
+- **The elevated half of first-run setup.** `Register-ScheduledTask`, `icacls`
+  and the `Start-Process -Verb RunAs` helper have not been *executed* — only
+  parsed, and their cmdlets confirmed present. Whether an interactive principal
+  for another account registers without a password, and whether `/RL HIGHEST`
+  yields a full token for the account in question, are both machine facts.
 
 - **Every line of the macOS platform modules.** `lsappinfo`, `ioreg`,
   `networksetup`, the launchd plist, the helper script and the pkg scripts have
@@ -646,6 +781,8 @@ Windows Settings.
 - **What the installers do when they run.** `npm run desktop:win` has been run
   and produces the three `.exe` artifacts, so packaging itself works — but
   nothing has been *installed*. The NSIS scheduled tasks (both of them), the
+  `Win32_ComputerSystem` lookup that decides whose logon they fire on, the
+  `schtasks /Run` that starts the agent elevated after install, the
   `parentix://` registry keys, the uninstaller's DNS restore, the `.pkg` scripts
   and the icon conversion have never executed on a real machine.
 - **The update path end to end.** `electron-updater` is wired in and the feed is

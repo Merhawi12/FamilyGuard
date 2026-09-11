@@ -15,9 +15,11 @@ import { isElevated } from './processes.js';
  *
  * **There is no "make me an administrator" button, and there cannot be.** UAC
  * elevation is not something a running process grants itself; it is decided when
- * the process starts. The installer requests it and installs the login item that
- * way, so this state means somebody launched the agent by hand from a standard
- * session — and the fix is to sign out and back in, not a click.
+ * the process starts. First-run setup gets the permission for a short-lived
+ * *helper* — which is how the sign-in task gets created (see `setup.js`) — and
+ * the agent that task starts is elevated from its first instruction. So this
+ * state means the agent was launched some other way, and the fix is to sign out
+ * and back in rather than a click here.
  */
 export const permissions = {
   async list() {
@@ -28,7 +30,8 @@ export const permissions = {
       granted: elevated,
       why: elevated
         ? 'Parentix can filter websites on this computer.'
-        : 'Without this, Parentix cannot block websites or record web history here. Sign out and back in, or ask your parent to reinstall Parentix.',
+        : 'Without this, Parentix cannot block websites or record web history here. '
+          + 'Parentix has it when this computer starts it at sign-in, so signing out and back in is what turns it on.',
       // Nothing to open: Windows has no settings pane that grants this.
       openable: false,
     }];

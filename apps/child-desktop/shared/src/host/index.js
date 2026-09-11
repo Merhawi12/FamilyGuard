@@ -10,6 +10,7 @@ import {
 import { createTray, trayIconPath } from './tray.js';
 import { registerProtocol, watchSetupUrls } from './setupLink.js';
 import { startUpdater, stopUpdater, getUpdateStatus } from './updater.js';
+import { beginFirstRun, getSetupView, stopFirstRun } from './firstRun.js';
 
 /**
  * Everything the Windows and macOS projects have in common, which is almost all
@@ -176,14 +177,60 @@ export async function bootstrap({ createOs, projectRoot }) {
    * sign-in is the fastest way to make a family uninstall a product that is
    * otherwise working. An *unlinked* machine opens the window regardless, since
    * there is nothing to do until somebody types a code.
+   *
+   * A machine with setup still to do overrides both — `beginFirstRun` calls
+   * `showMain()` itself — because that is the one state nobody can act on from
+   * a tray icon.
    */
   const startedHidden = process.argv.includes('--parentix-autostart') && linked;
+
+  /**
+   * First run, before anything else is started.
+   *
+   * Ahead of the agent because the machine-level arrangements — the elevated
+   * logon task, the folder holding the credential, the directories the rules
+   * cache is written into — are the ground everything below stands on, and a
+   * setup that ran *alongside* the agent would be changing them underneath it.
+   *
+   * Started **before** the window and awaited after it, which is the ordering
+   * that lets the screen actually show progress: the handlers this registers are
+   * the first thing the renderer asks for, and everything else on this bridge is
+   * registered further down. Awaiting it here rather than there would leave a
+   * window whose opening calls have nothing to answer them until the work it is
+   * meant to be narrating has already finished.
+   *
+   * It does not block a machine that has run before. See firstRun.js: the wait
+   * is only for a computer that has never been set up, where there is nothing
+   * behind the screen to show anybody yet.
+   */
+  const firstRun = beginFirstRun({
+    ipcMain,
+    sendToMain,
+    showMain,
+    exePath: process.execPath,
+    packaged: app.isPackaged,
+    appVersion: app.getVersion(),
+  }).catch((error) => {
+    // A setup that could not even be decided must not stop the agent: the
+    // capabilities it arranges are all reported separately, and a computer that
+    // refuses to run is worse than one running with less.
+    console.warn('[parentix] first-run setup could not start:', error.message);
+    return null;
+  });
+
   createMainWindow({ show: !startedHidden });
+  await firstRun;
 
   const tray = createTray({
     iconPath: trayIconPath(projectRoot),
     onStatusText: () => {
       const status = agent.getAgentStatus();
+      // Setup first, because a machine that is not set up is not monitoring
+      // whatever else the agent thinks — and this is the one line a parent sees
+      // without opening anything.
+      const setup = getSetupView();
+      if (setup.phase === 'running') return 'Finishing setup…';
+      if (setup.phase === 'failed' || setup.phase === 'needs-permission') return 'Setup is not finished';
       if (!status.linked) return 'Not linked yet';
       // A locked machine the child is working on through their allowlist is not
       // the same state as a locked machine with the screen taken, and a tray that
@@ -286,6 +333,9 @@ export async function bootstrap({ createOs, projectRoot }) {
     // Before the race, not inside it: a downloaded update installs *after* this
     // process exits, so the timer must not be what keeps it from exiting.
     stopUpdater();
+    // Same reasoning: a setup waiting thirty seconds to retry its connectivity
+    // check must not be what a shutdown waits for.
+    stopFirstRun();
     stopping = Promise.race([
       agent.stopAgent(),
       new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS)),

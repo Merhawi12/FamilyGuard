@@ -40,11 +40,35 @@ export const machine = {
   dnsStillOurs: true,
   /** `true` | `false` | `null` — the last being "could not tell", see the contract. */
   startupIntact: true,
+
+  // ── First-run setup ────────────────────────────────────────────────────────
+  //
+  // The privileged half of setup is a UAC token, a scheduled task and an ACL,
+  // none of which exist under plain Node — so these stand in for the machine's
+  // answers. They are inputs the harness sets, like the two above, rather than
+  // observations.
+
+  /** Does this process already hold the permission setup needs? */
+  elevated: true,
+  /** What happens when setup asks for it: `'grant'` or `'refuse'`. */
+  elevationAnswer: 'grant',
+  /** Who is at the keyboard, and who the agent is running as. */
+  consoleUser: 'HOUSE\\ada',
+  currentUser: 'HOUSE\\ada',
+  /** Set by `applyPrivileged`, read back by `verifyPrivileged` — the machine. */
+  startupRegistered: false,
+  stateDirSecured: false,
 };
 
 export function resetMachine() {
   machine.dnsStillOurs = true;
   machine.startupIntact = true;
+  machine.elevated = true;
+  machine.elevationAnswer = 'grant';
+  machine.consoleUser = 'HOUSE\\ada';
+  machine.currentUser = 'HOUSE\\ada';
+  machine.startupRegistered = false;
+  machine.stateDirSecured = false;
 }
 
 let _onSample = null;
@@ -136,6 +160,56 @@ export function createFakePlatform({ dataDir = mkdtempSync(path.join(tmpdir(), '
     permissions: {
       list: async () => [],
       open: async () => {},
+    },
+
+    /**
+     * First-run setup's privileged half.
+     *
+     * `verifyPrivileged` reads `machine`, and `applyPrivileged` is the only
+     * thing that writes it — so the harness's `finalize` check is asking the
+     * same question the shipping one does: not "did the step return without
+     * throwing" but "is it there now". A fake that simply returned success
+     * would agree with a setup that did nothing.
+     */
+    setup: {
+      supported: true,
+      canRequestElevation: true,
+      elevationHint: 'Parentix needs administrator permission once, to finish setting up this computer.',
+
+      isElevated: async () => machine.elevated,
+
+      sessionOwner: async () => ({
+        console: machine.consoleUser,
+        current: machine.currentUser,
+        matches: machine.consoleUser.toLowerCase() === machine.currentUser.toLowerCase(),
+      }),
+
+      async applyPrivileged({ elevate }) {
+        if (!machine.elevated) {
+          if (!elevate) throw new Error('Parentix needs administrator permission.');
+          // The prompt, answered. A refusal is a rejection from the OS, which is
+          // what a cancelled UAC dialog actually is.
+          if (machine.elevationAnswer !== 'grant') {
+            throw new Error('The Parentix setup could not finish with administrator permission.');
+          }
+          machine.elevated = true;
+        }
+        machine.startupRegistered = true;
+        machine.stateDirSecured = true;
+        return {
+          startup: { registered: true, mechanism: 'scheduled-task', detail: 'Parentix will start at sign-in.' },
+          stateDirSecured: true,
+          problems: [],
+        };
+      },
+
+      async verifyPrivileged() {
+        return {
+          startup: { registered: machine.startupRegistered, mechanism: 'scheduled-task' },
+          stateDirSecured: machine.stateDirSecured,
+          problems: [],
+        };
+      },
     },
   };
 }

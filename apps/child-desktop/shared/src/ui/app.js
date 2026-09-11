@@ -27,6 +27,8 @@ let status = null;
 let tab = 'home';
 /** `{ current, pending, … }` from the updater — see `versionFact`. */
 let updateStatus = null;
+/** `{ phase, steps, … }` from firstRun.js — see `renderSetup`. */
+let setupView = null;
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
@@ -82,10 +84,24 @@ const fill = (element, children) => {
 
 // ── Views ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Is the setup screen the thing this window should be showing?
+ *
+ * `dismissed` is the child having pressed "Continue without it", and it is
+ * deliberately a fact about this window rather than about the machine: nothing
+ * was written, the next launch will try again, and the "This computer" screen
+ * goes on saying what is not working. All the button does is stop a screen
+ * standing between a family and the three-quarters of the product that works
+ * without the permission it is waiting for.
+ */
+const setupShowing = () =>
+  !!setupView && ['running', 'failed', 'needs-permission'].includes(setupView.phase);
+
 function renderShell() {
   const linked = !!status?.linked;
-  $('nav').hidden = !linked;
-  app.dataset.view = linked ? tab : 'link';
+  const setup = setupShowing();
+  $('nav').hidden = !linked || setup;
+  app.dataset.view = setup ? 'setup' : (linked ? tab : 'link');
 
   for (const button of document.querySelectorAll('.nav-item')) {
     if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page');
@@ -105,6 +121,92 @@ function renderShell() {
   $('conn-label').textContent = !status?.linked
     ? 'Not linked'
     : (fresh ? 'Linked' : 'Reconnecting…');
+}
+
+/**
+ * The setup screen.
+ *
+ * Three states and one screen, because a family watching it does not care that
+ * they are different code paths: it is working, it needs a permission, or it
+ * could not finish. What changes between them is the heading, at most two
+ * buttons, and whether there is a sentence in red.
+ */
+const STEP_MARKS = { pending: '·', running: '…', done: '✓', failed: '✗' };
+
+function renderSetup() {
+  const view = setupView || {};
+  const phase = view.phase;
+  const updating = view.reason === 'update';
+
+  $('setup-eyebrow').textContent = updating ? 'Update' : 'Setting up';
+  $('setup-title').textContent = {
+    running: updating ? 'Finishing an update…' : 'Setting up Parentix…',
+    'needs-permission': 'Parentix needs permission',
+    failed: 'Setup did not finish',
+  }[phase] || 'Setting up Parentix…';
+
+  /**
+   * The lead says something the step list does not.
+   *
+   * The failing row already carries the sentence explaining what went wrong, so
+   * this one says what it means — what still works, and that nothing was left
+   * half-changed. Repeating the error here, which is what a banner under the
+   * list amounts to, is the same words three times on one screen.
+   */
+  $('setup-lead').textContent = {
+    running: updating
+      ? 'This version has a little more to set up. Nothing to do.'
+      : 'This happens once. You do not need to do anything.',
+    'needs-permission': 'Without it, Parentix cannot block websites or record web history on this computer. Everything else works.',
+    failed: 'Nothing on this computer was left half-changed. You can try again.',
+  }[phase] || '';
+
+  fill($('setup-steps'), (view.steps || []).map((step) => {
+    const li = row({
+      title: step.label,
+      sub: step.state === 'failed' ? step.error : (step.state === 'done' ? step.detail : null),
+    });
+    li.dataset.state = step.state;
+    const mark = document.createElement('span');
+    mark.className = 'step-mark';
+    mark.dataset.state = step.state;
+    mark.textContent = STEP_MARKS[step.state] || STEP_MARKS.pending;
+    // Before the text, which is where a list of steps is read from.
+    li.prepend(mark);
+    return li;
+  }));
+
+  /**
+   * The banner is for a failure with no row to sit on.
+   *
+   * The step list already shows the sentence beside the step that produced it,
+   * which is where somebody watching a list of five things is looking. The only
+   * case left is a run that failed before any step did — a setup that could not
+   * even start — and that is what this is for.
+   */
+  const error = $('setup-error');
+  const onARow = (view.steps || []).some((step) => step.state === 'failed');
+  error.hidden = phase !== 'failed' || !view.error || onARow;
+  if (!error.hidden) error.textContent = view.error;
+
+  const notes = $('setup-notes');
+  notes.hidden = !(view.notes || []).length;
+  if (!notes.hidden) notes.textContent = view.notes.join(' ');
+
+  const action = $('setup-action');
+  const dismiss = $('setup-dismiss');
+  action.hidden = phase === 'running';
+  dismiss.hidden = phase === 'running';
+  if (!action.hidden) {
+    action.textContent = phase === 'needs-permission'
+      ? 'Allow and finish setup'
+      : 'Try again';
+    action.disabled = phase === 'needs-permission' && !view.canRequestPermission;
+  }
+
+  $('setup-foot').textContent = phase === 'needs-permission' && !view.canRequestPermission
+    ? (view.hint || '')
+    : `This computer talks to ${view.apiHost || ''}`;
 }
 
 function renderHome() {
@@ -237,9 +339,33 @@ function renderSettings() {
   })));
   $('contact-empty').hidden = contacts.length > 0;
 
+  /**
+   * What the first run arranged, stated on the screen that states everything
+   * else.
+   *
+   * A setup that did not finish is the quietest way for this product to be
+   * wrong — the app looks identical — so it is written here in the same list as
+   * the version and the last sync, rather than only on a screen that goes away
+   * once it has been dismissed.
+   */
+  const setupFact = () => {
+    if (!setupView) return '—';
+    if (setupView.phase === 'running') return 'In progress';
+    if (setupView.phase !== 'done') {
+      return 'Not finished — Parentix will try again next time this computer starts';
+    }
+    const when = setupView.completedAt ? new Date(setupView.completedAt).toLocaleString() : 'Finished';
+    // A setup that finished with something it could not do — a resolver port
+    // another program is holding, permissions it could not tighten — is the one
+    // that would otherwise never be mentioned anywhere: the screen carrying the
+    // note goes away the moment it succeeds.
+    return setupView.notes?.length ? `${when} · ${setupView.notes.join(' ')}` : when;
+  };
+
   const facts = [
     ['Computer', status.osVersion],
     ['Connected to', bridge.apiHost],
+    ['Set up', setupFact()],
     // Shown to the child on purpose, alongside everything else on this screen.
     // It is also the answer to the first question support asks, and reading it
     // off the machine beats a parent describing what they think is installed.
@@ -296,6 +422,7 @@ async function loadMessages() {
 
 function render() {
   renderShell();
+  if (setupShowing()) return renderSetup();
   if (!status?.linked) return;
   if (tab === 'home') renderHome();
   if (tab === 'settings') renderSettings();
@@ -309,6 +436,38 @@ for (const button of document.querySelectorAll('.nav-item')) {
     render();
   });
 }
+
+/**
+ * The one button on this screen that does anything to the computer.
+ *
+ * It is disabled while the attempt runs rather than left clickable, because the
+ * thing it starts can raise an operating-system prompt and a second press would
+ * raise a second one behind the first.
+ */
+$('setup-action').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Working…';
+  try {
+    setupView = await bridge.setup.run({ elevate: true });
+  } catch (err) {
+    // A refused prompt lands here as well as a genuine failure, and both are the
+    // same thing to somebody looking at the screen: it did not happen, and the
+    // button is still there.
+    setupView = { ...(setupView || {}), phase: 'failed', error: err?.message || 'Setup could not finish.' };
+  }
+  render();
+});
+
+$('setup-dismiss').addEventListener('click', async () => {
+  setupView = await bridge.setup.dismiss().catch(() => ({ ...(setupView || {}), phase: 'dismissed' }));
+  render();
+});
+
+bridge.setup.onProgress((view) => {
+  setupView = view;
+  render();
+});
 
 $('link-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -419,6 +578,21 @@ bridge.update.onStatus((next) => {
 
 (async () => {
   $('api-host').textContent = bridge.apiHost;
+
+  /**
+   * Asked first, and painted before anything else is asked for.
+   *
+   * Two reasons, and the second is the one that bites. The main process may have
+   * started — or finished — setup before this window existed, so the progress
+   * events alone would leave a first run showing a link screen with a setup
+   * running invisibly behind it. And every other call below is answered by a
+   * handler the main process registers *after* the setup it is narrating, so
+   * waiting for one of those before the first paint would mean the screen
+   * appeared only once there was nothing left to watch.
+   */
+  setupView = await bridge.setup.status().catch(() => null);
+  render();
+
   $('autostart').checked = await bridge.autostart.get();
   updateStatus = await bridge.update.status().catch(() => null);
   status = await bridge.getStatus();
