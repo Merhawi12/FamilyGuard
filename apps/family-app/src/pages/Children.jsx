@@ -92,9 +92,19 @@ export default function Children() {
   // rather than a stale copy captured when the row was clicked.
   const selected = childList.find((c) => c.id === selectedId) || null;
 
+  /**
+   * Always a round trip, never the cached copy.
+   *
+   * This is the screen that manages the family, so it has to show the family
+   * rather than a copy of it — and it is also called from the socket handler
+   * below, where a device has just finished linking on the *server*. That change
+   * came from the phone, not from anything this browser did, so no mutating
+   * call invalidated the cache and a cached list would leave the parent looking
+   * at a confirmation for a device that is not in the list under it.
+   */
   const load = async () => {
     try {
-      const { data } = await childrenApi.list();
+      const { data } = await childrenApi.list({ fresh: true });
       setChildList(data);
       setSelectedId((current) => (data.some((c) => c.id === current) ? current : data[0]?.id ?? null));
     } catch (err) {

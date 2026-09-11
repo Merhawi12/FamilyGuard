@@ -167,12 +167,28 @@ export default function GoogleSignInButton({ onCredential, onError, text = 'sign
       script.defer = true;
       document.head.appendChild(script);
     }
+    /**
+     * Named, so it can be removed — the `load` handler already was and this one
+     * was not.
+     *
+     * The script element is looked up before it is created, so every mount after
+     * the first reuses the one already in `document.head`, and that element
+     * outlives the component: it is never removed. An inline arrow here was
+     * therefore a listener added on every mount and taken off on none,
+     * accumulating for the life of the tab, each one holding a closure over that
+     * render's `onError` and the component state behind it. The sign-in screen
+     * mounts this more than once in an ordinary session — the Sign in and Create
+     * account tabs both carry the button.
+     */
+    const onScriptError = () => onError?.(new Error('Could not reach Google to sign in'));
+
     script.addEventListener('load', render);
-    script.addEventListener('error', () => onError?.(new Error('Could not reach Google to sign in')));
+    script.addEventListener('error', onScriptError);
 
     return () => {
       cancelled = true;
       script.removeEventListener('load', render);
+      script.removeEventListener('error', onScriptError);
     };
   }, [nativeShell, available, clientId, onCredential, onError, text]);
 

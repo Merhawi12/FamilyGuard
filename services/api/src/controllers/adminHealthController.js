@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const { AuditLog, User, PushToken, Alert } = require('../models');
 const { LEVELS, levelFor, serviceFor, levelCondition } = require('../utils/logSeverity');
+const { countGrouped } = require('../utils/aggregate');
 const { getSetting, setSetting } = require('../utils/settings');
 const { getMutedAlertTypes, setMutedAlertTypes } = require('../utils/alertDelivery');
 const { ALERT_TYPES, ALERT_TYPE_KEYS } = require('../config/alertTypes');
@@ -34,6 +35,42 @@ const WINDOWS = {
 const ACK_KEY = 'criticalAcknowledgement';
 
 const HISTORY_LIMIT = 6;
+
+/**
+ * How many entries of each level the window holds — in one pass over it.
+ *
+ * This was one `COUNT` per level, and the levels are not cheap conditions. Only
+ * the top rule is a plain `IN (…)`; every rule below it must also *exclude* the
+ * rules above, so the query for `warning` carries three `NOT LIKE '%…'` terms
+ * and the query for `info` carries five. A leading-wildcard LIKE cannot use an
+ * index, so each of the four counts was a scan of the window over `audit_logs`
+ * — the busiest table on the platform — and the Overview ran all four on every
+ * load, at a window an operator can widen to thirty days.
+ *
+ * The level is derived from `action` and nothing else, and there are a few dozen
+ * distinct actions. So the database is asked the question it can answer with the
+ * `audit_logs_created_at` index — how many rows per action — and the levels are
+ * summed here with `levelFor`, the *same function* that labels a row on the
+ * System Logs screen.
+ *
+ * That is a strengthening of the invariant the old code was protecting, not a
+ * relaxation of it. Before, a tile and its screen agreed because two independent
+ * translations of one rule set — `levelCondition` in SQL and `levelFor` in
+ * JavaScript — were kept in step by hand; `suffixPattern` exists precisely to
+ * make the JS side imitate LIKE's `_` wildcard. Now the tile *is* `levelFor`, so
+ * the two cannot disagree even in principle. `levelCondition` is still what the
+ * log listing filters by, and platformHealth.test.js pins the two together.
+ */
+const levelCounts = async (since) => {
+  const byAction = await countGrouped(AuditLog, 'action', { createdAt: { [Op.gte]: since } });
+
+  const totals = new Map(LEVELS.map((level) => [level, 0]));
+  for (const [action, count] of byAction) {
+    const level = levelFor(action);
+    totals.set(level, (totals.get(level) || 0) + count);
+  }
+  return LEVELS.map((level) => ({ level, count: totals.get(level) || 0 }));
+};
 
 /** One entry, flattened the way the console reads it. */
 const entryOf = (row) => {
@@ -133,11 +170,8 @@ const getPlatformHealth = async (req, res, next) => {
     const since = new Date(Date.now() - window.ms);
 
     const [counts, latestCritical, recent, acknowledgement, muted, deliveryChannels, alerts] = await Promise.all([
-      // One count per level, each built from the same condition the log filter
-      // uses, so a tile and the screen behind it can never disagree.
-      Promise.all(LEVELS.map((level) => AuditLog.count({
-        where: { [Op.and]: [{ createdAt: { [Op.gte]: since } }, levelCondition(level)] },
-      }).then((count) => ({ level, count })))),
+      // Every level, from one grouped pass over the window — see levelCounts.
+      levelCounts(since),
 
       AuditLog.findOne({
         where: { [Op.and]: [{ createdAt: { [Op.gte]: since } }, levelCondition('critical')] },

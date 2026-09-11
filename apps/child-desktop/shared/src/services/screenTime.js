@@ -26,7 +26,8 @@ import { readJson, writeJson } from './store.js';
  * **Totals survive a restart.** The daily limit is enforced against this number.
  * If it reset when the agent restarted, closing and reopening Parentix would be
  * all it took to get the afternoon back — which is precisely what a child who
- * has just been locked out will try. The file is written every tick.
+ * has just been locked out will try. See `PERSIST_INTERVAL_MS` for how often
+ * that reaches disk, and why it is no longer every tick.
  */
 
 const CACHE_KEY = 'fg_screen_time';
@@ -36,6 +37,31 @@ const MAX_CREDIT_MS = 90 * 1000;
 
 /** Uploads are per app and cumulative, so this need not be frequent. */
 const UPLOAD_INTERVAL = 5 * 60 * 1000;
+
+/**
+ * Least time between two writes of the totals to disk.
+ *
+ * The totals were written on **every sample**, and the sample is every five
+ * seconds (`SAMPLE_MS` in the platform's foreground module). That is not a cheap
+ * write: `store.js` seals the value through the OS keystore — DPAPI on Windows,
+ * the login Keychain on macOS — then writes a temp file and renames it over the
+ * target. Seventeen thousand of those a day, on a machine this agent is supposed
+ * to be unnoticeable on, for a number that changes by five seconds each time.
+ * On a low-end laptop with a spinning disk it is the single most frequent thing
+ * the agent does.
+ *
+ * A minute is chosen against what the file is *for*, which is one specific
+ * defence: a child who has just been locked out closing and reopening Parentix
+ * to get the afternoon back. Against that, the exposure is what the last write
+ * missed — at most a minute — and the child would have to kill the agent every
+ * minute, all day, to accumulate anything worth having. They would also be
+ * killing the agent, which `tamper.js` reports.
+ *
+ * Nothing that matters is left to the timer, and that is the other half of this:
+ * `stopScreenTime` forces a write, so a clean quit reaches disk immediately
+ * whenever the last tick happened to have written.
+ */
+const PERSIST_INTERVAL_MS = 60 * 1000;
 
 /**
  * Never counted: this agent, and the shell the desktop itself is drawn by.
@@ -87,6 +113,7 @@ let _lastSampleAt = 0;
 let _stopSampling = null;
 let _uploadTimer = null;
 let _persistDirty = false;
+let _lastPersistAt = 0;
 
 /** Minutes, rounded down — the unit every rule and every report is written in. */
 const toMinutes = (seconds) => Math.floor((seconds || 0) / 60);
@@ -135,9 +162,12 @@ function rollDayIfNeeded() {
  * Credit the interval that has just elapsed, then take the new sample.
  *
  * @param {{appId: string, appName?: string}|null} sample  null means "nobody is using it"
+ * @returns {boolean} whether the calendar day rolled over on this call — the
+ *   caller has to force the totals to disk when it did, since yesterday's are
+ *   now gone from memory.
  */
 export function observe(sample, now = Date.now()) {
-  rollDayIfNeeded();
+  const rolled = rollDayIfNeeded();
 
   if (_current && _lastSampleAt) {
     const elapsed = now - _lastSampleAt;
@@ -152,16 +182,33 @@ export function observe(sample, now = Date.now()) {
   if (sample?.appId && sample.appName) _state.names[sample.appId] = sample.appName;
   _current = sample?.appId ? { appId: sample.appId, appName: sample.appName || sample.appId } : null;
   _lastSampleAt = now;
+  return rolled;
 }
 
-async function persist() {
+/**
+ * Write the totals to disk.
+ *
+ * @param {{force?: boolean}} [options] `force` skips the interval — used where
+ *   the write cannot wait: a clean shutdown, and the day rolling over.
+ */
+async function persist({ force = false } = {}) {
   if (!_persistDirty) return;
+  if (!force && Date.now() - _lastPersistAt < PERSIST_INTERVAL_MS) return;
+
+  // Cleared before the await, not after: a second call arriving while this one
+  // is in flight must not start a competing write of the same file.
   _persistDirty = false;
+  _lastPersistAt = Date.now();
   await writeJson(CACHE_KEY, {
     day: _state.day,
     seconds: _state.seconds,
     names: _state.names,
-  }).catch((err) => console.warn('[screenTime] persist failed:', err.message));
+  }).catch((err) => {
+    // Put the flag back: the totals on disk are still the old ones, so the next
+    // tick has to try again rather than assume this one landed.
+    _persistDirty = true;
+    console.warn('[screenTime] persist failed:', err.message);
+  });
 }
 
 /**
@@ -240,9 +287,20 @@ export async function startScreenTime({ onTick } = {}) {
   _stopSampling?.();
   _lastSampleAt = 0;
   _current = null;
+  // The first tick after a start writes immediately rather than waiting out an
+  // interval it did not spend running.
+  _lastPersistAt = 0;
   _stopSampling = p.foreground.start((sample) => {
-    observe(sample);
-    persist();
+    // `observe` answers true when the calendar day rolled over on this tick, and
+    // that one write is not deferred. Correctness does not depend on it — the
+    // file still carries *yesterday's* `day` until it is rewritten, and the
+    // restore above rejects a cache whose day is not today, so a crash inside
+    // the deferral window loses nothing and resurrects nothing. It is forced
+    // because it costs one write a day to keep the file and memory in step
+    // across the one moment they diverge completely, which is worth more than
+    // the write.
+    const rolled = observe(sample);
+    persist({ force: rolled });
     try { onTick?.(getScreenTime()); } catch (err) {
       console.warn('[screenTime] tick handler failed:', err.message);
     }
@@ -264,9 +322,10 @@ export async function stopScreenTime() {
   _uploadTimer = null;
   // The interval up to this moment still belongs to whatever was in front, and
   // the totals still have to reach disk — a clean shutdown must not be the way
-  // a child loses the afternoon off their limit.
+  // a child loses the afternoon off their limit. Forced past the write interval
+  // for exactly that reason: there is no next tick to defer to.
   observe(null);
-  await persist();
+  await persist({ force: true });
 }
 
 export const __testing = { isExcluded, dayKeyOf, state: _state, MAX_CREDIT_MS };

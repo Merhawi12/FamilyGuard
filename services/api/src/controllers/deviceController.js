@@ -423,7 +423,21 @@ const getDeviceRules = async (req, res, next) => {
     const { childId, deviceId } = req;
     const scope = rulesVisibleTo(childId, deviceId);
 
-    const [appRows, websiteRows, screenTimeRows, grants, child, device, policy] = await Promise.all([
+    /**
+     * The device and the child come from the token check, not from two more
+     * queries.
+     *
+     * This used to add `Child.findByPk` (for `name`) and `Device.findByPk` (for
+     * `blockedAt`) to the fan-out below — two round trips for two columns that
+     * `authenticateDevice` had just selected, on the call every linked device in
+     * the fleet makes every five minutes for as long as it is linked. They are
+     * read off `req.device`, which is the same row this request already
+     * authenticated against and therefore exactly as fresh; see middleware/auth.
+     */
+    const device = req.device;
+    const child = device?.child;
+
+    const [appRows, websiteRows, screenTimeRows, grants, policy] = await Promise.all([
       AppRule.findAll({ where: scope }),
       WebsiteRule.findAll({ where: scope }),
       ScreenTimeRule.findAll({ where: scope }),
@@ -431,11 +445,6 @@ const getDeviceRules = async (req, res, next) => {
       // summed here: which of them still count is a question about the device's
       // own calendar day, and only the device can answer it.
       grantsForDevice(childId, deviceId),
-      // The child app greets whoever is holding the phone. Their own name is
-      // the one thing it needs that no rule carries, and this is the call it
-      // already makes every five minutes.
-      Child.findByPk(childId, { attributes: ['name'] }),
-      Device.findByPk(deviceId, { attributes: ['blockedAt'] }),
       getContentPolicy(),
     ]);
 

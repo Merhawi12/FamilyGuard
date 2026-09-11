@@ -51,9 +51,37 @@ const encryptUrl = (log) => {
 ActivityLog.beforeCreate(encryptUrl);
 ActivityLog.beforeUpdate(encryptUrl);
 
-// Decrypt url after reading
+/**
+ * Decrypt `url` after reading — and never throw doing it.
+ *
+ * The guard is the whole of this function, and it is not defensive padding.
+ * `decrypt` returns a value carrying no `:` unchanged, which is what lets a row
+ * written before encryption existed read back as itself — but **a url always
+ * carries a `:`**, in `https://`. So that escape hatch, which covers every other
+ * encrypted column on the platform, covers nothing here: any row this
+ * deployment's key cannot open reaches `Buffer.from(undefined)` and throws.
+ *
+ * A throw here is not one bad row, it is the endpoint. This hook runs on every
+ * read of `activity_logs` — the activity log, web history, the daily and weekly
+ * reports, the safety analyser — and Sequelize runs it over the whole result
+ * set, so one unreadable row 500s the entire response and every retry of it.
+ * The ways a row gets there are all real and none of them are the child app:
+ * a restored dump from another environment, a `FIELD_ENCRYPTION_KEY` rotated
+ * without re-wrapping, or any write path that skips the hooks (a bare
+ * `bulkCreate` without `individualHooks`, a manual insert).
+ *
+ * Left exactly as stored rather than nulled: the caller sees a value it cannot
+ * make sense of instead of being told confidently that the child visited
+ * nothing. `models/User.js` guards its `mfaSecret` hook for the same reason and
+ * says so — this table is the more exposed of the two and had no guard at all.
+ */
 const decryptUrl = (log) => {
-  if (log.url) log.url = decrypt(log.url);
+  if (!log.url) return;
+  try {
+    log.url = decrypt(log.url);
+  } catch {
+    /* unreadable with this key — see above */
+  }
 };
 
 ActivityLog.afterFind((results) => {

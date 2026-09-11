@@ -4,6 +4,36 @@ const { env } = require('../config/env');
 const { DEVICE_UNLINKED, ACCOUNT_SUSPENDED } = require('../utils/deviceAccess');
 const { JWT_VERIFY_OPTIONS } = require('../utils/jwtOptions');
 
+/**
+ * How stale `Session.lastActiveAt` is allowed to get before it is written again.
+ *
+ * This was an unconditional `UPDATE sessions SET last_active_at = now()` on
+ * **every authenticated request**. Opening the dashboard is a dozen calls, so a
+ * parent moving between four screens issued something like fifty row writes to
+ * record one fact that changes meaning on the scale of minutes — and every one
+ * of them is a write to Cloud SQL, taken on the request's own connection, on the
+ * hottest path in the service.
+ *
+ * A minute is chosen against what reads the column, which is only ever the two
+ * "your active sessions" lists (Settings → Active sessions, and the console's
+ * Sessions screen). Both order by it and print it as a human timestamp; neither
+ * can tell sixty seconds of skew from none. Nothing authorises on it — session
+ * validity is `revoked`, checked above and unaffected by this.
+ *
+ * Deliberately *not* a cache of the session row: the row is still read on every
+ * request, so a revocation still takes effect on the next call. Only the write
+ * is skipped.
+ */
+const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
+
+const touchSession = (session) => {
+  const last = session.lastActiveAt ? new Date(session.lastActiveAt).getTime() : 0;
+  // `Number.isNaN` rather than a truthiness check: an unparseable stored value
+  // must be rewritten, not treated as infinitely fresh.
+  if (!Number.isNaN(last) && Date.now() - last < SESSION_TOUCH_INTERVAL_MS) return;
+  session.update({ lastActiveAt: new Date() }).catch(() => {});
+};
+
 const authenticate = async (req, res, next) => {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'No token provided' });
@@ -55,7 +85,7 @@ const authenticate = async (req, res, next) => {
     if (decoded.sid) {
       const session = await Session.findByPk(decoded.sid);
       if (!session || session.revoked) return res.status(401).json({ error: 'Session expired' });
-      session.update({ lastActiveAt: new Date() }).catch(() => {});
+      touchSession(session);
       req.sessionId = session.id;
     }
 
@@ -108,7 +138,13 @@ const authenticateDevice = async (req, res, next) => {
       include: [{
         model: Child,
         as: 'child',
-        attributes: ['id', 'isActive', 'parentId'],
+        // `name` is not needed to authorise anything. It is here because the
+        // rules sync needs it and this row is already being fetched: the child
+        // app greets whoever is holding the phone, so `GET /devices/me/rules`
+        // was issuing a second `Child.findByPk` for one column, on the
+        // highest-rate authenticated call on the platform. One extra column on a
+        // query that already runs beats a query that does not have to.
+        attributes: ['id', 'name', 'isActive', 'parentId'],
         include: [{ model: User, as: 'parent', attributes: ['id', 'isActive'] }],
       }],
     });
@@ -141,10 +177,24 @@ const authenticateDevice = async (req, res, next) => {
     // From the row, not the claim — see above.
     req.childId = device.childId;
     req.parentId = device.child.parentId;
+    /**
+     * The rows this check already loaded, offered to the handler behind it.
+     *
+     * Every device route re-derived what is sitting right here. `getDeviceRules`
+     * in particular re-read the device (for `blockedAt`) and the child (for
+     * `name`) that this query has just returned — two extra round trips per
+     * device per five minutes, for ever, for two columns already in memory.
+     *
+     * The ids above stay the contract. This is an optimisation a handler may
+     * take, not one it has to: `req.deviceId`/`req.childId` remain the only
+     * things a route is required to trust, and they are still read off the row
+     * rather than the token.
+     */
+    req.device = device;
     next();
   } catch {
     res.status(401).json({ error: 'Invalid token' });
   }
 };
 
-module.exports = { authenticate, authenticateDevice };
+module.exports = { authenticate, authenticateDevice, SESSION_TOUCH_INTERVAL_MS };

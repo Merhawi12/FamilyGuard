@@ -1,4 +1,19 @@
 import api from './client.js';
+import { cachedFamily, invalidateFamily } from './familyCache.js';
+
+/**
+ * `.then(invalidating)` on a write: drop the cached child list, then hand the
+ * response on untouched.
+ *
+ * Written as a pass-through rather than a wrapper so the bindings below still
+ * read as one line each, and so a caller's `.then(r => r.data)` is unaffected.
+ * Only a *successful* write invalidates — a rejected promise skips this and
+ * keeps the cache, which is correct: nothing changed.
+ */
+const invalidating = (response) => {
+  invalidateFamily();
+  return response;
+};
 
 /**
  * Every call the two web apps make, in one place.
@@ -94,24 +109,42 @@ export const mfa = {
   validate: (data) => api.post('/auth/mfa/validate', data),
 };
 
+/**
+ * The child list, and the things that change it.
+ *
+ * `list` is the one read in this file with a cache behind it, because it is the
+ * one every screen in the family app opens with — see api/familyCache.js for
+ * what it does and the four rules that keep it honest. The three writers below
+ * drop that cache, so it is only ever reused between reads.
+ *
+ * `list({ fresh: true })` forces a round trip. The Children screen uses it: it
+ * is the screen that manages the family, so it should show the family, not a
+ * copy of it from half a minute ago.
+ */
 export const children = {
-  list: () => api.get('/children'),
-  create: (data) => api.post('/children', data),
-  update: (id, data) => api.put(`/children/${id}`, data),
-  remove: (id) => api.delete(`/children/${id}`),
+  list: (options) => cachedFamily(() => api.get('/children'), options),
+  create: (data) => api.post('/children', data).then(invalidating),
+  update: (id, data) => api.put(`/children/${id}`, data).then(invalidating),
+  remove: (id) => api.delete(`/children/${id}`).then(invalidating),
 };
 
+/**
+ * Every device action a parent can take invalidates the family cache, because
+ * `GET /children` carries each child's devices — their names, their `blockedAt`
+ * and their `online` dot. A device renamed or paused here must not still read
+ * the old way on the next screen the parent opens.
+ */
 export const devices = {
   list: () => api.get('/devices'),
-  generateLink: (data) => api.post('/devices/link', data),
+  generateLink: (data) => api.post('/devices/link', data).then(invalidating),
   // A fresh code for a device that was created but never connected.
   regenerateLink: (id) => api.post(`/devices/${id}/link`),
-  update: (id, data) => api.patch(`/devices/${id}`, data),
+  update: (id, data) => api.patch(`/devices/${id}`, data).then(invalidating),
   // Pausing one device. Not the same as `remove`, which cannot be undone — see
   // the API's utils/deviceAccess.js.
-  block: (id) => api.post(`/devices/${id}/block`),
-  unblock: (id) => api.post(`/devices/${id}/unblock`),
-  remove: (id) => api.delete(`/devices/${id}`),
+  block: (id) => api.post(`/devices/${id}/block`).then(invalidating),
+  unblock: (id) => api.post(`/devices/${id}/unblock`).then(invalidating),
+  remove: (id) => api.delete(`/devices/${id}`).then(invalidating),
 };
 
 export const screenTime = {
@@ -195,7 +228,10 @@ export const alerts = {
 };
 
 export const notifications = {
-  list: () => api.get('/notifications'),
+  // `{ limit, offset }` — the API pages these (100 max, 100 by default), and a
+  // caller that wants a shorter panel should be able to ask for one rather than
+  // fetch a hundred rows and slice.
+  list: (params) => api.get('/notifications', { params }),
   markRead: (id) => api.patch(`/notifications/${id}/read`),
   markAllRead: () => api.patch('/notifications/read-all'),
 
@@ -305,6 +341,15 @@ export const admin = {
    * filter — it describes the business, not the page.
    */
   listTransactions: (params) => api.get('/admin/transactions', { params }),
+  /**
+   * Reconcile the payment log against Stripe, recording anything the webhook
+   * never delivered. Idempotent — a payment already recorded is recognised and
+   * skipped — so it is safe to press twice.
+   *
+   * Answers `{ available, days, scanned, recorded, alreadyRecorded,
+   * unattributed, unattributedInvoices, truncated }`.
+   */
+  syncBilling: (days) => api.post('/admin/billing/sync', days ? { days } : {}),
 
   getSettings: () => api.get('/admin/settings'),
   updateSettings: (data) => api.put('/admin/settings', data),
