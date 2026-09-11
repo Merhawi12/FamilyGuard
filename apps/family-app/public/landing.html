@@ -252,7 +252,10 @@ body.nav-open .nav-toggle .ic-close{display:block;}
 @keyframes waveScroll{from{transform:translateX(0);}to{transform:translateX(-50%);}}
 
 /* ============ HERO ============ */
-.hero{position:relative;padding-top:clamp(8.5rem,14vw,11rem);padding-bottom:0;background:var(--foam);overflow:hidden;}
+/* The top gap has to clear the fixed header and no more. It was 11rem at wide
+   widths, which was comfortable when the hero copy was two paragraphs; at four
+   it pushed "Get Started Free" through the fold on a 900px-tall laptop. */
+.hero{position:relative;padding-top:clamp(8.5rem,14vw,9rem);padding-bottom:0;background:var(--foam);overflow:hidden;}
 
 /* Hero photograph, in two layers.
    ::before is the picture, ::after the scrim that keeps the copy readable over
@@ -286,8 +289,12 @@ body.nav-open .nav-toggle .ic-close{display:block;}
 
 .hero-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:clamp(2.5rem,5vw,4rem);align-items:center;position:relative;z-index:1;}
 .hero-copy h1{margin-bottom:1.3rem;}
-.hero-copy p{color:var(--slate);font-size:1.08rem;max-width:540px;margin-bottom:.95rem;}
-.hero-ctas{display:flex;flex-wrap:wrap;gap:1rem;margin-top:1.8rem;}
+.hero-copy p{color:var(--slate);font-size:1.08rem;max-width:540px;margin-bottom:.8rem;}
+/* The sign-off under the hero copy. A statement, not a sentence in the body —
+   so it takes the brand weight and colour rather than reading as a fourth
+   paragraph somebody forgot to finish. */
+.hero-copy p.hero-sign{margin-top:1.15rem;margin-bottom:0;font-size:1.12rem;font-weight:650;color:var(--ink);}
+.hero-ctas{display:flex;flex-wrap:wrap;gap:1rem;margin-top:1.5rem;}
 .hero-trust{margin-top:1.3rem;font-size:.85rem;color:var(--slate-soft);display:flex;align-items:center;gap:.5rem;}
 .hero-trust .dot{width:5px;height:5px;border-radius:50%;background:var(--slate-soft);}
 
@@ -659,8 +666,10 @@ footer{background:#07121E;color:rgba(255,255,255,.55);padding-block:3rem 2rem;}
       <div class="hero-copy" data-reveal>
         <span class="eyebrow">About Parentix</span>
         <h1>One platform.<br>Complete <em>family protection.</em></h1>
-        <p>Parentix gives parents complete visibility and calm control over their children's digital lives — from a single, easy-to-use dashboard.</p>
-        <p>As kids spend more of childhood online, the old patchwork of separate apps can't keep up. Parentix replaces it with one steady current of real-time monitoring, intelligent alerts, and parental controls across every phone, tablet, and computer in the house.</p>
+        <p>Parentix is an AI-powered family digital-safety platform designed to help families stay safe, secure, and balanced in today's digital world.</p>
+        <p>As children and families spend more time online, managing digital safety shouldn't require a collection of separate tools. Parentix brings device protection, online safety, parental guidance, cybersecurity monitoring, intelligent alerts, and digital wellbeing together in one simple platform.</p>
+        <p>From phones and tablets to computers, Parentix helps families understand digital activity, identify potential risks, and take action when it matters — all from one easy-to-use dashboard.</p>
+        <p class="hero-sign">Parentix — <em>Peace of mind. Every day.</em></p>
         <div class="hero-ctas">
           <a href="#pricing" class="btn btn-primary">Get Started Free <svg class="use-icon"><use href="#ic-arrow"/></svg></a>
           <a href="#how-it-works" class="btn btn-secondary">See how it works</a>
