@@ -167,6 +167,20 @@ export const dns = {
       return false;
     }
   },
+
+  /**
+   * Drop the resolver cache when the parent adds a block mid-run.
+   *
+   * Best-effort, and unprivileged on purpose: `dscacheutil -flushcache` needs
+   * root and the GUI agent is not, so this usually cannot flush and `tryRun`
+   * swallows the refusal. That is acceptable because the proxy's TTL cap makes
+   * the same block bite within 30s regardless — the flush only ever shortens
+   * that wait when the agent happens to be running as root (a `sudo` dev run).
+   * The launchd helper already flushes as part of a redirect.
+   */
+  async flushCache() {
+    await flush();
+  },
 };
 
 // ── The same work, when the agent is already root ────────────────────────────

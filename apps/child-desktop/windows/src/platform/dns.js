@@ -126,6 +126,19 @@ Clear-DnsClientCache
   },
 
   /**
+   * Drop Windows' resolver cache.
+   *
+   * Called when the parent adds a block while the filter is already running: the
+   * proxy will refuse the name, but `Get-DnsClientServerAddress` is not what
+   * answers a browser — the client-side cache is, and it still holds the address
+   * from before the rule. No elevation needed, and a failure is not worth
+   * surfacing: the proxy's TTL cap makes the same block bite within 30s anyway.
+   */
+  async flushCache() {
+    await ps('Clear-DnsClientCache').catch(() => {});
+  },
+
+  /**
    * Is every connected interface still resolving through us?
    *
    * The question the tamper watcher asks, and it is deliberately the strict

@@ -103,3 +103,69 @@ export function setId(buf, id) {
   buf.writeUInt16BE(id, 0);
   return buf;
 }
+
+/** EDNS0. Its "TTL" field carries the extended RCODE and flags, not a lifetime. */
+const TYPE_OPT = 41;
+
+/**
+ * Advance past a name at `offset` — labels, or a compression pointer — and
+ * return the offset just after it, or -1 if it cannot be read.
+ */
+function skipName(buf, offset) {
+  let i = offset;
+  while (i < buf.length) {
+    const len = buf[i];
+    if (len === 0) return i + 1;
+    if ((len & 0xc0) === 0xc0) return i + 2 <= buf.length ? i + 2 : -1;
+    if ((len & 0xc0) !== 0) return -1; // 0x40 / 0x80: reserved label types
+    i += 1 + len;
+  }
+  return -1;
+}
+
+/**
+ * Lower every record lifetime above `maxSeconds` to it, returning a copy.
+ *
+ * This is what stops a site the parent has just blocked from going on loading.
+ * Windows' resolver — and the browser's — answer a repeat lookup from cache for
+ * as long as the record said they could, and real records say hours: a CNAME for
+ * a news site comes back with tens of thousands of seconds. Until that runs out,
+ * nothing reaches this proxy to be refused. Capping the lifetime of every answer
+ * relayed bounds how long a stale "allowed" can outlive a new rule. The parallel
+ * of `DnsPacket.capTtls` in the Android app, which had the identical bug.
+ *
+ * The whole message is walked before a byte is changed, so anything that cannot
+ * be read — truncated, a reserved label type, a length that overruns — comes
+ * back untouched. A working answer is worth more than a lifetime we could not
+ * safely rewrite. OPT records are skipped: their TTL field is the extended RCODE
+ * and the DNSSEC-OK flag, and "capping" it would corrupt both.
+ */
+export function capTtls(buf, maxSeconds) {
+  if (!Buffer.isBuffer(buf) || buf.length < 12) return buf;
+  const questions = buf.readUInt16BE(4);
+  const records = buf.readUInt16BE(6) + buf.readUInt16BE(8) + buf.readUInt16BE(10);
+
+  let i = 12;
+  for (let q = 0; q < questions; q += 1) {
+    i = skipName(buf, i);
+    if (i < 0 || i + 4 > buf.length) return buf;
+    i += 4; // QTYPE + QCLASS
+  }
+
+  const offsets = [];
+  for (let r = 0; r < records; r += 1) {
+    i = skipName(buf, i);
+    if (i < 0 || i + 10 > buf.length) return buf;
+    const type = buf.readUInt16BE(i);
+    const rdlength = buf.readUInt16BE(i + 8);
+    if (type !== TYPE_OPT) offsets.push(i + 4); // TTL is the 4 bytes after TYPE+CLASS
+    i += 10 + rdlength;
+    if (i > buf.length) return buf;
+  }
+
+  const out = Buffer.from(buf);
+  for (const offset of offsets) {
+    if (out.readUInt32BE(offset) > maxSeconds) out.writeUInt32BE(maxSeconds, offset);
+  }
+  return out;
+}

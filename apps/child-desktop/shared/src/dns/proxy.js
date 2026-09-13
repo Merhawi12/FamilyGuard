@@ -1,5 +1,5 @@
 import dgram from 'node:dgram';
-import { parseQuery, refuse, setId, TYPE_A, TYPE_AAAA, TYPE_HTTPS } from './wire.js';
+import { capTtls, parseQuery, refuse, setId, TYPE_A, TYPE_AAAA, TYPE_HTTPS } from './wire.js';
 
 /**
  * A local DNS resolver: the one mechanism behind both website blocking and the
@@ -43,6 +43,18 @@ const FALLBACK_UPSTREAMS = ['1.1.1.1', '8.8.8.8'];
 
 /** A relayed lookup this long unanswered is dropped; the client will retry. */
 const UPSTREAM_TIMEOUT_MS = 5000;
+
+/**
+ * The longest any relayed answer may be cached for.
+ *
+ * A site the child visited a minute before the parent blocked it is answered by
+ * Windows' own resolver cache, so the lookup never reaches this proxy to be
+ * refused — the desktop half of the bug the Android app had. Capping every
+ * forwarded answer's lifetime bounds how long that stale "allowed" survives a
+ * new rule. Thirty seconds matches the Android cap, and a page's handful of
+ * names re-resolving twice a minute is a few small packets.
+ */
+const MAX_TTL_SECONDS = 30;
 
 /** Ceiling on lookups in flight, so a broken upstream cannot grow the map. */
 const MAX_INFLIGHT = 2048;
@@ -375,7 +387,11 @@ export class DnsProxy {
     clearTimeout(entry.timer);
     this._pending.delete(localId);
 
-    const reply = Buffer.from(msg);
+    // Capped before the id is rewritten, so a browser cannot pin an answer for
+    // longer than a new block rule takes to matter. `capTtls` returns the buffer
+    // untouched if it cannot safely parse it, so a working lookup is never lost
+    // to this.
+    const reply = capTtls(msg, MAX_TTL_SECONDS);
     setId(reply, entry.originalId);
     this.stats.relayed += 1;
     entry.socket?.send(reply, entry.port, entry.address);

@@ -92,17 +92,48 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ── A resolver for the proxy to forward to ───────────────────────────────────
 //
-// Answers NOERROR with no records to anything it is asked. That is enough: the
-// question under test is whether an allowed lookup is relayed at all, and
-// NOERROR against the proxy's own NXDOMAIN is an unambiguous answer.
+// Answers every query with one A record carrying a deliberately long TTL, so a
+// relayed answer read off the wire can prove the proxy capped it — the fix for a
+// just-visited site staying cached after it is blocked. An answer section also
+// keeps the "allowed lookup is relayed" assertions honest: NOERROR against the
+// proxy's own NXDOMAIN, with a real record behind it.
+const UPSTREAM_TTL = 86_400; // a day — far above the proxy's 30s cap
 const upstream = dgram.createSocket('udp4');
 let upstreamQueries = 0;
 upstream.on('message', (msg, rinfo) => {
   upstreamQueries += 1;
-  const reply = Buffer.from(msg);
+  // Echo the header + question, flip to a response, and append one A record.
+  // The question ends at the first zero label byte after the 12-byte header,
+  // plus QTYPE and QCLASS.
+  let qEnd = 12;
+  while (qEnd < msg.length && msg[qEnd] !== 0) qEnd += 1 + msg[qEnd];
+  qEnd += 5; // the zero byte, QTYPE (2), QCLASS (2)
+
+  const answer = Buffer.alloc(16);
+  answer.writeUInt16BE(0xc00c, 0); // name: pointer to the question
+  answer.writeUInt16BE(1, 2);      // TYPE A
+  answer.writeUInt16BE(1, 4);      // CLASS IN
+  answer.writeUInt32BE(UPSTREAM_TTL, 6);
+  answer.writeUInt16BE(4, 10);     // RDLENGTH
+  answer.writeUInt32BE(0x5db8d822, 12); // 93.184.216.34
+
+  const reply = Buffer.concat([msg.subarray(0, qEnd), answer]);
   reply.writeUInt16BE(0x8180, 2); // QR=1, RD, RA, RCODE=0
+  reply.writeUInt16BE(1, 6);      // ancount = 1
   upstream.send(reply, rinfo.port, rinfo.address);
 });
+
+/**
+ * The TTL of the first A record in a relayed answer, read straight off the wire.
+ * Mirrors the upstream layout above: a compression-pointer name, then TYPE at
+ * the question end + 2.
+ */
+const answerTtl = (msg) => {
+  let qEnd = 12;
+  while (qEnd < msg.length && msg[qEnd] !== 0) qEnd += 1 + msg[qEnd];
+  qEnd += 5;
+  return msg.readUInt32BE(qEnd + 6); // name pointer (2) + TYPE (2) + CLASS (2)
+};
 
 /** Build a standard A query for `name`. */
 const dnsQuestion = (name, id) => {
@@ -132,7 +163,12 @@ const resolve = (name) => new Promise((resolveWith, reject) => {
   socket.on('message', (msg) => {
     clearTimeout(timer);
     socket.close();
-    resolveWith({ id: msg.readUInt16BE(0), rcode: msg.readUInt16BE(2) & 0x0f });
+    resolveWith({
+      id: msg.readUInt16BE(0),
+      rcode: msg.readUInt16BE(2) & 0x0f,
+      ancount: msg.readUInt16BE(6),
+      ttl: msg.readUInt16BE(6) ? answerTtl(msg) : null,
+    });
   });
   socket.on('error', (err) => { clearTimeout(timer); socket.close(); reject(err); });
   socket.send(dnsQuestion(name, id), DNS_PORT, '127.0.0.1');
@@ -534,6 +570,77 @@ const run = async () => {
    */
   check('the Firefox DoH canary is refused', canaryAnswer.rcode === 3, `rcode ${canaryAnswer.rcode}`);
   check('a DNS-over-HTTPS endpoint is refused', dohAnswer.rcode === 3, `rcode ${dohAnswer.rcode}`);
+
+  /*
+   * The relayed answer's lifetime is capped.
+   *
+   * The upstream hands back a day-long TTL; the proxy must lower it so a site
+   * the child had open a minute before it was blocked cannot keep resolving from
+   * the OS cache. This is the desktop half of the Android caching bug, checked
+   * on the wire rather than trusted.
+   */
+  check('a relayed answer carries a record',
+    allowedAnswer.ancount === 1, `ancount ${allowedAnswer.ancount}`);
+  check('and its TTL is capped so a new block bites quickly',
+    allowedAnswer.ttl !== null && allowedAnswer.ttl <= 30, `ttl ${allowedAnswer.ttl}`);
+
+  /*
+   * Adding a block while the filter runs flushes the OS resolver cache, so the
+   * refusal is immediate rather than at the (now 30s) TTL. Lifting one does not
+   * — nothing cached needs clearing to let a name resolve again — and re-sending
+   * the same list must not flush on a timer.
+   */
+  const webFilterSvc = await import(src('services/webFilter.js'));
+  const flushesBefore = fake.spy.dnsFlushed;
+  // The flush only fires once the machine is actually redirected; the harness
+  // runs the proxy on a high port and never touches system DNS, so the flag that
+  // gates it is set directly — the same seam the tamper check's filter test uses.
+  webFilterSvc.__testing.setSystemDnsApplied(true);
+  webFilterSvc.setBlockedDomains(['bad.example.com', 'newly-blocked.example.com']);
+  check('blocking a new site flushes the resolver cache', fake.spy.dnsFlushed === flushesBefore + 1,
+    `flushes ${fake.spy.dnsFlushed - flushesBefore}`);
+  webFilterSvc.setBlockedDomains(['bad.example.com', 'newly-blocked.example.com']);
+  check('re-sending the same block list does not flush again', fake.spy.dnsFlushed === flushesBefore + 1);
+  webFilterSvc.setBlockedDomains(['bad.example.com']);
+  check('lifting a block does not flush', fake.spy.dnsFlushed === flushesBefore + 1);
+  // Put the flag back: the tamper checks below assert on an install that never
+  // redirected DNS, and a stray `systemDnsApplied` left true here would have
+  // them accuse a healthy unelevated machine of losing a redirect it never made.
+  webFilterSvc.__testing.setSystemDnsApplied(false);
+
+  /*
+   * `capTtls` against real answers, on the awkward shapes a single-A upstream
+   * never produces: a CNAME chain with compression pointers, an OPT record whose
+   * "TTL" is really flags, and a truncated packet. These were captured from
+   * 8.8.8.8 and are the same fixtures the Android app's DnsPacketTest uses — the
+   * two implementations of this cap must agree, because the bug they fix is one.
+   */
+  const { capTtls } = await import(src('dns/wire.js'));
+  const fixture = (s) => Buffer.from(s, 'hex');
+  const recordTtls = (buf) => {
+    const skip = (b, o) => { let i = o; for (;;) { const l = b[i]; if (l === 0) return i + 1; if (l >= 0xc0) return i + 2; i += l + 1; } };
+    let i = 12;
+    for (let k = 0; k < buf.readUInt16BE(4); k += 1) i = skip(buf, i) + 4;
+    const out = [];
+    const n = buf.readUInt16BE(6) + buf.readUInt16BE(8) + buf.readUInt16BE(10);
+    for (let k = 0; k < n; k += 1) { i = skip(buf, i); out.push([buf.readUInt16BE(i), buf.readUInt32BE(i + 4)]); i += 10 + buf.readUInt16BE(i + 8); }
+    return out;
+  };
+  // www.bbc.co.uk: two CNAMEs (21468s, 300s), four A (50s), then OPT.
+  const bbc = fixture('abcd81800001000600000001037777770362626302636f02756b0000010001c00c00050001000053dc0014037777770362626302636f02756b03707269c010c02b000500010000012c001403626263036d617006666173746c79036e657400c04b0001000100000032000497650051c04b000100010000003200049765c051c04b0001000100000032000497654051c04b00010001000000320004976580510000290200000000000000');
+  check('every lifetime over the cap comes down, CNAMEs and A alike',
+    JSON.stringify(recordTtls(capTtls(bbc, 30))) === JSON.stringify([[5, 30], [5, 30], [1, 30], [1, 30], [1, 30], [1, 30], [41, 0]]));
+  check('a lifetime already under the cap is left alone',
+    JSON.stringify(recordTtls(capTtls(bbc, 120))) === JSON.stringify([[5, 120], [5, 120], [1, 50], [1, 50], [1, 50], [1, 50], [41, 0]]));
+  // The OPT "TTL" is the extended RCODE and the DNSSEC-OK flag; capping it corrupts both.
+  const optFlagged = Buffer.from(bbc); optFlagged.writeUInt32BE(0x00008000, optFlagged.length - 6);
+  check('an OPT record\'s flags survive the cap',
+    capTtls(optFlagged, 30).readUInt32BE(optFlagged.length - 6) === 0x00008000);
+  check('a packet too short to parse is returned untouched',
+    Buffer.compare(capTtls(bbc.subarray(0, 40), 30), bbc.subarray(0, 40)) === 0);
+  check('capping returns a copy, leaving the original buffer intact', (() => {
+    const original = Buffer.from(bbc); capTtls(original, 30); return recordTtls(original)[0][1] === 21468;
+  })());
 
   const { flushVisits } = await import(src('services/webFilter.js'));
   const { ingestVisits, uploadWebHistory } = await import(src('services/webHistory.js'));

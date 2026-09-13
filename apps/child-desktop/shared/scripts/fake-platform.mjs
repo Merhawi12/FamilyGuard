@@ -25,6 +25,7 @@ export const spy = {
   lockHides: 0,
   dnsApplied: 0,
   dnsRestored: 0,
+  dnsFlushed: 0,
 };
 
 /**
@@ -135,6 +136,10 @@ export function createFakePlatform({ dataDir = mkdtempSync(path.join(tmpdir(), '
       // browsing unfiltered while the agent reports filtering as on.
       isApplied: async () => machine.dnsStillOurs,
       restore: async () => { spy.dnsRestored += 1; return true; },
+      // Flushing the OS cache needs the machine; here it is just recorded, so a
+      // test can prove the filter asks for it when — and only when — a block was
+      // added while it was running.
+      flushCache: async () => { spy.dnsFlushed += 1; },
     },
 
     lockScreen: {

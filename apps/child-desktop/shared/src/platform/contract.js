@@ -48,6 +48,8 @@
  * @property {(o: {port: number, ipv6: boolean}) => Promise<boolean>} dns.apply   point the machine at us
  * @property {() => Promise<boolean>} dns.isApplied             is *every* interface still on us?
  * @property {() => Promise<boolean>} dns.restore               and put it back
+ * @property {() => Promise<void>} [dns.flushCache]             drop the OS resolver cache, so a
+ *   freshly-blocked name the machine already resolved is refused now rather than at its TTL
  *
  * @property {object} lockScreen             the full-screen "time is up" surface
  * @property {(state: LockState) => void} lockScreen.show
@@ -164,6 +166,7 @@ export const UNSUPPORTED = Object.freeze({
     // "we never applied it" as "somebody removed it".
     isApplied: async () => true,
     restore: async () => false,
+    flushCache: async () => {},
   },
 
   lockScreen: { show: () => {}, hide: () => {} },

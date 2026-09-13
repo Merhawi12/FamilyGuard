@@ -155,7 +155,26 @@ export async function startWebFilter({ blockedDomains = [], onVisits } = {}) {
 /** Replace the block list on a running filter. */
 export function setBlockedDomains(domains) {
   if (!_proxy) return 0;
+  const before = new Set(_proxy.blocked);
   _state.blockedCount = _proxy.setBlockedDomains(domains).length;
+
+  /**
+   * Flush the OS resolver cache when something new was blocked.
+   *
+   * The proxy refuses the next lookup for a newly-blocked name, but Windows and
+   * macOS answer a repeat from their own cache without asking anyone — so a site
+   * the child had open a minute before the parent blocked it keeps resolving
+   * until its record expires. The TTL cap in the proxy bounds that to 30s for
+   * anything relayed since the filter started; flushing here makes a fresh block
+   * bite now. Only when the set grew: a lift needs no flush, and re-sending the
+   * same list on every five-minute sync must not clear the cache on a timer.
+   */
+  const added = _proxy.blocked.some((d) => !before.has(d));
+  if (added && _state.systemDnsApplied) {
+    platform().dns.flushCache?.().catch((err) => {
+      console.warn('[webFilter] could not flush the resolver cache:', err.message);
+    });
+  }
   return _state.blockedCount;
 }
 
