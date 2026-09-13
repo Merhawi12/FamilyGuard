@@ -346,9 +346,20 @@ async function applyRules(rules) {
   // with no website rules has monitoring but no filtering.
   const blockedDomains = blockedDomainsFor(rules);
   if (await VpnControl.hasPermission()) {
-    await VpnControl.startVpn(blockedDomains);
-    _state.status.websiteBlocking = blockedDomains.length > 0;
-    _state.status.webHistory = true;
+    /**
+     * What native code says is in force, not what was asked for.
+     *
+     * This used to report website blocking as on whenever there were rules, and
+     * that was the lie behind "I blocked a site and it still loads": after a
+     * reboot the tunnel could fail to come up while this screen said it was
+     * filtering. `startVpn` now resolves with whether filtering actually started
+     * (and is not being routed around by a named Private DNS provider). A
+     * failure to start is a status, not a failed sync — the rules themselves
+     * arrived fine.
+     */
+    const filtering = (await VpnControl.startVpn(blockedDomains).catch(() => false)) === true;
+    _state.status.websiteBlocking = filtering && blockedDomains.length > 0;
+    _state.status.webHistory = filtering;
   } else {
     // The child has not accepted the VPN prompt — report both as off rather than
     // leaving a stale "on" from a previous run.

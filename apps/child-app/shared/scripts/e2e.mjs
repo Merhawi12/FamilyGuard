@@ -268,6 +268,28 @@ const run = async () => {
   check('the blocked website reached the VPN',
     spy.vpnStarted && spy.vpnDomains?.includes('bad.example.com'), JSON.stringify(spy.vpnDomains));
   check('website blocking reports as on', status.status.websiteBlocking === true);
+
+  /*
+   * A filter that did not come up must read as off.
+   *
+   * This was the lie behind "I blocked a site and it still loads". After a
+   * reboot the Android tunnel could fail to establish while the phone went on
+   * saying website blocking was on, because the status was derived from "there
+   * are rules" rather than from whether native code had started anything.
+   * `startVpn` now resolves with the real outcome, and this pins the status to it.
+   */
+  const rulesSvc = await import(src('services/rules.js'));
+  platformState.vpnFiltering = false;
+  await rulesSvc.fetchRules();
+  check('a filter that did not start does not report website blocking as on',
+    monitoring.getMonitoringStatus().status.websiteBlocking === false);
+  check('nor web history, which comes from the same tunnel',
+    monitoring.getMonitoringStatus().status.webHistory === false);
+  platformState.vpnFiltering = true;
+  await rulesSvc.fetchRules();
+  check('and reports website blocking again once the filter is up',
+    monitoring.getMonitoringStatus().status.websiteBlocking === true);
+
   check('a background sync task was registered', spy.backgroundTasks.length === 1);
   check('location tracking started', status.status.locationTracking === true);
 

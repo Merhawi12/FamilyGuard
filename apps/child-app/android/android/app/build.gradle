@@ -184,6 +184,12 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
+    // JVM unit tests for the packet handling behind website blocking
+    // (src/test/java/ca/parentix/DnsPacketTest.kt). Plain JUnit on purpose: the
+    // code under test has no Android dependencies, so no emulator or Robolectric.
+    //   gradlew :app:testDebugUnitTest
+    testImplementation("junit:junit:4.13.2")
+
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
     def isWebpAnimatedEnabled = (findProperty('expo.webp.animated') ?: "") == "true";

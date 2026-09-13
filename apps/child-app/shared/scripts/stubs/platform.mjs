@@ -115,7 +115,16 @@ export const NativeModules = {
   VpnControl: {
     async hasPermission() { return platformState.permissions.vpn; },
     async requestPermission() { return platformState.permissions.vpn; },
-    async startVpn(domains) { spy.vpnDomains = domains; spy.vpnStarted = true; return true; },
+    /**
+     * Resolves with whether filtering came up, as the native module now does.
+     * `platformState.vpnFiltering = false` plays a phone whose tunnel failed to
+     * establish — the post-reboot case that used to report blocking as on.
+     */
+    async startVpn(domains) {
+      spy.vpnDomains = domains;
+      spy.vpnStarted = true;
+      return platformState.vpnFiltering !== false;
+    },
     async stopVpn() { spy.vpnStarted = false; return true; },
     /**
      * Stands in for the DNS proxy's flush. A test queues domains through
