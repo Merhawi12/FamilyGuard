@@ -56,6 +56,8 @@ export const machine = {
   /** Who is at the keyboard, and who the agent is running as. */
   consoleUser: 'HOUSE\\ada',
   currentUser: 'HOUSE\\ada',
+  /** Is the child a local administrator? `true` | `false` | `null` (unknown). */
+  childIsAdmin: false,
   /** Set by `applyPrivileged`, read back by `verifyPrivileged` — the machine. */
   startupRegistered: false,
   stateDirSecured: false,
@@ -68,6 +70,7 @@ export function resetMachine() {
   machine.elevationAnswer = 'grant';
   machine.consoleUser = 'HOUSE\\ada';
   machine.currentUser = 'HOUSE\\ada';
+  machine.childIsAdmin = false;
   machine.startupRegistered = false;
   machine.stateDirSecured = false;
 }
@@ -188,6 +191,8 @@ export function createFakePlatform({ dataDir = mkdtempSync(path.join(tmpdir(), '
         current: machine.currentUser,
         matches: machine.consoleUser.toLowerCase() === machine.currentUser.toLowerCase(),
       }),
+
+      sessionIsAdministrator: async () => machine.childIsAdmin,
 
       async applyPrivileged({ elevate }) {
         if (!machine.elevated) {

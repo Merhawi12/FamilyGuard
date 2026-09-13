@@ -1,4 +1,5 @@
 import { isElevated } from './processes.js';
+import { setup } from './setup.js';
 
 /**
  * What Windows makes Parentix ask for, which is one thing.
@@ -24,7 +25,7 @@ import { isElevated } from './processes.js';
 export const permissions = {
   async list() {
     const elevated = await isElevated();
-    return [{
+    const list = [{
       key: 'administrator',
       label: 'Administrator access',
       granted: elevated,
@@ -35,6 +36,26 @@ export const permissions = {
       // Nothing to open: Windows has no settings pane that grants this.
       openable: false,
     }];
+
+    /**
+     * The account being a Windows administrator is stated here as well as sent
+     * to the parent, because a child is entitled to know what Parentix can and
+     * cannot do on their computer — the same premise as the rest of this screen.
+     * Only shown when it is a clean yes: `null` (a domain account, a machine that
+     * would not answer) says nothing rather than guessing.
+     */
+    const isAdmin = await setup.sessionIsAdministrator().catch(() => null);
+    if (isAdmin === true) {
+      list.push({
+        key: 'standard-account',
+        label: 'Standard Windows account',
+        granted: false,
+        why: 'This computer is signed in to an administrator account, so Parentix here works by agreement rather '
+          + 'than by force. A parent has been told; they can switch it to a standard account to make the controls hold.',
+        openable: false,
+      });
+    }
+    return list;
   },
 
   async open() {

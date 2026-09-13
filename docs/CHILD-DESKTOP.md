@@ -663,7 +663,7 @@ parent is told. That turns a technical arms race the product loses into a
 conversation between a parent and their child. Same judgement as the lock screen
 in §4.
 
-Three signals, checked every two minutes, one alert per kind per six hours (a
+Four signals, checked every two minutes, one alert per kind per six hours (a
 laptop with a VPN client that rewrites DNS on every connect would otherwise
 produce twenty alerts an hour, and the parent would stop reading them):
 
@@ -672,9 +672,12 @@ produce twenty alerts an hour, and the parent would stop reading them):
 | The last run was killed | `repairSystemDns()` found a leftover redirect at startup | reported |
 | The resolver drifted back | `platform.dns.isApplied()` — **every** connected interface must be on the loopback | re-applied, then reported |
 | Start-at-sign-in removed | `platform.autostart.systemIntact()` | re-enabled where possible, then reported |
+| The child is a local administrator | `platform.setup.sessionIsAdministrator()` — group membership of the console account | reported (once a day; there is nothing to repair) |
 
 They reach the parent as the `tamper_detected` alert, over `alert:tamper` on the
-device socket. Four details are deliberate:
+device socket — the server allow-lists the four kinds in
+`sockets/deviceEvents.js` and takes the *wording* from the device but the *type*
+from itself. Four details are deliberate:
 
 - **The wording never accuses.** A flat battery, a power cut and a forced restart
   all reach the first signal by exactly the same route as a deliberate kill.
@@ -698,6 +701,47 @@ it is not running (the single-instance lock means it can be an unconditional
 start command), and `perMachine: true` puts UAC in front of uninstalling from
 Windows Settings.
 
+### The trust model, stated plainly
+
+Whether any of the above can hold comes down to one thing: **is the child a
+standard Windows user, or a local administrator?** It is worth being exact,
+because a requirement to "stop the child removing Parentix" means different work
+depending on the answer, and against one of the two it means none that can
+succeed.
+
+| The child tries to… | Standard user | Local administrator |
+| --- | --- | --- |
+| Uninstall from Settings | blocked — needs the admin password (`perMachine`) | can |
+| Delete the Program Files install | blocked — that tree needs admin | can |
+| Change DNS back to automatic | blocked — `Set-DnsClientServerAddress` needs admin | can (noticed and re-applied while the agent runs) |
+| End the agent process | can — the watchdog restarts it within 5 min | can |
+| Delete the scheduled tasks | can delete tasks under their own account | can |
+| Unlink the device from the account | **no** — removal is `DELETE /devices/:id` behind a parent session; there is no local unlink, and no Quit item outside a dev build | **no** — same |
+
+Two things follow, and both are honest rather than reassuring:
+
+- **The device cannot be unlinked from the machine at all.** Unlinking is a
+  parent action in the dashboard, authenticated as the parent; the agent has no
+  child-facing control that removes the link, forgets the credential, or quits.
+  A re-link onto another account is refused while the computer is already
+  somebody's (`host/index.js`). This part holds regardless of the account type.
+- **Everything else assumes a standard-user child.** For a standard user the
+  install, the resolver and the uninstall are all behind the administrator
+  password, and the only moves left — ending the process, deleting the tasks —
+  are the temporary, noticed kind. For a local-administrator child, none of it
+  can be enforced: an administrator owns the machine, and no software running as
+  them can prevent them switching it off. That is the OS's boundary, not the
+  product's. So the agent **detects that case and tells the parent** (the fourth
+  signal above), because the fix — signing the child in to a standard account —
+  is the parent's to make, and it is the one change that turns every "can" in the
+  right-hand column into a "blocked".
+
+Making a standard-user child's process *unkillable* — a service running as
+LocalSystem rather than a scheduled task as the child — is a real option and a
+larger one: it re-architects the agent (the enforcement would move out of the
+Electron process into a headless service) and changes the uninstall story. It is
+deliberately not built here; this section is the boundary as it stands.
+
 ## 10. What has been verified, and what has not
 
 **Verified by running it, on Windows, 2026-08-17 (extended 2026-09-06 and
@@ -715,6 +759,15 @@ Windows Settings.
   being put back *before* the parent is told, the six-hour repeat suppression,
   "could not tell" not counting as evidence, and a report raised before the
   socket exists surviving to be delivered afterwards.
+- The 2026-09-12 additions cover the resolver cache (a relayed answer's TTL read
+  off the wire and confirmed capped, a fresh block flushing the OS cache while a
+  lift and a re-send do not, and `capTtls` run against captured CNAME/OPT/
+  truncated packets) and the fourth tamper signal: a standard-account child
+  raising no administrator alert, an unreadable account raising none either, and
+  a local-administrator child reaching the parent once — carrying its own
+  `admin_user` kind and not repeating on the next check. The Windows
+  `sessionIsAdministrator` was also run against this machine's real account
+  (a local admin) and answered `true`.
 - The real Electron application, driven with Playwright: it boots to the link
   screen, redeems a real code, switches to My Day with the child's name and the
   parent's limit, lists the blocked app and site, reports the unelevated state

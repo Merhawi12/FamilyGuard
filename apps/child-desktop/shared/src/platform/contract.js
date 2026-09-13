@@ -84,6 +84,13 @@
  * @property {() => Promise<SessionOwner|null>} setup.sessionOwner  who is at the
  *   keyboard versus who this process is running as. `null` when it cannot be
  *   told — and nothing acts on `null`, because not knowing is not evidence.
+ * @property {() => Promise<boolean|null>} setup.sessionIsAdministrator  is the
+ *   account at the keyboard a local administrator? This is the fact that decides
+ *   whether any of the tamper protection can hold: an administrator can stop the
+ *   agent, change the resolver and uninstall, and no software running as them can
+ *   prevent it. Reported to the parent, never acted on locally. `null` when it
+ *   cannot be told (a domain account, a machine that will not answer) — not
+ *   knowing is not evidence.
  * @property {(o: PrivilegedSetup) => Promise<PrivilegedResult>} setup.applyPrivileged
  * @property {(o: {stateDir: string}) => Promise<PrivilegedResult>} setup.verifyPrivileged
  *   read back what `applyPrivileged` should have done, from the machine rather
@@ -197,6 +204,7 @@ export const UNSUPPORTED = Object.freeze({
     elevationHint: 'This computer cannot complete the Parentix setup.',
     canRequestElevation: false,
     sessionOwner: async () => null,
+    sessionIsAdministrator: async () => null,
     applyPrivileged: async () => ({
       startup: null,
       stateDirSecured: false,

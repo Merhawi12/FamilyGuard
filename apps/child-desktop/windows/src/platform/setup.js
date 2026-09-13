@@ -230,6 +230,44 @@ export const setup = {
 
   sessionOwner,
 
+  /**
+   * Is the account at the keyboard a local administrator?
+   *
+   * The single fact that decides whether the tamper protection can hold. A
+   * standard-user child cannot stop the agent, change DNS, delete the scheduled
+   * tasks for long, or uninstall — all of those need the administrator the
+   * installer asked for. An administrator child can do every one of them, and no
+   * code running as them can stop it. So the honest thing is to find out and tell
+   * the parent, which `tamper.js` does; nothing here acts on it.
+   *
+   * Membership is read of the *console* account, independent of whether this
+   * process is elevated — an unelevated agent still needs the true answer.
+   * `Get-LocalGroupMember` needs no privilege to read a local group. The
+   * well-known SID `S-1-5-32-544` is the Administrators group on every locale.
+   *
+   * `null` for anything but a clean yes or no: a domain account (where
+   * `Get-LocalGroupMember` can throw on a remote principal), a machine with
+   * nobody at the console, a build without the cmdlet. Not knowing is not
+   * evidence, the same rule the rest of this file follows.
+   */
+  async sessionIsAdministrator() {
+    const owner = await sessionOwner().catch(() => null);
+    if (!owner?.console) return null;
+    const result = await psJson(`
+$ErrorActionPreference = 'Stop'
+try {
+  $console = ${q(owner.console)}
+  $members = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop | ForEach-Object { $_.Name })
+  $isAdmin = [bool]($members | Where-Object { $_ -ieq $console })
+  ConvertTo-Json -Compress -InputObject @{ known = $true; isAdmin = $isAdmin }
+} catch {
+  ConvertTo-Json -Compress -InputObject @{ known = $false }
+}
+`, null);
+    if (!result || result.known !== true) return null;
+    return !!result.isAdmin;
+  },
+
   async applyPrivileged({ stateDir, exePath, user, elevate = false }) {
     // Written beside the folder it is about rather than to the system temp
     // directory: the elevated helper runs as a different account there, and a

@@ -77,6 +77,15 @@ const KINDS = {
   FILTER_BYPASSED: 'filter_bypassed',
   /** Parentix will not start with Windows any more. */
   AUTOSTART_REMOVED: 'autostart_removed',
+  /**
+   * The account at the keyboard is a local administrator.
+   *
+   * Not tampering — a standing weakness. Everything else in this file is a
+   * fight the product can at least make noisy; this is the one condition under
+   * which it cannot even do that, because an administrator can undo any of it.
+   * The only fix is one the parent has to make, so the parent is who is told.
+   */
+  ADMIN_USER: 'admin_user',
 };
 
 const MESSAGES = {
@@ -86,7 +95,18 @@ const MESSAGES = {
     "This computer's network settings were changed so website filtering was bypassed. Parentix has put them back.",
   [KINDS.AUTOSTART_REMOVED]:
     'Parentix was set not to start when this computer is switched on.',
+  [KINDS.ADMIN_USER]:
+    'The account signed in to this computer is a Windows administrator, so Parentix cannot stop it being '
+    + 'switched off, changed, or uninstalled. To keep protection in force, ask an adult to sign the child in '
+    + 'to a standard (non-administrator) Windows account.',
 };
+
+/**
+ * A standing condition, unlike the others, so it is re-stated at most once a day
+ * rather than sharing the six-hour window. Long enough not to nag, short enough
+ * that a parent who fixes it sees the alert stop and one who does not is reminded.
+ */
+const ADMIN_REPEAT_AFTER_MS = 24 * 60 * 60 * 1000;
 
 let _timer = null;
 let _startedAt = 0;
@@ -131,9 +151,9 @@ async function flush() {
  * adding a second copy: the parent needs to know the filter was bypassed, not
  * how many times the check loop noticed while the laptop was offline.
  */
-async function report(kind, extra = {}) {
+async function report(kind, extra = {}, repeatAfter = REPEAT_AFTER_MS) {
   const last = _reported[kind] || 0;
-  if (Date.now() - last < REPEAT_AFTER_MS) return false;
+  if (Date.now() - last < repeatAfter) return false;
 
   _pending[kind] = { kind, message: MESSAGES[kind], ...extra };
   await flush();
@@ -205,6 +225,24 @@ async function check() {
       }
     }
   } catch { /* same */ }
+
+  /**
+   * The one condition the product cannot fight, only surface.
+   *
+   * A local-administrator child can stop the agent, change the resolver and
+   * uninstall, and no code running as them can prevent it — so the useful thing
+   * is to make sure the parent knows, because the fix (a standard Windows
+   * account) is theirs to make. Checked on the timer rather than only at startup
+   * because an account can be promoted to administrator later, and answered
+   * `null` on any platform that cannot tell — where nothing is reported, since
+   * not knowing is not evidence.
+   */
+  try {
+    if (p.setup?.supported) {
+      const isAdmin = await p.setup.sessionIsAdministrator();
+      if (isAdmin === true) await report(KINDS.ADMIN_USER, {}, ADMIN_REPEAT_AFTER_MS);
+    }
+  } catch { /* a check that throws must not stop the ones after it */ }
 }
 
 export function startTamperWatch() {

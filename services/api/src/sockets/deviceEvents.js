@@ -124,8 +124,10 @@ const initSocketHandlers = (io) => {
      * A computer reporting that its own controls stopped being in force.
      *
      * Desktop-only — see `config/alertTypes.js` for why the phones have no
-     * equivalent. Three kinds arrive here (`unexpected_stop`, `filter_bypassed`,
-     * `autostart_removed`) and the device sends the sentence with them.
+     * equivalent. Four kinds arrive here (`unexpected_stop`, `filter_bypassed`,
+     * `autostart_removed`, and `admin_user` — the child's Windows account being a
+     * local administrator, the one weakness the agent can only surface) and the
+     * device sends the sentence with them.
      *
      * **The message is taken from the device and the type is not.** That is the
      * split that matters: `type` decides delivery, muting and the parent's
@@ -139,7 +141,7 @@ const initSocketHandlers = (io) => {
      */
     socket.on('alert:tamper', async ({ kind, message, restored }) => {
       if (role !== 'child') return;
-      const known = ['unexpected_stop', 'filter_bypassed', 'autostart_removed'].includes(kind);
+      const known = ['unexpected_stop', 'filter_bypassed', 'autostart_removed', 'admin_user'].includes(kind);
       const text = typeof message === 'string' && message.trim()
         ? message.trim().slice(0, 300)
         : 'Parentix protection on a child computer was interrupted.';

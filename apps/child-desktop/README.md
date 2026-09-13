@@ -229,7 +229,7 @@ DESKTOP_DOWNLOAD_BASE_URL=https://parentix-downloads.web.app npm run desktop:pub
 
 # Tests
 npm run lint
-npm run test:e2e:desktop   # 151 checks against a real API and a real resolver
+npm run test:e2e:desktop   # 166 checks against a real API and a real resolver
 npm run assets             # regenerate build/icon.png and build/tray.png
 ```
 

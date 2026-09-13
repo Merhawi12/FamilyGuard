@@ -851,6 +851,47 @@ const run = async () => {
     startupAlert.message.toLowerCase().includes('start'), startupAlert.message);
   check('and it was switched back on', fake.machine.startupIntact === true);
 
+  /*
+   * The child's Windows account being a local administrator — the one condition
+   * the agent can only surface, because an administrator can undo everything
+   * above and no code running as them can stop it. It is not "put back": there is
+   * nothing to repair, only a parent to tell.
+   */
+  tamper.resetTamperState();
+  const adminBefore = tamperAlerts().length;
+  fake.machine.childIsAdmin = false;
+  await tamper.__testing.check();
+  await sleep(200);
+  check('a standard-account child raises no administrator alert',
+    tamperAlerts().length === adminBefore,
+    JSON.stringify(tamperAlerts().map((a) => a.message)));
+
+  fake.machine.childIsAdmin = null; // a domain account, say — cannot be told
+  await tamper.__testing.check();
+  await sleep(200);
+  check('an account whose group cannot be read is not reported either',
+    tamperAlerts().length === adminBefore);
+
+  fake.machine.childIsAdmin = true;
+  await tamper.__testing.check();
+  const adminAlert = await waitFor(
+    () => tamperAlerts().find((a) => /administrator/i.test(a.message)),
+    'the administrator-account alert',
+  );
+  check('an administrator-account child is reported to the parent',
+    /standard .*account|administrator/i.test(adminAlert.message), adminAlert.message);
+  const adminMeta = typeof adminAlert.metadata === 'string'
+    ? JSON.parse(adminAlert.metadata) : (adminAlert.metadata || {});
+  check('and it carries its own kind, not "unknown"',
+    adminMeta.kind === 'admin_user', JSON.stringify(adminAlert.metadata));
+
+  // Once a day, not every two minutes: a standing condition must not become noise.
+  await tamper.__testing.check();
+  await sleep(200);
+  check('the administrator alert is not repeated on the next check',
+    tamperAlerts().filter((a) => /administrator/i.test(a.message)).length === 1,
+    String(tamperAlerts().filter((a) => /administrator/i.test(a.message)).length));
+
   // Leave the machine as it was found, so the sections after this one are not
   // running against a laptop this one broke.
   tamper.resetTamperState();
